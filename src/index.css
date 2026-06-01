@@ -1,0 +1,132 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Libre Franklin", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-serif: Georgia, "Times New Roman", serif;
+  --font-display: "Fraunces", Georgia, serif;
+
+  /* Defining keyframes here exposes them as `animate-*` utilities. */
+  --animate-pick-ring: pickRing 1.4s ease-in-out infinite;
+  --animate-solve-flash: solveFlash 2.6s ease-in-out infinite;
+  --animate-livedot: livedot 1.6s ease-in-out infinite;
+  --animate-dots: dots 1.4s steps(4, end) infinite;
+  --animate-overlay-fade: ovfade 0.16s ease;
+  --animate-sheet-rise: sheetrise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Loading screen: shimmer sweep + category colors pulsing in sequence. */
+  --animate-shimmer: shimmer 1.7s ease-in-out infinite;
+  --animate-qpulse: qpulse 1.5s ease-in-out infinite;
+
+  @keyframes pickRing {
+    0%,
+    100% {
+      opacity: 0.25;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.9;
+      transform: scale(1.06);
+    }
+  }
+  @keyframes solveFlash {
+    0%,
+    70%,
+    100% {
+      box-shadow: 0 0 0 0 transparent;
+      filter: none;
+    }
+    80% {
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+      filter: brightness(1.22);
+    }
+  }
+  @keyframes livedot {
+    0%,
+    100% {
+      opacity: 0.35;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+  @keyframes dots {
+    0% {
+      content: "";
+    }
+    25% {
+      content: ".";
+    }
+    50% {
+      content: "..";
+    }
+    75% {
+      content: "...";
+    }
+    100% {
+      content: "";
+    }
+  }
+  @keyframes ovfade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes sheetrise {
+    from {
+      transform: translateY(16px) scale(0.99);
+      opacity: 0;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+  @keyframes shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    60%,
+    100% {
+      transform: translateX(100%);
+    }
+  }
+  @keyframes qpulse {
+    0%,
+    70%,
+    100% {
+      opacity: 0.22;
+      transform: scale(1);
+    }
+    28% {
+      opacity: 1;
+      transform: scale(1.06);
+    }
+  }
+}
+
+/* Thin dark scrollbar; Firefox + WebKit pieces can't be inline utilities. */
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent;
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: #2a2a2e;
+    border-radius: 99px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+/* Discord activity iframe can be narrow; never scroll sideways. */
+body {
+  overflow-x: hidden;
+}

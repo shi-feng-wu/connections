@@ -11,8 +11,14 @@
       rel="stylesheet"
     />
   </head>
-  <body class="bg-zinc-950 text-zinc-100 antialiased">
-    <div id="app" class="mx-auto flex min-h-screen w-full max-w-[940px] flex-col justify-center p-4"></div>
+  <body class="bg-black text-zinc-100 antialiased">
+    <!-- min-h-dvh tracks the Discord iframe height. Vertical centering is done with
+         auto margins on the child (via [&>*]:my-auto), NOT justify-center: when the
+         content is taller than the viewport (the end screen), justify-center pushes
+         the top off-screen with no way to scroll to it — clipping the score hero.
+         Auto margins collapse to a top anchor on overflow, so the top stays reachable.
+         pt-8 leaves headroom for the score hero, which rides up out of the title row. -->
+    <div id="app" class="mx-auto flex min-h-dvh w-full max-w-[940px] flex-col px-4 pb-6 pt-8 [&>*]:my-auto"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

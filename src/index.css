@@ -14,9 +14,10 @@
   --animate-sheet-rise: sheetrise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
   /* score hero easing into the header row at game end */
   --animate-hero-in: heroIn 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
-  /* Loading screen: shimmer sweep + category colors pulsing in sequence. */
-  --animate-shimmer: shimmer 1.7s ease-in-out infinite;
+  /* Loading screen: category colors pulse in sequence, then the loaded page
+     fades in over the loader. */
   --animate-qpulse: qpulse 1.5s ease-in-out infinite;
+  --animate-fade-in: fadeIn 0.45s ease-out both;
 
   @keyframes pickRing {
     0%,
@@ -95,13 +96,12 @@
       opacity: 1;
     }
   }
-  @keyframes shimmer {
-    0% {
-      transform: translateX(-100%);
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
     }
-    60%,
-    100% {
-      transform: translateX(100%);
+    to {
+      opacity: 1;
     }
   }
   @keyframes qpulse {
@@ -136,6 +136,13 @@
 html,
 body {
   min-height: 100%;
+}
+
+:root {
+  /* Board tile + solved-bar + skeleton height. Full size on tall viewports; shrinks
+     on short ones so the playing board always fits its Discord iframe without
+     scrolling. Capped at 80px (≈ 667px tall and up keeps the original look). */
+  --tile-h: clamp(52px, 11.5vh, 80px);
 }
 
 /* Discord activity iframe can be narrow; never scroll sideways. */

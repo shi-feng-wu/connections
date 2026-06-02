@@ -242,17 +242,31 @@ create policy "room presence: authenticated write"
 -- bypasses RLS, so neither carries an anon policy (unlike scores there is no
 -- "readable by all" grant: the anon key sees nothing here).
 
--- Where to post a room's recap: the channel the Activity was last launched in.
--- scope_id mirrors public.scores.scope_id (g:<guild> or c:<channel>). channel_id
--- is its own column because for a g: scope the channel id is NOT recoverable from
--- scope_id (which holds the guild id). Written by /api/score after it verifies
--- membership; last-write-wins per room.
+-- Where to post a room's recap. scope_id mirrors public.scores.scope_id (g:<guild>
+-- or c:<channel>). channel_id is its own column because for a g: scope the channel
+-- id is NOT recoverable from scope_id (which holds the guild id).
+--
+-- Two writers, two purposes:
+--   • /api/discord-callback writes webhook_url (and channel_id/guild_id) when an
+--     admin installs the app via the webhook.incoming OAuth flow — Discord mints a
+--     channel-bound incoming webhook and we post the recap straight to it, exactly
+--     like Discord's own daily-summary activities, with no bot in the guild.
+--   • /api/score still upserts channel_id (the last-played channel) as a fallback
+--     breadcrumb; it never touches webhook_url.
+-- The cron posts only when webhook_url is set, so a room that never ran the install
+-- flow simply gets no recap (there is no bot-token path anymore).
 create table if not exists public.recap_channels (
-  scope_id   text        primary key,
-  channel_id text        not null,
-  guild_id   text,
-  updated_at timestamptz not null default now()
+  scope_id    text        primary key,
+  channel_id  text        not null,
+  guild_id    text,
+  webhook_id  text,                          -- Discord webhook id (for reference / cleanup)
+  webhook_url text,                          -- full POST target: .../webhooks/<id>/<token>
+  updated_at  timestamptz not null default now()
 );
+
+-- Columns added when the recap moved from bot-token posting to incoming webhooks.
+alter table public.recap_channels add column if not exists webhook_id  text;
+alter table public.recap_channels add column if not exists webhook_url text;
 
 -- Idempotency ledger: one row per (scope, puzzle_date) once a recap is posted, so
 -- a retried or overlapping cron run can't double-post. /api/cron-recap claims a
@@ -310,3 +324,26 @@ create table if not exists public.progress (
 );
 
 alter table public.progress enable row level security;
+
+-- "Who's playing today" card, one row per room per puzzle. /api/join appends each
+-- player who opens the Activity (append-only: nobody is removed when they leave) and
+-- renders a roster image posted to the room's recap webhook. message_id is the latest
+-- card we edit as the roster grows; after a cooldown a new join posts a FRESH card and
+-- leaves the old one, so the channel keeps a timeline of who was playing when (posted_at
+-- gates that cooldown). players holds [{id,name,avatar}] for the render. Written only by
+-- the service role (RLS, no policy → anon sees nothing), same posture as progress.
+create table if not exists public.live_cards (
+  scope_id    text        not null,
+  puzzle_date date        not null,
+  message_id  text,                                   -- webhook message to edit; null until first post
+  players     jsonb       not null default '[]'::jsonb,
+  posted_at   timestamptz,                            -- when the current message was POSTED (not edited)
+  updated_at  timestamptz not null default now(),
+  primary key (scope_id, puzzle_date)
+);
+
+-- posted_at drives the re-post cooldown: rapid joins edit the card in place, but a
+-- join after the cooldown bumps a fresh message (and deletes the old) so it resurfaces.
+alter table public.live_cards add column if not exists posted_at timestamptz;
+
+alter table public.live_cards enable row level security;

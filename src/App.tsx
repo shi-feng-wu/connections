@@ -1,7 +1,8 @@
-import { DiscordSDK } from "@discord/embedded-app-sdk";
+import { Common, DiscordSDK } from "@discord/embedded-app-sdk";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BoardSnapshot } from "./board";
 import { GameView, LoadingScreen } from "./components";
+import { PipThumbnail } from "./pip";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
 import {
   currentSeasonStart,
@@ -95,6 +96,11 @@ export function App({
   const [gameKey, setGameKey] = useState("0");
   const [phase, setPhase] = useState<"loading" | "ready" | "error" | "blocked">(
     "loading",
+  );
+  // Discord activity layout: FOCUSED (0) normally, PIP (1) when collapsed. Drives the
+  // compact thumbnail swap.
+  const [layoutMode, setLayoutMode] = useState<number>(
+    Common.LayoutModeTypeObject.FOCUSED,
   );
 
   function selfState(): PlayerState {
@@ -291,6 +297,17 @@ export function App({
       channelIdRef.current = sdk.channelId ?? null;
       scopeRef.current = canonicalScope(sdk.guildId, sdk.channelId);
 
+      // Collapsing the activity puts it into Discord's picture-in-picture layout.
+      // Track that so the app can swap to a compact board thumbnail (see render)
+      // instead of letting Discord shrink the full UI into the tiny window.
+      void sdk
+        .subscribe("ACTIVITY_LAYOUT_MODE_UPDATE", (data) => {
+          setLayoutMode(data.layout_mode);
+        })
+        .catch(() => {
+          /* non-fatal: the thumbnail just won't engage if the subscription fails */
+        });
+
       const { code } = await sdk.commands.authorize({
         client_id: CLIENT_ID,
         response_type: "code",
@@ -359,6 +376,22 @@ export function App({
       } catch {
         /* presence stays on the public fallback channel */
       }
+
+      // Add this player to the channel's "who's playing today" card (append-only;
+      // the server posts/edits an image on the room's recap webhook). Fire-and-forget:
+      // the card is a nicety and must never delay or block play.
+      void fetch("/api/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accessToken: access_token,
+          guildId: guildIdRef.current,
+          channelId: channelIdRef.current,
+        }),
+      }).catch(() => {
+        /* no card this time */
+      });
+
       return true;
     } catch (e) {
       console.warn("Discord auth failed:", e);
@@ -397,6 +430,20 @@ export function App({
     return [...byId.values()];
   }, [players, self]);
 
+  // Collapsed into Discord's picture-in-picture window: show the compact board
+  // thumbnail (full-bleed) rather than the shrunken full UI. Takes precedence over
+  // every other phase so it works mid-load too.
+  if (layoutMode === Common.LayoutModeTypeObject.PIP) {
+    return (
+      <div className="fixed inset-0 z-50">
+        <PipThumbnail
+          game={gameRef.current}
+          revealed={gameRef.current ? revealedLevelsOf(gameRef.current) : []}
+        />
+      </div>
+    );
+  }
+
   if (phase !== "ready" || !gameRef.current) {
     const retry = (): void => {
       void (async () => {
@@ -411,8 +458,6 @@ export function App({
         error={phase === "error"}
         blocked={phase === "blocked"}
         onRetry={retry}
-        players={roster}
-        selfId={meRef.current.id}
       />
     );
   }

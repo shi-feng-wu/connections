@@ -128,7 +128,7 @@ function Avatar({
       className={
         "group relative grid flex-none place-items-center rounded-full font-extrabold text-[#0c0c0c] select-none " +
         dims +
-        (you ? " shadow-[0_0_0_2px_#09090b,0_0_0_4px_#f4f4f5]" : "") +
+        (you ? " shadow-[0_0_0_2px_#000,0_0_0_4px_#f4f4f5]" : "") +
         (p.picking
           ? " before:absolute before:-inset-1 before:animate-pick-ring before:rounded-full before:shadow-[0_0_0_2px_#34d399] before:content-['']"
           : "")
@@ -285,44 +285,11 @@ function RosterRow({
   );
 }
 
-// Shimmer sweep, matching the board skeleton's loader. Local copy so roster.tsx
-// stays free of a back-import from components.tsx.
-const SHINE =
-  "absolute inset-0 animate-shimmer [background:linear-gradient(90deg,transparent_0%,rgba(255,255,255,0.05)_18%,rgba(255,255,255,0.09)_50%,rgba(255,255,255,0.05)_82%,transparent_100%)]";
-
-// Placeholder row while presence is still connecting; mirrors RosterRow's shape so
-// the list doesn't jump when real players arrive.
-function RosterRowSkeleton({ i }: { i: number }) {
-  const shine = (extra = 0) => (
-    <span className={SHINE} style={{ animationDelay: `${(i + extra) * 0.12}s` }} />
-  );
-  return (
-    <div className="flex items-center gap-2.75 rounded-lg bg-zinc-900/60 px-3 py-2.5">
-      <div className="w-5.5 flex-none" />
-      <div className="relative h-7.5 w-7.5 flex-none overflow-hidden rounded-full bg-zinc-800">
-        {shine()}
-      </div>
-      <div className="flex w-7.5 flex-none flex-col gap-[1.5px]">
-        {[0, 1, 2, 3].map((r) => (
-          <div key={r} className="relative h-1.5 overflow-hidden rounded-xs bg-zinc-800">
-            {shine(r)}
-          </div>
-        ))}
-      </div>
-      <div className="min-w-0 flex-1" />
-      <div className="relative h-1.75 w-12 flex-none overflow-hidden rounded-full bg-zinc-800">
-        {shine()}
-      </div>
-    </div>
-  );
-}
-
 export function Roster({
   players,
   selfId,
   defaultOpen = false,
   sidebar = false,
-  loading = false,
 }: {
   players: PlayerState[];
   selfId: string;
@@ -330,8 +297,6 @@ export function Roster({
   defaultOpen?: boolean;
   // in the sidebar the scroll area flexes to fill the column; standalone uses a fixed cap
   sidebar?: boolean;
-  // show shimmer placeholder rows while presence connects (empty roster only)
-  loading?: boolean;
 }) {
   const now = useNow(players.some((p) => p.done === null));
   const flashing = useFlash(players);
@@ -351,18 +316,16 @@ export function Roster({
             : "max-h-81.5")
         }
       >
-        {sorted.length === 0 && loading
-          ? Array.from({ length: 5 }, (_, i) => <RosterRowSkeleton key={`sk${i}`} i={i} />)
-          : sorted.map((p, i) => (
-              <RosterRow
-                key={p.userId}
-                p={p}
-                rank={i + 1}
-                selfId={selfId}
-                now={now}
-                flash={flashing.has(p.userId)}
-              />
-            ))}
+        {sorted.map((p, i) => (
+          <RosterRow
+            key={p.userId}
+            p={p}
+            rank={i + 1}
+            selfId={selfId}
+            now={now}
+            flash={flashing.has(p.userId)}
+          />
+        ))}
       </div>
 
       {self && (

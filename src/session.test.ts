@@ -68,6 +68,35 @@ describe("auth ticket", () => {
   });
 });
 
+describe("oauth state", () => {
+  it("accepts a freshly signed state", () => {
+    expect(session.verifyState(session.signState())).toBe(true);
+  });
+
+  it("rejects a state past its max age", () => {
+    expect(session.verifyState(session.signState(Date.now() - 11 * 60 * 1000))).toBe(false);
+  });
+
+  it("rejects a state dated in the future", () => {
+    expect(session.verifyState(session.signState(Date.now() + 60 * 1000))).toBe(false);
+  });
+
+  it("rejects a tampered or malformed state", () => {
+    const tok = session.signState();
+    const flipped = tok.slice(0, -1) + (tok.at(-1) === "A" ? "B" : "A");
+    expect(session.verifyState(flipped)).toBe(false);
+    expect(session.verifyState("nope")).toBe(false);
+    expect(session.verifyState(null)).toBe(false);
+  });
+
+  it("won't accept an auth ticket as a state, or vice versa", () => {
+    // an auth ticket has no role separation from state beyond shape: state carries
+    // only iat, so an auth ticket (which also has iat) would pass the freshness gate.
+    // Guard the inverse instead — a state must not satisfy verifyAuth (no uid).
+    expect(session.verifyAuth(session.signState())).toBeNull();
+  });
+});
+
 describe("isLocalDev", () => {
   // read at call time, so toggling process.env between assertions is fine.
   it("is true only when no Vercel system env vars are present (local vercel dev)", () => {

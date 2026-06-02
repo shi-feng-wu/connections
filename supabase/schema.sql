@@ -235,3 +235,56 @@ drop policy if exists "room presence: authenticated write" on realtime.messages;
 create policy "room presence: authenticated write"
   on realtime.messages for insert to authenticated
   with check ( realtime.topic() = 'room:' || (auth.jwt() ->> 'room') );
+
+-- Daily recap plumbing. The bot posts yesterday's results + season standings to
+-- the channel an Activity was last played in, per room, on the midnight-ET reset
+-- (see /api/cron-recap). Both tables are written only by the service role, which
+-- bypasses RLS, so neither carries an anon policy (unlike scores there is no
+-- "readable by all" grant: the anon key sees nothing here).
+
+-- Where to post a room's recap: the channel the Activity was last launched in.
+-- scope_id mirrors public.scores.scope_id (g:<guild> or c:<channel>). channel_id
+-- is its own column because for a g: scope the channel id is NOT recoverable from
+-- scope_id (which holds the guild id). Written by /api/score after it verifies
+-- membership; last-write-wins per room.
+create table if not exists public.recap_channels (
+  scope_id   text        primary key,
+  channel_id text        not null,
+  guild_id   text,
+  updated_at timestamptz not null default now()
+);
+
+-- Idempotency ledger: one row per (scope, puzzle_date) once a recap is posted, so
+-- a retried or overlapping cron run can't double-post. /api/cron-recap claims a
+-- row before posting and treats a unique violation as "already done".
+create table if not exists public.recap_posts (
+  scope_id    text        not null,
+  puzzle_date date        not null,
+  posted_at   timestamptz not null default now(),
+  primary key (scope_id, puzzle_date)
+);
+
+alter table public.recap_channels enable row level security;
+alter table public.recap_posts    enable row level security;
+
+-- One row per player for a single puzzle in one room, ranked richest-first
+-- (solved before unsolved, then score, fewer mistakes, faster). Backs the daily
+-- recap's "yesterday's results" block. Mirrors season_standings' shape/style.
+drop function if exists public.day_results(text, date);
+create or replace function public.day_results(p_scope text, p_date date)
+returns table (
+  user_id text, name text, avatar text,
+  score int, mistakes int, solved boolean,
+  groups_solved smallint, duration_ms int
+)
+language sql
+stable
+as $$
+  select s.user_id, s.name, s.avatar, s.score, s.mistakes,
+         s.solved, s.groups_solved, s.duration_ms
+  from public.scores s
+  where s.scope_id = p_scope and s.puzzle_date = p_date
+  order by s.solved desc, s.score desc, s.mistakes asc, s.duration_ms asc nulls last;
+$$;
+
+grant execute on function public.day_results(text, date) to anon, authenticated;

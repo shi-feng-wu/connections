@@ -30,12 +30,15 @@ function guess(g: Game, words: string[]) {
   return g.submit();
 }
 
-// Four distinct wrong guesses (one word per group); exhausts mistakes, completes nothing.
+// Four distinct wrong guesses drawn only from the two hardest groups, which stay
+// unsolved (and so on the board) for any reachable loss — solved words can no
+// longer be selected. Each mixes levels, so none completes a group; together they
+// spend all four mistakes.
 const FOUR_WRONG = [
-  ["A0", "A1", "A2", "A3"],
-  ["B0", "B1", "B2", "B3"],
-  ["C0", "C1", "C2", "C3"],
-  ["D0", "D1", "D2", "D3"],
+  ["A2", "B2", "C2", "A3"],
+  ["A2", "B2", "B3", "C3"],
+  ["A2", "A3", "B3", "C3"],
+  ["B2", "C2", "D2", "D3"],
 ];
 
 describe("Game · construction", () => {
@@ -232,14 +235,33 @@ describe("Game · score", () => {
     expect(g.status).toBe("won");
     expect(g.score).toBeGreaterThanOrEqual(0);
 
-    // best partial loss is 3 groups
-    const lost3 = (() => {
+    // best reachable partial loss is 2 groups: a 3rd solve forces the last group,
+    // so you can never lose with 3 solved.
+    const lost2 = (() => {
       const h = newGame();
-      for (const lvl of [0, 1, 2]) guess(h, group(lvl));
+      for (const lvl of [0, 1]) guess(h, group(lvl));
       for (const w of FOUR_WRONG) if (h.status === "playing") guess(h, w);
+      expect(h.status).toBe("lost");
       return h.score;
     })();
-    expect(g.score).toBeGreaterThan(lost3);
+    expect(g.score).toBeGreaterThan(lost2);
+  });
+
+  it("can't select a solved word, so a 3-group loss is impossible", () => {
+    const g = newGame();
+    for (const lvl of [0, 1, 2]) guess(g, group(lvl)); // three groups by deduction
+    expect(g.status).toBe("playing");
+    expect(g.board.length).toBe(4); // only the forced last group remains
+
+    // solved words are off the board now — toggling them is a no-op, so no mixed
+    // (losing) guess can be built.
+    for (const w of ["A0", "B1", "C2"]) g.toggle(w);
+    expect(g.selected.size).toBe(0);
+
+    // the only legal move is the forced fourth group → a win, never a loss.
+    guess(g, group(3));
+    expect(g.status).toBe("won");
+    expect(g.groupsSolved).toBe(4);
   });
 });
 

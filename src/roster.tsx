@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, X } from "lucide-react";
 import { LEVELS, MAX_MISTAKES } from "./game";
 import type { PlayerState } from "./realtime";
+import { HoverButton } from "./hoverbutton";
 
 // Live room tracker: ranked list (avatar, mini-board, mistake dots, status),
 // pinned "your standing", and a "see all" full-room overlay.
@@ -208,8 +210,6 @@ function Mistakes({ p }: { p: PlayerState }) {
   );
 }
 
-const CHIP =
-  "rounded-full px-1.75 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] whitespace-nowrap";
 const TIME = "text-[13px] tabular-nums tracking-[0.01em]";
 
 function Status({ p, now, wide = false }: { p: PlayerState; now: number; wide?: boolean }) {
@@ -218,23 +218,14 @@ function Status({ p, now, wide = false }: { p: PlayerState; now: number; wide?: 
   if (p.done === "lost")
     return (
       <div className={box}>
-        <span className={CHIP + " border border-zinc-700 text-zinc-500"}>Out</span>
+        <X className="flex-none text-zinc-500" size={16} strokeWidth={2.6} aria-label="Out" />
         <span className={TIME + " text-zinc-600"}>{time}</span>
-      </div>
-    );
-  if (p.picking)
-    return (
-      <div className={box}>
-        <span className="text-[12px] font-semibold whitespace-nowrap text-emerald-400">
-          picking
-          <span className="after:animate-dots after:content-['']" />
-        </span>
       </div>
     );
   if (p.done === "won")
     return (
       <div className={box}>
-        <span className={CHIP + " bg-zinc-300 text-zinc-900"}>Solved</span>
+        <Check className="flex-none text-zinc-100" size={16} strokeWidth={2.8} aria-label="Solved" />
         <span className={TIME + " text-zinc-200"}>{time}</span>
       </div>
     );
@@ -294,11 +285,44 @@ function RosterRow({
   );
 }
 
+// Shimmer sweep, matching the board skeleton's loader. Local copy so roster.tsx
+// stays free of a back-import from components.tsx.
+const SHINE =
+  "absolute inset-0 animate-shimmer [background:linear-gradient(90deg,transparent_0%,rgba(255,255,255,0.05)_18%,rgba(255,255,255,0.09)_50%,rgba(255,255,255,0.05)_82%,transparent_100%)]";
+
+// Placeholder row while presence is still connecting; mirrors RosterRow's shape so
+// the list doesn't jump when real players arrive.
+function RosterRowSkeleton({ i }: { i: number }) {
+  const shine = (extra = 0) => (
+    <span className={SHINE} style={{ animationDelay: `${(i + extra) * 0.12}s` }} />
+  );
+  return (
+    <div className="flex items-center gap-2.75 rounded-lg bg-zinc-900/60 px-3 py-2.5">
+      <div className="w-5.5 flex-none" />
+      <div className="relative h-7.5 w-7.5 flex-none overflow-hidden rounded-full bg-zinc-800">
+        {shine()}
+      </div>
+      <div className="flex w-7.5 flex-none flex-col gap-[1.5px]">
+        {[0, 1, 2, 3].map((r) => (
+          <div key={r} className="relative h-1.5 overflow-hidden rounded-xs bg-zinc-800">
+            {shine(r)}
+          </div>
+        ))}
+      </div>
+      <div className="min-w-0 flex-1" />
+      <div className="relative h-1.75 w-12 flex-none overflow-hidden rounded-full bg-zinc-800">
+        {shine()}
+      </div>
+    </div>
+  );
+}
+
 export function Roster({
   players,
   selfId,
   defaultOpen = false,
   sidebar = false,
+  loading = false,
 }: {
   players: PlayerState[];
   selfId: string;
@@ -306,6 +330,8 @@ export function Roster({
   defaultOpen?: boolean;
   // in the sidebar the scroll area flexes to fill the column; standalone uses a fixed cap
   sidebar?: boolean;
+  // show shimmer placeholder rows while presence connects (empty roster only)
+  loading?: boolean;
 }) {
   const now = useNow(players.some((p) => p.done === null));
   const flashing = useFlash(players);
@@ -325,16 +351,18 @@ export function Roster({
             : "max-h-81.5")
         }
       >
-        {sorted.map((p, i) => (
-          <RosterRow
-            key={p.userId}
-            p={p}
-            rank={i + 1}
-            selfId={selfId}
-            now={now}
-            flash={flashing.has(p.userId)}
-          />
-        ))}
+        {sorted.length === 0 && loading
+          ? Array.from({ length: 5 }, (_, i) => <RosterRowSkeleton key={`sk${i}`} i={i} />)
+          : sorted.map((p, i) => (
+              <RosterRow
+                key={p.userId}
+                p={p}
+                rank={i + 1}
+                selfId={selfId}
+                now={now}
+                flash={flashing.has(p.userId)}
+              />
+            ))}
       </div>
 
       {self && (
@@ -351,16 +379,6 @@ export function Roster({
           />
         </div>
       )}
-
-      <div className="px-1 pt-2.75 pb-0.5 text-center text-[12.5px] text-zinc-500">
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="cursor-pointer border-b border-[#2a2a2e] text-zinc-400 hover:text-zinc-100"
-        >
-          see all
-        </button>
-      </div>
 
       {open && (
         <SeeAll
@@ -498,18 +516,19 @@ function SeeAll({
               ? `${ranked.length} playing`
               : `${rows.length} of ${ranked.length}`}
           </span>
-          <button
-            className="ml-auto grid h-7.5 w-7.5 flex-none cursor-pointer place-items-center rounded-lg bg-transparent text-[15px] text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-100"
+          <HoverButton
+            className="ml-auto grid h-7.5 w-7.5 flex-none cursor-pointer place-items-center rounded-lg bg-transparent text-zinc-400 transition duration-150 ease-out hover:bg-zinc-800 hover:text-zinc-100"
+            hover="scale-110"
             onClick={onClose}
             aria-label="Close"
           >
-            ✕
-          </button>
+            <X size={16} strokeWidth={2.2} aria-hidden />
+          </HoverButton>
         </div>
         <div className="flex flex-col gap-2.75 border-b border-[#1c1c1f] px-4.5 pb-3.5">
           <input
             ref={searchRef}
-            className="w-full rounded-full border border-[#2a2a2e] bg-zinc-900 px-3.75 py-2.25 font-sans text-[13.5px] text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-zinc-500"
+            className="w-full rounded-full border border-[#2a2a2e] bg-zinc-900 px-3.75 py-2.25 font-sans text-[13.5px] text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 hover:border-zinc-600 focus:border-zinc-500"
             type="text"
             placeholder="Search players by name…"
             autoComplete="off"
@@ -518,10 +537,11 @@ function SeeAll({
           />
           <div className="flex flex-wrap gap-1.5">
             {FILTERS.map(({ f, label }) => (
-              <button
+              <HoverButton
                 key={f}
+                hover="-translate-y-[1px]"
                 className={
-                  "cursor-pointer rounded-full border px-2.75 py-1.25 font-sans text-[11px] font-semibold uppercase tracking-wider transition " +
+                  "cursor-pointer rounded-full border px-2.75 py-1.25 font-sans text-[11px] font-semibold uppercase tracking-wider transition duration-150 ease-out " +
                   (filter === f
                     ? "border-zinc-100 bg-zinc-100 text-zinc-900"
                     : "border-zinc-700 bg-transparent text-zinc-400 hover:border-zinc-500 hover:text-zinc-100")
@@ -529,7 +549,7 @@ function SeeAll({
                 onClick={() => setFilter(f)}
               >
                 {label}
-              </button>
+              </HoverButton>
             ))}
           </div>
         </div>
@@ -569,12 +589,13 @@ function SeeAll({
               </>
             )}
           </div>
-          <button
-            className="flex-none cursor-pointer rounded-full border border-zinc-600 bg-transparent px-3.75 py-2.25 font-sans text-[12.5px] font-semibold text-zinc-100 transition hover:bg-zinc-800"
+          <HoverButton
+            className="flex-none cursor-pointer rounded-full border border-zinc-600 bg-transparent px-3.75 py-2.25 font-sans text-[12.5px] font-semibold text-zinc-100 transition duration-150 ease-out hover:bg-zinc-800"
+            hover="-translate-y-[1px]"
             onClick={jumpToMe}
           >
             Jump to me
-          </button>
+          </HoverButton>
         </div>
       </div>
     </div>

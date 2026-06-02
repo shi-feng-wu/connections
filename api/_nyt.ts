@@ -71,6 +71,13 @@ export function todayET(): string {
   }).format(new Date());
 }
 
+// The ET calendar day before today. Anchoring at noon UTC keeps a 1h DST shift
+// from ever crossing a day boundary, so subtracting one day is exact year-round
+// (same trick randomDate relies on). The cron uses this for "yesterday's puzzle".
+export function yesterdayET(): string {
+  return ymd(atNoonUTC(todayET()) - DAY);
+}
+
 export function randomDate(): string {
   const days = Math.floor((atNoonUTC(todayET()) - atNoonUTC(FIRST_DATE)) / DAY);
   return ymd(atNoonUTC(FIRST_DATE) + Math.floor(Math.random() * (days + 1)) * DAY);

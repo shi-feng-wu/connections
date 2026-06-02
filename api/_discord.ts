@@ -6,6 +6,14 @@ import { createHmac } from 'node:crypto';
 
 export type DiscordUser = { id: string; name: string; avatar?: string };
 
+// Pull the token out of an `Authorization: Bearer <token>` header value. Returns
+// null for anything else, so the caller fails closed.
+export function bearerToken(authHeader: unknown): string | null {
+  if (typeof authHeader !== 'string') return null;
+  const m = authHeader.match(/^Bearer (.+)$/i);
+  return m ? m[1] : null;
+}
+
 export async function fetchDiscordUser(accessToken: unknown): Promise<DiscordUser | null> {
   if (typeof accessToken !== 'string' || !accessToken) return null;
   try {

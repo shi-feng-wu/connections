@@ -7,19 +7,16 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { Game, LEVELS, MAX_MISTAKES, shuffle, type Group } from "./game";
+import { HoverButton } from "./hoverbutton";
 import { Leaderboard, type Standings } from "./season";
-import { showToast } from "./toast";
 
 // Playable board + solve animations (correct: pop, FLIP gather, morph to bar;
 // wrong: shake, spend a dot; end: fade controls, reveal missed groups on loss).
 // Keeps a parallel display model because Game resolves a guess atomically but
 // the FLIP sequence needs the intermediate states.
 
-const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-const fmtTime = (ms: number | null): string => {
-  const s = Math.max(1, Math.round((ms ?? 0) / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-};
+const wait = (ms: number): Promise<void> =>
+  new Promise((r) => setTimeout(r, ms));
 
 // Time until next daily puzzle (local midnight), HH:MM:SS.
 function nextMidnight(): string {
@@ -48,14 +45,30 @@ function Countdown() {
 }
 
 const TILE =
-  "h-20 min-w-0 break-words rounded-lg font-extrabold uppercase tracking-[0.01em] text-[clamp(9px,3vw,17px)] leading-none px-1 text-center flex items-center justify-center cursor-pointer select-none transition hover:-translate-y-px active:translate-y-0";
-// hover: is gated to hover-capable devices, so touch never sticks selected.
-const TILE_DEFAULT = " bg-[#efefe6] text-[#121212] hover:bg-[#f5f5ee] active:bg-[#e3e3d9]";
-const TILE_SELECTED = " bg-[#5a594e] text-white hover:bg-[#66645a]";
+  "relative h-20 min-w-0 break-words rounded-lg font-extrabold uppercase tracking-[0.01em] text-[clamp(9px,3vw,17px)] leading-none px-1 text-center flex items-center justify-center cursor-pointer select-none transition duration-150 ease-out";
+// Hover lift rides on JS pointer events (mouse-only), NOT CSS :hover — a tap on a
+// touch/hybrid device sets :hover and never clears it, which would strand the tile
+// lifted. Driving it from pointerenter/leave filtered to pointerType==="mouse"
+// means touch gets only the press-pop, never a sticky lift. Press feedback is the
+// WAAPI scale in onTileClick, so the press still works for both touch and mouse.
+const TILE_LIFT = " z-10 -translate-y-[1px] scale-[1.03]";
+// palette is [selected][hovered]; exactly one bg utility applies per state so no
+// two background utilities ever collide.
+const TILE_DEFAULT = " bg-[#efefe6] text-[#121212] active:bg-[#e3e3d9]";
+const TILE_DEFAULT_HOVER = " bg-[#f5f5ee] text-[#121212] active:bg-[#e3e3d9]";
+const TILE_SELECTED = " bg-[#5a594e] text-white";
+const TILE_SELECTED_HOVER = " bg-[#66645a] text-white";
+// cursor-pointer (default cursor when disabled). The hover lift/scale is the
+// *_HOVER fragment, applied mouse-only via <HoverButton> — CSS :hover sticks after
+// a tap on touch/hybrid (Discord Activity). :active press feedback stays here since
+// :active clears reliably on touchend. (Same reasoning as TILE_LIFT above.)
 const BTN =
-  "rounded-full px-5 py-2.5 border border-zinc-600 text-zinc-100 font-semibold text-sm transition hover:bg-zinc-800 hover:border-zinc-500 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:border-zinc-600";
+  "cursor-pointer rounded-full px-5 py-2.5 border border-zinc-600 text-zinc-100 font-semibold text-sm transition duration-150 ease-out active:translate-y-0 active:scale-100 active:bg-zinc-800 disabled:opacity-40 disabled:cursor-default";
+const BTN_HOVER = "bg-zinc-800 -translate-y-[1px] scale-[1.02]";
 const BTN_PRIMARY =
-  "rounded-full px-5 py-2.5 border border-zinc-100 bg-zinc-100 text-zinc-900 font-semibold text-sm transition hover:bg-white hover:border-white disabled:opacity-40 disabled:hover:bg-zinc-100 disabled:hover:border-zinc-100";
+  "cursor-pointer rounded-full px-5 py-2.5 border border-zinc-100 bg-zinc-100 text-zinc-900 font-semibold text-sm transition duration-150 ease-out active:translate-y-0 active:scale-100 active:bg-zinc-200 disabled:opacity-40 disabled:cursor-default";
+const BTN_PRIMARY_HOVER =
+  "-translate-y-[1px] scale-[1.02] shadow-[0_6px_18px_-8px_rgba(244,244,245,0.55)]";
 
 const SPRING = "cubic-bezier(.34,1.56,.64,1)";
 const GLIDE = "cubic-bezier(.22,.61,.36,1)";
@@ -71,6 +84,7 @@ export function Board({
   game,
   onPresence,
   onFinish,
+  onFeedback,
   season,
   allTime,
   selfId,
@@ -81,6 +95,9 @@ export function Board({
   game: Game;
   onPresence: (snap: BoardSnapshot) => void;
   onFinish: () => void;
+  // transient guess feedback ("One away…", "Already guessed"), surfaced as text
+  // in the header score slot.
+  onFeedback: (msg: string) => void;
   // end-screen leaderboard; empty in standalone play or before today's score posts.
   season: Standings;
   allTime: Standings;
@@ -99,6 +116,8 @@ export function Board({
   const shownMistakes = useRef<number>(game.mistakesLeft);
   const ended = useRef<boolean>(game.status !== "playing");
   const busy = useRef<boolean>(false);
+  // word under the mouse, for the hover lift (mouse-only — see TILE_LIFT).
+  const [hover, setHover] = useState<string | null>(null);
 
   const [, bump] = useReducer((n: number) => n + 1, 0);
   const rerender = () => bump();
@@ -110,7 +129,9 @@ export function Board({
   const tailRef = useRef<HTMLDivElement>(null);
 
   function broadcast(): void {
-    const real = solvedLevels.current.filter((l) => !revealedLevels.current.includes(l));
+    const real = solvedLevels.current.filter(
+      (l) => !revealedLevels.current.includes(l),
+    );
     onPresence({
       mistakesLeft: game.mistakesLeft,
       solvedLevels: [...real].sort((a, b) => a - b),
@@ -126,33 +147,48 @@ export function Board({
       .forEach((e) => m.set(e.dataset.flip!, e.getBoundingClientRect()));
     return m;
   }
-  function playFlip(prev: Map<string, DOMRect>, dur = 520, ease = GLIDE): Promise<unknown> {
+  function playFlip(
+    prev: Map<string, DOMRect>,
+    dur = 520,
+    ease = GLIDE,
+  ): Promise<unknown> {
     const proms: Promise<unknown>[] = [];
-    boardRef.current?.querySelectorAll<HTMLElement>("[data-flip]").forEach((e) => {
-      const b = prev.get(e.dataset.flip!);
-      if (!b) return;
-      const a = e.getBoundingClientRect();
-      const dx = b.left - a.left;
-      const dy = b.top - a.top;
-      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
-        proms.push(
-          e.animate(
-            [{ transform: `translate(${dx}px,${dy}px)` }, { transform: "translate(0,0)" }],
-            { duration: dur, easing: ease },
-          ).finished,
-        );
-      }
-    });
+    boardRef.current
+      ?.querySelectorAll<HTMLElement>("[data-flip]")
+      .forEach((e) => {
+        const b = prev.get(e.dataset.flip!);
+        if (!b) return;
+        const a = e.getBoundingClientRect();
+        const dx = b.left - a.left;
+        const dy = b.top - a.top;
+        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+          proms.push(
+            e.animate(
+              [
+                { transform: `translate(${dx}px,${dy}px)` },
+                { transform: "translate(0,0)" },
+              ],
+              { duration: dur, easing: ease },
+            ).finished,
+          );
+        }
+      });
     return Promise.all(proms);
   }
   const tileByWord = (w: string): HTMLElement | null =>
-    gridRef.current?.querySelector<HTMLElement>(`[data-flip="${CSS.escape(w)}"]`) ?? null;
+    gridRef.current?.querySelector<HTMLElement>(
+      `[data-flip="${CSS.escape(w)}"]`,
+    ) ?? null;
 
   function onTileClick(e: ReactMouseEvent<HTMLButtonElement>, w: string): void {
     if (busy.current || game.status !== "playing") return;
     // press pop via WAAPI; the re-render after toggle would clobber a CSS one.
     e.currentTarget.animate(
-      [{ transform: "scale(1)" }, { transform: "scale(0.9)" }, { transform: "scale(1)" }],
+      [
+        { transform: "scale(1)" },
+        { transform: "scale(0.9)" },
+        { transform: "scale(1)" },
+      ],
       { duration: 150, easing: "ease-out" },
     );
     if (selected.current.has(w)) selected.current.delete(w);
@@ -187,7 +223,9 @@ export function Board({
       if (sel.has(w)) selPos.push(i);
     });
     const selOrdered = selPos.map((i) => order[i]);
-    const displaced = [0, 1, 2, 3].filter((i) => !sel.has(order[i])).map((i) => order[i]);
+    const displaced = [0, 1, 2, 3]
+      .filter((i) => !sel.has(order[i]))
+      .map((i) => order[i]);
     const holes = selPos.filter((i) => i >= 4);
     const res = order.slice();
     for (let k = 0; k < 4; k++) res[k] = selOrdered[k];
@@ -203,7 +241,11 @@ export function Board({
           new Promise<void>((res) => {
             setTimeout(() => {
               t.animate(
-                [{ transform: "scale(1)" }, { transform: "scale(1.14)" }, { transform: "scale(1)" }],
+                [
+                  { transform: "scale(1)" },
+                  { transform: "scale(1.14)" },
+                  { transform: "scale(1)" },
+                ],
                 { duration: 300, easing: SPRING },
               ).finished.then(() => res());
             }, i * 85);
@@ -226,11 +268,17 @@ export function Board({
     await Promise.all(
       tiles.map(
         (t) =>
-          t.animate([{ opacity: 1, transform: "scale(1)" }, { opacity: 0, transform: "scale(.9)" }], {
-            duration: 190,
-            easing: "ease-in",
-            fill: "forwards",
-          }).finished,
+          t.animate(
+            [
+              { opacity: 1, transform: "scale(1)" },
+              { opacity: 0, transform: "scale(.9)" },
+            ],
+            {
+              duration: 190,
+              easing: "ease-in",
+              fill: "forwards",
+            },
+          ).finished,
       ),
     );
     const prev2 = recordRects();
@@ -238,17 +286,29 @@ export function Board({
     solvedLevels.current.push(level);
     selected.current.clear();
     rerenderSync();
-    const bar = solvedRef.current?.querySelector<HTMLElement>(`[data-flip="bar-${level}"]`);
-    bar?.animate([{ transform: "scale(.97)", opacity: 0.25 }, { transform: "scale(1)", opacity: 1 }], {
-      duration: 300,
-      easing: GLIDE,
-    });
+    const bar = solvedRef.current?.querySelector<HTMLElement>(
+      `[data-flip="bar-${level}"]`,
+    );
+    bar?.animate(
+      [
+        { transform: "scale(.97)", opacity: 0.25 },
+        { transform: "scale(1)", opacity: 1 },
+      ],
+      {
+        duration: 300,
+        easing: GLIDE,
+      },
+    );
     await playFlip(prev2, 360);
   }
 
-  async function animateWrong(words: string[], oneAway: boolean): Promise<void> {
+  async function animateWrong(
+    words: string[],
+    oneAway: boolean,
+  ): Promise<void> {
     const tiles = words.map(tileByWord).filter(Boolean) as HTMLElement[];
-    showToast(oneAway ? "One away…" : "Not a group");
+    // only the near-miss gets called out; a plain wrong guess just shakes.
+    if (oneAway) onFeedback("One away…");
     await Promise.all(
       tiles.map(
         (t) =>
@@ -269,7 +329,9 @@ export function Board({
     // spend the dot: dim + spring pop.
     shownMistakes.current = game.mistakesLeft;
     rerenderSync();
-    const dot = tailRef.current?.querySelector<HTMLElement>(`[data-dot="${game.mistakesLeft}"]`);
+    const dot = tailRef.current?.querySelector<HTMLElement>(
+      `[data-dot="${game.mistakesLeft}"]`,
+    );
     dot?.animate([{ transform: "scale(1.5)" }, { transform: "scale(1)" }], {
       duration: 300,
       easing: SPRING,
@@ -279,27 +341,46 @@ export function Board({
   async function endGame(won: boolean): Promise<void> {
     if (!won) {
       // reveal unsolved groups, gathered + dimmed, one by one
-      const left = [0, 1, 2, 3].filter((l) => !solvedLevels.current.includes(l));
+      const left = [0, 1, 2, 3].filter(
+        (l) => !solvedLevels.current.includes(l),
+      );
       for (const lvl of left) {
-        const words = group(lvl).members.filter((w) => remaining.current.includes(w));
+        const words = group(lvl).members.filter((w) =>
+          remaining.current.includes(w),
+        );
         const prev = recordRects();
         reorderGather(words);
         rerenderSync();
         await playFlip(prev, 380);
         const tiles = words.map(tileByWord).filter(Boolean) as HTMLElement[];
         await Promise.all(
-          tiles.map((t) => t.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 150, easing: "ease-in", fill: "forwards" }).finished),
+          tiles.map(
+            (t) =>
+              t.animate([{ opacity: 1 }, { opacity: 0 }], {
+                duration: 150,
+                easing: "ease-in",
+                fill: "forwards",
+              }).finished,
+          ),
         );
         const prev2 = recordRects();
         remaining.current = remaining.current.filter((w) => !words.includes(w));
         solvedLevels.current.push(lvl);
         revealedLevels.current.push(lvl);
         rerenderSync();
-        const bar = solvedRef.current?.querySelector<HTMLElement>(`[data-flip="bar-${lvl}"]`);
-        bar?.animate([{ transform: "scale(.97)", opacity: 0.1 }, { transform: "scale(1)", opacity: 0.56 }], {
-          duration: 260,
-          easing: "ease-out",
-        });
+        const bar = solvedRef.current?.querySelector<HTMLElement>(
+          `[data-flip="bar-${lvl}"]`,
+        );
+        bar?.animate(
+          [
+            { transform: "scale(.97)", opacity: 0.1 },
+            { transform: "scale(1)", opacity: 0.56 },
+          ],
+          {
+            duration: 260,
+            easing: "ease-out",
+          },
+        );
         await playFlip(prev2, 320);
         await wait(90);
       }
@@ -312,27 +393,40 @@ export function Board({
         /* ignore */
       }
     }
+    // fade the controls out, swap to the end layout (leaderboard below the board),
+    // then fade it in. The score hero rides up in the header row (see GameView).
     await tailRef.current!.animate(
-      [{ opacity: 1, transform: "translateY(0)" }, { opacity: 0, transform: "translateY(8px)" }],
-      { duration: 240, easing: "ease-in", fill: "forwards" },
+      [
+        { opacity: 1, transform: "translateY(0)" },
+        { opacity: 0, transform: "translateY(8px)" },
+      ],
+      { duration: 220, easing: "ease-in", fill: "forwards" },
     ).finished;
     ended.current = true;
     rerenderSync();
     await tailRef.current!.animate(
-      [{ opacity: 0, transform: "translateY(12px)" }, { opacity: 1, transform: "translateY(0)" }],
+      [
+        { opacity: 0, transform: "translateY(12px)" },
+        { opacity: 1, transform: "translateY(0)" },
+      ],
       { duration: 380, easing: GLIDE, fill: "forwards" },
     ).finished;
   }
 
   async function submit(): Promise<void> {
-    if (selected.current.size !== 4 || busy.current || game.status !== "playing") return;
+    if (
+      selected.current.size !== 4 ||
+      busy.current ||
+      game.status !== "playing"
+    )
+      return;
     busy.current = true;
     const words = [...selected.current];
     game.selected = new Set(words);
     const result = game.submit();
 
     if (result.type === "duplicate") {
-      showToast("Already guessed");
+      onFeedback("Already guessed");
       busy.current = false;
       return;
     }
@@ -360,7 +454,8 @@ export function Board({
     if (game.status !== "playing") onFinish();
   }
 
-  const group = (lvl: number): Group => game.puzzle.groups.find((g) => g.level === lvl)!;
+  const group = (lvl: number): Group =>
+    game.puzzle.groups.find((g) => g.level === lvl)!;
 
   const playing = game.status === "playing";
   const showGrid = !ended.current && remaining.current.length > 0;
@@ -395,22 +490,41 @@ export function Board({
         </div>
         {showGrid && (
           <div className="grid grid-cols-4 gap-2" ref={gridRef}>
-            {remaining.current.map((w) => (
-              <button
-                key={w}
-                data-flip={w}
-                className={TILE + (selected.current.has(w) ? TILE_SELECTED : TILE_DEFAULT)}
-                onClick={(e) => onTileClick(e, w)}
-              >
-                {w}
-              </button>
-            ))}
+            {remaining.current.map((w) => {
+              const sel = selected.current.has(w);
+              const lifted = hover === w;
+              const palette = sel
+                ? lifted
+                  ? TILE_SELECTED_HOVER
+                  : TILE_SELECTED
+                : lifted
+                  ? TILE_DEFAULT_HOVER
+                  : TILE_DEFAULT;
+              return (
+                <button
+                  key={w}
+                  data-flip={w}
+                  className={TILE + palette + (lifted ? TILE_LIFT : "")}
+                  onClick={(e) => onTileClick(e, w)}
+                  // mouse-only so a touch tap never strands the tile lifted
+                  onPointerEnter={(e) => {
+                    if (e.pointerType === "mouse") setHover(w);
+                  }}
+                  onPointerLeave={(e) => {
+                    if (e.pointerType === "mouse")
+                      setHover((h) => (h === w ? null : h));
+                  }}
+                >
+                  {w}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
 
       <div ref={tailRef}>
-        {playing && !ended.current ? renderControls() : renderEndScreen()}
+        {playing && !ended.current ? renderControls() : renderBelowEnd()}
       </div>
     </div>
   );
@@ -432,68 +546,37 @@ export function Board({
           ))}
         </div>
         <div className="flex flex-wrap justify-center gap-2">
-          <button className={BTN} onClick={doShuffle}>
+          <HoverButton className={BTN} hover={BTN_HOVER} onClick={doShuffle}>
             Shuffle
-          </button>
-          <button className={BTN} onClick={clearSelection} disabled={selected.current.size === 0}>
+          </HoverButton>
+          <HoverButton
+            className={BTN}
+            hover={BTN_HOVER}
+            onClick={clearSelection}
+            disabled={selected.current.size === 0}
+          >
             Deselect all
-          </button>
-          <button
+          </HoverButton>
+          <HoverButton
             className={BTN_PRIMARY}
+            hover={BTN_PRIMARY_HOVER}
             onClick={() => void submit()}
             disabled={selected.current.size !== 4}
           >
             Submit
-          </button>
+          </HoverButton>
         </div>
       </div>
     );
   }
 
-  function renderEndScreen() {
-    const won = game.status === "won";
-    const perfect = won && game.mistakesLeft === MAX_MISTAKES;
-    const status = perfect ? "Perfect" : won ? "Solved" : "Out of guesses";
-    const made = MAX_MISTAKES - game.mistakesLeft;
-    const playerSolved = 4 - revealedLevels.current.length;
+  // Room standing + next-puzzle countdown, shown below the puzzle on the end screen.
+  function renderBelowEnd() {
     // leaderboard only when the room has scored rows.
     const hasBoard = season.board.length > 0 || allTime.board.length > 0;
 
     return (
       <div className="flex flex-col gap-5.5">
-        {/* today's score; solved bars already sit above. */}
-        <div className="mx-auto flex w-full max-w-[430px] flex-col items-center gap-4 text-center">
-          <div className="flex flex-col items-center gap-1.5">
-            <div className="text-[12.5px] font-semibold tracking-[0.16em] whitespace-nowrap text-zinc-400 uppercase">
-              {status}
-            </div>
-            <div className="text-[clamp(52px,8.5vw,68px)] font-extrabold leading-[0.9] tracking-[-0.02em] tabular-nums text-[#efefe6]">
-              +{game.score.toLocaleString()}
-            </div>
-            <div className="text-[11px] uppercase tracking-[0.14em] text-zinc-500">
-              Points earned today
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center justify-center gap-2.25 text-[13px] text-zinc-400 [&>span]:whitespace-nowrap">
-            <span className="inline-flex items-center gap-1">
-              {Array.from({ length: MAX_MISTAKES }, (_, i) => (
-                <span
-                  key={i}
-                  className={
-                    "h-2 w-2 rounded-full " +
-                    (i < MAX_MISTAKES - made ? "bg-zinc-300" : "bg-zinc-700")
-                  }
-                />
-              ))}
-            </span>
-            <span className="text-zinc-700">·</span>
-            <span className="tabular-nums tracking-[0.01em]">{fmtTime(game.durationMs)}</span>
-            <span className="text-zinc-700">·</span>
-            <span>{won ? "All four groups" : `Solved ${playerSolved} of 4`}</span>
-          </div>
-        </div>
-
-        {/* standing in the room: season / all-time. */}
         {hasBoard && (
           <Leaderboard
             season={season}

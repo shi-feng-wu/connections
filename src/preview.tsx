@@ -1,6 +1,7 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
-import { Game, type Puzzle } from "./game";
+import { Game, MAX_MISTAKES, type Puzzle } from "./game";
 import { GameView, LoadingScreen } from "./components";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import type { Standings } from "./season";
@@ -141,6 +142,133 @@ const ALLTIME: Standings = {
 
 const noop = (): void => {};
 
+const SIMBTN =
+  "cursor-pointer rounded-full border border-zinc-700 bg-zinc-900 px-3.5 py-1.5 text-[12px] font-semibold text-zinc-200 transition hover:bg-zinc-800 hover:text-white disabled:cursor-default disabled:opacity-40";
+const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const until = async (cond: () => boolean, timeout = 8000): Promise<void> => {
+  const start = performance.now();
+  while (!cond() && performance.now() - start < timeout) await delay(80);
+};
+
+// Interactive playground: a fresh, live GameView that the buttons drive through
+// the real board (clicking tiles + Submit), so the solve/fail choreography and
+// the end-screen transition play exactly as in the app. Reset re-mounts a new game.
+function Simulate() {
+  const [key, setKey] = useState(0);
+  const [running, setRunning] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const game = useMemo(() => new Game(puzzle), [key]);
+
+  const tile = (w: string): HTMLElement | null | undefined =>
+    ref.current?.querySelector<HTMLElement>(`[data-flip="${CSS.escape(w)}"]`);
+  const btn = (label: string): HTMLButtonElement | undefined =>
+    [...(ref.current?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+      (b) => b.textContent?.trim() === label,
+    );
+  const select = (words: string[]): void => words.forEach((w) => tile(w)?.click());
+  // Submit is disabled until the 4-tile selection lands on the next render, and
+  // .click() on a disabled button is a no-op — so wait for it to enable, then click.
+  const submitGuess = async (): Promise<void> => {
+    await until(() => btn("Submit") != null && !btn("Submit")!.disabled);
+    btn("Submit")?.click();
+  };
+  // live counts read off the DOM, so the driver waits on real readiness rather
+  // than fixed timers (robust on any machine speed).
+  const tilesLeft = (): number =>
+    ref.current?.querySelectorAll('[data-flip]:not([data-flip^="bar-"])').length ?? 0;
+  const mistakesLeft = (): number =>
+    [...(ref.current?.querySelectorAll<HTMLElement>("[data-dot]") ?? [])].filter((d) =>
+      d.className.includes("bg-zinc-300"),
+    ).length;
+
+  async function simulateSolve(): Promise<void> {
+    if (running) return;
+    setRunning(true);
+    for (const g of puzzle.groups) {
+      const before = tilesLeft();
+      btn("Deselect all")?.click();
+      select(g.members);
+      await submitGuess();
+      await until(() => tilesLeft() <= before - 4); // group accepted + removed
+      await delay(450); // let the morph settle before the next guess
+    }
+    setRunning(false);
+  }
+
+  async function simulateFail(): Promise<void> {
+    if (running) return;
+    setRunning(true);
+    const cols = puzzle.groups.map((g) => g.members);
+    // one tile from each group is never a real group, so every guess is wrong;
+    // a different column each round keeps the four guesses distinct.
+    for (let i = 0; i < MAX_MISTAKES; i++) {
+      const before = mistakesLeft();
+      btn("Deselect all")?.click();
+      select(cols.map((c) => c[i]));
+      await submitGuess();
+      await until(() => mistakesLeft() < before); // mistake registered
+      await delay(350);
+    }
+    setRunning(false);
+  }
+
+  function reset(): void {
+    setKey((k) => k + 1);
+    window.scrollTo({ top: 0 });
+  }
+
+  // #feedback isolates this playground and auto-fires a one-away guess (3 of one
+  // group + 1 other), so the transient "One away…" pill shows up in the header
+  // score slot — the same spot the end-screen hero lands.
+  useEffect(() => {
+    if (location.hash.toLowerCase() !== "#feedback") return;
+    void (async () => {
+      await until(() => tilesLeft() >= 16);
+      select([
+        puzzle.groups[0].members[0],
+        puzzle.groups[0].members[1],
+        puzzle.groups[0].members[2],
+        puzzle.groups[1].members[0],
+      ]);
+      await submitGuess();
+    })();
+  }, []);
+
+  return (
+    <section className="w-full max-w-[940px] px-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-amber-400">
+          Simulate
+        </span>
+        <button className={SIMBTN} disabled={running} onClick={() => void simulateSolve()}>
+          Simulate solve
+        </button>
+        <button className={SIMBTN} disabled={running} onClick={() => void simulateFail()}>
+          Simulate fail
+        </button>
+        <button className={SIMBTN} onClick={reset}>
+          Reset
+        </button>
+      </div>
+      <div ref={ref}>
+        <GameView
+          key={key}
+          game={game}
+          gameKey={`sim-${key}`}
+          players={ROSTER}
+          selfId={SELF_ID}
+          selfName={SELF_NAME}
+          selfAvatar={SELF_AVATAR}
+          season={SEASON}
+          allTime={ALLTIME}
+          onPresence={noop}
+          onFinish={noop}
+        />
+      </div>
+    </section>
+  );
+}
+
 function State({
   label,
   game,
@@ -173,13 +301,21 @@ function State({
 }
 
 // wraps LoadingScreen the way State wraps GameView
-function LoadState({ label, error }: { label: string; error?: boolean }) {
+function LoadState({
+  label,
+  error,
+  blocked,
+}: {
+  label: string;
+  error?: boolean;
+  blocked?: boolean;
+}) {
   return (
     <section className="w-full max-w-[940px] px-4">
       <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
         {label}
       </div>
-      <LoadingScreen error={error} onRetry={noop} />
+      <LoadingScreen error={error} blocked={blocked} onRetry={noop} />
     </section>
   );
 }
@@ -189,25 +325,35 @@ function LoadState({ label, error }: { label: string; error?: boolean }) {
 const STATES = [
   <LoadState key="ld" label="Loading" />,
   <LoadState key="er" label="Error · couldn’t load" error />,
+  <LoadState key="bl" label="Blocked · open in Discord" blocked />,
   <State key="p" label="In progress" game={playing} />,
   <State key="pf" label="Results · won · perfect" game={perfect} />,
   <State key="w" label="Results · won" game={won} />,
   <State key="l" label="Results · lost" game={lost} revealed={[2, 3]} />,
 ];
 const pick = decodeURIComponent(location.hash.slice(1)).toLowerCase();
-const known = ["progress", "perfect", "won", "lost", "loading", "error"];
-const shown = known.includes(pick)
-  ? STATES.filter((s) => String(s.props.label).toLowerCase().includes(pick))
-  : STATES;
+const known = ["progress", "perfect", "won", "lost", "loading", "error", "blocked", "simulate", "feedback"];
+// #simulate and #feedback both isolate the Simulate playground (#feedback also
+// auto-fires a one-away guess to surface the header feedback pill).
+const onlySim = pick === "simulate" || pick === "feedback";
+const shown =
+  known.includes(pick) && !onlySim
+    ? STATES.filter((s) => String(s.props.label).toLowerCase().includes(pick))
+    : STATES;
+// Simulate playground rides on top by default; #simulate / #feedback isolate it.
+const showSim = pick === "" || onlySim;
 
 createRoot(document.getElementById("preview")!).render(
   <div className="flex flex-col items-center gap-16 py-10">
-    {shown}
-    <section className="w-full max-w-[360px] px-4">
-      <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
-        Roster panel · standalone (click “see all”)
-      </div>
-      <Roster players={ROSTER} selfId={SELF_ID} defaultOpen={location.hash === "#seeall"} />
-    </section>
+    {showSim && <Simulate />}
+    {!onlySim && shown}
+    {!onlySim && (
+      <section className="w-full max-w-[360px] px-4">
+        <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
+          Roster panel · standalone (#seeall opens the overlay)
+        </div>
+        <Roster players={ROSTER} selfId={SELF_ID} defaultOpen={location.hash === "#seeall"} />
+      </section>
+    )}
   </div>,
 );

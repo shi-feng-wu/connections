@@ -33,13 +33,14 @@ export const MAX_MISTAKES = 4;
 
 // Leaderboard score. Convex in groups solved, so finishing >> partial. Losses
 // score purely by groups reached: a loss always spends MAX_MISTAKES, so a
-// mistake penalty would double-count.
+// mistake penalty would double-count. groupsSolved tops out at 2 on a loss —
+// once 3 are solved the last four words are forced, so you can't miss again.
 export const SCORING = {
-  completionPerGroupSq: 100, // loss credit = this × groupsSolved²
+  completionPerGroupSq: 100, // loss credit = this × groupsSolved² (max 2² = 400)
   solveBonus: 600, // flat reward for completing every group
   mistakePenalty: 150, // subtracted per mistake on a win
-  speedMax: 300, // largest speed bonus on a win
-  speedTargetSec: 180, // solve in this or less for the full speed bonus; none beyond it
+  speedMax: 300, // largest speed bonus on a win (only at an instant solve)
+  speedTargetSec: 600, // speed bonus decays linearly from full to zero over 10 min
 };
 
 export function shuffle<T>(arr: T[]): T[] {
@@ -80,7 +81,12 @@ export class Game {
   }
 
   toggle(word: string): void {
-    if (this.status !== 'playing' || !this.wordLevel.has(word)) return;
+    // Only words still on the board are selectable. Checking `board` (not the full
+    // word set) means already-solved words can't be re-selected — so once three
+    // groups are solved the forced last four are the only legal guess, making a
+    // 3-group loss impossible in the model, not just in the UI. Also closes a
+    // replay gap: /api/score can't be fed a guess built from off-board words.
+    if (this.status !== 'playing' || !this.board.includes(word)) return;
     if (this.selected.has(word)) this.selected.delete(word);
     else if (this.selected.size < 4) this.selected.add(word);
   }

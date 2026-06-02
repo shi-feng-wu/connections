@@ -51,4 +51,13 @@ describe("routeInteraction", () => {
     const r = routeInteraction({ type: 3, data: { custom_id: "nope" } }) as { type: number };
     expect(r.type).not.toBe(12);
   });
+
+  it("launches the Activity for the /connections slash command", () => {
+    expect(routeInteraction({ type: 2, data: { name: "connections" } })).toEqual({ type: 12 });
+  });
+
+  it("does not launch for an unknown slash command", () => {
+    const r = routeInteraction({ type: 2, data: { name: "nope" } }) as { type: number };
+    expect(r.type).not.toBe(12);
+  });
 });

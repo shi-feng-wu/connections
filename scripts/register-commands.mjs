@@ -15,6 +15,13 @@
 // name_localizations/description_localizations so /connections (+ our description)
 // applies everywhere.
 //
+// Then we also register a CHAT_INPUT (type 1) command. The Entry Point command lives
+// in the App Launcher and doesn't reliably appear in the typed "/" menu; a normal
+// slash command does. It carries no handler — Discord delivers the invocation to the
+// Interactions Endpoint URL, and api/interactions.ts replies with LAUNCH_ACTIVITY to
+// open the game. REQUIRES the app's Interactions Endpoint URL to be set to
+// <host>/api/interactions (Developer Portal ▸ General Information, or PATCH /applications/@me).
+//
 // Run once after setting up the bot:
 //   npm run register-commands
 // Needs VITE_DISCORD_CLIENT_ID and DISCORD_BOT_TOKEN in .env (loaded via --env-file).
@@ -25,6 +32,13 @@ const NAME = 'connections';
 // Shown in the command picker / app launcher. Max 100 chars (Discord limit).
 const DESCRIPTION = 'Launch the daily 16-word Connections puzzle and play live with the channel';
 const PRIMARY_ENTRY_POINT = 4;
+const CHAT_INPUT = 1;
+// The typed "/" command. Keep in sync with LAUNCH_COMMANDS in api/interactions.ts.
+const CHAT_NAME = 'connections';
+const CHAT_DESCRIPTION = 'Launch the daily 16-word Connections puzzle';
+// Match the Entry Point command so the slash command appears in the same places.
+const CONTEXTS = [0, 1, 2];
+const INTEGRATION_TYPES = [0, 1];
 const API = 'https://discord.com/api/v10';
 
 if (!APP_ID || !TOKEN) {
@@ -50,6 +64,7 @@ if (!entry) {
   process.exit(1);
 }
 
+// --- 1) Entry Point command (App Launcher) ----------------------------------------
 // `name_localized`/`description_localized` reflect the requester-locale override (if
 // any). The command is fully set only when the base matches AND no localized value
 // differs from it — otherwise some locale still shows /launch.
@@ -57,28 +72,53 @@ const nameOk = entry.name === NAME && (entry.name_localized ?? NAME) === NAME;
 const descOk =
   entry.description === DESCRIPTION && (entry.description_localized ?? DESCRIPTION) === DESCRIPTION;
 if (nameOk && descOk) {
-  console.log(`Entry Point command already set: /${NAME} — "${DESCRIPTION}" (id ${entry.id}). Nothing to do.`);
-  process.exit(0);
+  console.log(`Entry Point command already set: /${NAME} — "${DESCRIPTION}" (id ${entry.id}).`);
+} else {
+  const patchRes = await fetch(`${API}/applications/${APP_ID}/commands/${entry.id}`, {
+    method: 'PATCH',
+    headers: auth,
+    // null localizations clear Discord's auto-translated "launch" so the base name
+    // (connections) and description apply in every locale.
+    body: JSON.stringify({
+      name: NAME,
+      description: DESCRIPTION,
+      name_localizations: null,
+      description_localizations: null,
+    }),
+  });
+  if (!patchRes.ok) {
+    console.error(`Failed to update Entry Point command: ${patchRes.status} ${await patchRes.text()}`);
+    process.exit(1);
+  }
+  console.log(
+    `Updated Entry Point command (id ${entry.id}): name "${entry.name}" -> "${NAME}", ` +
+      `description "${entry.description}" -> "${DESCRIPTION}", localizations cleared.`,
+  );
 }
 
-const patchRes = await fetch(`${API}/applications/${APP_ID}/commands/${entry.id}`, {
-  method: 'PATCH',
-  headers: auth,
-  // null localizations clear Discord's auto-translated "launch" so the base name
-  // (connections) and description apply in every locale.
-  body: JSON.stringify({
-    name: NAME,
-    description: DESCRIPTION,
-    name_localizations: null,
-    description_localizations: null,
-  }),
-});
-if (!patchRes.ok) {
-  console.error(`Failed to update command: ${patchRes.status} ${await patchRes.text()}`);
-  process.exit(1);
+// --- 2) Chat-input command (typed "/" menu) ---------------------------------------
+const chat = commands.find((c) => c.type === CHAT_INPUT && c.name === CHAT_NAME);
+if (chat) {
+  console.log(`Chat command /${CHAT_NAME} already registered (id ${chat.id}).`);
+} else {
+  const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({
+      name: CHAT_NAME,
+      description: CHAT_DESCRIPTION,
+      type: CHAT_INPUT,
+      contexts: CONTEXTS,
+      integration_types: INTEGRATION_TYPES,
+    }),
+  });
+  if (!createRes.ok) {
+    console.error(`Failed to register /${CHAT_NAME}: ${createRes.status} ${await createRes.text()}`);
+    process.exit(1);
+  }
+  const cmd = await createRes.json();
+  console.log(
+    `Registered chat command /${cmd.name} (id ${cmd.id}). Typing /${cmd.name} launches the Activity ` +
+      `(via the Interactions Endpoint — make sure it's set to <host>/api/interactions).`,
+  );
 }
-console.log(
-  `Updated Entry Point command (id ${entry.id}): name "${entry.name}" -> "${NAME}", ` +
-    `description "${entry.description}" -> "${DESCRIPTION}", localizations cleared. ` +
-    `/${NAME} launches the Activity in every locale.`,
-);

@@ -26,7 +26,7 @@ function LeaderAvatar({
     <div
       className={
         "relative grid h-7.5 w-7.5 flex-none place-items-center rounded-full text-[11px] font-extrabold text-[#0c0c0c] select-none" +
-        (you ? " shadow-[0_0_0_2px_#09090b,0_0_0_4px_#f4f4f5]" : "")
+        (you ? " shadow-[0_0_0_2px_#000,0_0_0_4px_#f4f4f5]" : "")
       }
       style={{ background: colorFor(id) }}
     >
@@ -150,12 +150,15 @@ function LedgerBody({
   name,
   avatar,
   query = "",
+  fill = false,
 }: {
   data: Standings;
   selfId: string;
   name: string;
   avatar?: string;
   query?: string;
+  // fill: the row list flexes to fill its parent's height instead of capping at 46vh
+  fill?: boolean;
 }) {
   const { board, self } = data;
   if (!board.length) {
@@ -197,7 +200,12 @@ function LedgerBody({
           Avg <X size={9} strokeWidth={2.6} aria-hidden />
         </span>
       </div>
-      <div className="max-h-[46vh] overflow-y-auto scrollbar-thin">
+      <div
+        className={
+          (fill ? "min-h-0 flex-1" : "max-h-[46vh]") +
+          " overflow-y-auto scrollbar-thin"
+        }
+      >
         {rows.length ? (
           rows.map((e, i) => (
             <LedgerRow key={e.id} e={e} you={e.id === selfId} first={i === 0} />
@@ -240,6 +248,7 @@ export function Leaderboard({
   name,
   avatar,
   bare = false,
+  fill = false,
   searchable = false,
   onClose,
 }: {
@@ -250,6 +259,9 @@ export function Leaderboard({
   avatar?: string;
   // bare drops the standalone card surface (the modal supplies its own).
   bare?: boolean;
+  // fill: stretch to the parent's height, scrolling the rows internally. Used when
+  // the leaderboard takes over the end-screen board area at its exact footprint.
+  fill?: boolean;
   searchable?: boolean;
   onClose?: () => void;
 }) {
@@ -262,7 +274,14 @@ export function Leaderboard({
   ] as const;
 
   return (
-    <div className={bare ? "flex min-h-0 flex-col" : "rounded-lg bg-zinc-900/60 p-3"}>
+    <div
+      className={
+        (bare
+          ? "flex min-h-0 flex-col"
+          : "rounded-lg bg-zinc-900/60 p-3" + (fill ? " flex min-h-0 flex-col" : "")) +
+        (fill ? " h-full" : "")
+      }
+    >
       <div className="flex flex-wrap items-center justify-between gap-2 px-1.5 pt-0.5 pb-3">
         <span className="text-xs uppercase tracking-[0.05em] text-zinc-500">Leaderboard</span>
         <div className="flex items-center gap-2">
@@ -315,6 +334,7 @@ export function Leaderboard({
         name={name}
         avatar={avatar}
         query={searchable ? query : ""}
+        fill={fill}
       />
     </div>
   );

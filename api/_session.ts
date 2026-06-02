@@ -9,6 +9,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 //  • Auth — minted by /api/token after one Discord /users/@me check, verified by
 //    /api/puzzle and /api/start. Vouches that a Discord identity was confirmed, so
 //    those endpoints gate on a cheap HMAC instead of a Discord round-trip each call.
+//  • State — minted by /api/install, verified by /api/discord-callback. A short-lived
+//    OAuth `state` nonce so a code can only be redeemed by a flow this server began.
 
 const SECRET = process.env.SESSION_SECRET ?? '';
 
@@ -18,6 +20,10 @@ export type Auth = { uid: string; iat: number };
 // An auth ticket is good for a day — longer than any single sitting, short enough
 // that a leaked one ages out.
 const AUTH_MAX_AGE = 24 * 60 * 60 * 1000;
+
+// An OAuth state nonce only has to outlive the user's trip through Discord's
+// consent screen.
+const STATE_MAX_AGE = 10 * 60 * 1000;
 
 // `vercel dev` injects none of Vercel's system env vars (verified: VERCEL,
 // VERCEL_ENV, NODE_ENV all unset locally), while every real deploy sets them. So
@@ -64,6 +70,20 @@ export function verifySession(token: unknown): Session | null {
 
 export function signAuth(a: Auth): string {
   return sign(a);
+}
+
+// OAuth `state`: a signed, self-expiring nonce. Carries only a timestamp — there is
+// no per-user state to bind, just proof the callback's flow started here and is
+// fresh (guards against a forged or replayed redirect).
+export function signState(now: number = Date.now()): string {
+  return sign({ iat: now });
+}
+
+export function verifyState(token: unknown): boolean {
+  const s = verify(token) as { iat?: number } | null;
+  if (!s || typeof s.iat !== 'number') return false;
+  const age = Date.now() - s.iat;
+  return age >= 0 && age <= STATE_MAX_AGE;
 }
 
 // Verify an auth ticket's signature, shape, and freshness. The `uid` (no `date`)

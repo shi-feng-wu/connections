@@ -2,10 +2,12 @@ import { createPublicKey, verify as edVerify } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { PLAY_CUSTOM_ID } from './_recap.js';
 
-// Discord interactions webhook. Discord POSTs here for the Play button on the
-// daily recap (and a PING when the endpoint URL is saved). The activity launch
-// itself is the native Entry Point command, handled by Discord — this endpoint
-// only needs to PONG the verification ping and turn a Play click into a launch.
+// Discord interactions webhook. Discord POSTs here for: the Entry Point command and
+// the typed /connections command (both launch the Activity), the Play button on the
+// daily recap, and a PING when the endpoint URL is saved. We reply LAUNCH_ACTIVITY to
+// open the game. Routing the Entry Point command here (handler APP_HANDLER, set by
+// scripts/register-commands.mjs) is deliberate: it stops Discord from launching the
+// Activity itself and auto-posting its invite card to the channel on every launch.
 //
 // Every request is Ed25519-signed; an unverified request must get a 401 (Discord
 // rejects the endpoint at setup time otherwise). The signature covers the exact
@@ -22,11 +24,13 @@ const CHANNEL_MESSAGE_WITH_SOURCE = 4;
 const LAUNCH_ACTIVITY = 12;
 const EPHEMERAL = 64; // message flag
 
-// Chat-input (type 1) command names that should open the Activity. The type-4 Entry
-// Point command covers the App Launcher but doesn't reliably show in the typed "/"
-// menu; a normal slash command does, and launches the game by replying with
-// LAUNCH_ACTIVITY. `play` is kept as an alias in case `connections` collides with the
-// Entry Point command name at registration time.
+// Command names that should open the Activity. Both the type-4 Entry Point command
+// (App Launcher, handler APP_HANDLER) and the type-1 chat-input command arrive as
+// APPLICATION_COMMAND interactions named `connections`, and both launch the game by
+// replying with LAUNCH_ACTIVITY. (The chat-input command also exists because the
+// Entry Point one doesn't reliably show in the typed "/" menu.) `play` is kept as an
+// alias in case `connections` collides with the Entry Point command name at
+// registration time.
 const LAUNCH_COMMANDS = new Set(['connections', 'play']);
 
 // 32-byte raw Ed25519 public key -> a KeyObject, via the fixed SPKI DER prefix.

@@ -6,8 +6,10 @@
 // Discord creates a PRIMARY_ENTRY_POINT command (type 4) automatically when an app
 // enables Activities. We PATCH it by id rather than bulk-overwriting the command
 // list: a PUT that omits or re-specifies the Entry Point command can drop or
-// duplicate it. The handler (DISCORD_LAUNCH_ACTIVITY) is left untouched, so Discord
-// keeps performing the launch itself.
+// duplicate it. We also flip the handler to APP_HANDLER so Discord routes the launch
+// to our Interactions Endpoint (api/interactions.ts replies LAUNCH_ACTIVITY) instead
+// of launching it itself and auto-posting an invite card to the channel on every
+// launch. REQUIRES the Interactions Endpoint URL to be set (see DISCORD_SETUP.md §3).
 //
 // The auto-created command also ships localized as "launch" (translated into every
 // locale). Discord shows each user the name for THEIR locale, so the base `name`
@@ -32,6 +34,9 @@ const NAME = 'connections';
 // Shown in the command picker / app launcher. Max 100 chars (Discord limit).
 const DESCRIPTION = 'Launch the daily 16-word Connections puzzle and play live with the channel';
 const PRIMARY_ENTRY_POINT = 4;
+// Entry Point command handlers: 1 = APP_HANDLER (our Interactions Endpoint launches
+// it), 2 = DISCORD_LAUNCH_ACTIVITY (Discord launches + auto-posts the invite card).
+const APP_HANDLER = 1;
 const CHAT_INPUT = 1;
 // The typed "/" command. Keep in sync with LAUNCH_COMMANDS in api/interactions.ts.
 const CHAT_NAME = 'connections';
@@ -71,19 +76,23 @@ if (!entry) {
 const nameOk = entry.name === NAME && (entry.name_localized ?? NAME) === NAME;
 const descOk =
   entry.description === DESCRIPTION && (entry.description_localized ?? DESCRIPTION) === DESCRIPTION;
-if (nameOk && descOk) {
-  console.log(`Entry Point command already set: /${NAME} — "${DESCRIPTION}" (id ${entry.id}).`);
+const handlerOk = entry.handler === APP_HANDLER;
+if (nameOk && descOk && handlerOk) {
+  console.log(`Entry Point command already set: /${NAME} — "${DESCRIPTION}", APP_HANDLER (id ${entry.id}).`);
 } else {
   const patchRes = await fetch(`${API}/applications/${APP_ID}/commands/${entry.id}`, {
     method: 'PATCH',
     headers: auth,
     // null localizations clear Discord's auto-translated "launch" so the base name
-    // (connections) and description apply in every locale.
+    // (connections) and description apply in every locale. handler: APP_HANDLER routes
+    // the launch through our Interactions Endpoint so Discord stops launching the
+    // Activity itself and auto-posting its invite card on every launch.
     body: JSON.stringify({
       name: NAME,
       description: DESCRIPTION,
       name_localizations: null,
       description_localizations: null,
+      handler: APP_HANDLER,
     }),
   });
   if (!patchRes.ok) {
@@ -92,7 +101,7 @@ if (nameOk && descOk) {
   }
   console.log(
     `Updated Entry Point command (id ${entry.id}): name "${entry.name}" -> "${NAME}", ` +
-      `description "${entry.description}" -> "${DESCRIPTION}", localizations cleared.`,
+      `description "${entry.description}" -> "${DESCRIPTION}", handler -> APP_HANDLER, localizations cleared.`,
   );
 }
 

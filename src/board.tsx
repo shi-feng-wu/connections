@@ -1,3 +1,4 @@
+import { Check, Eraser, Shuffle as ShuffleIcon } from "lucide-react";
 import {
   useEffect,
   useReducer,
@@ -30,7 +31,8 @@ function nextMidnight(): string {
   return `${h}:${m}:${sec}`;
 }
 
-// End-screen footer countdown; the daily doesn't replay.
+// End-screen footer countdown; the daily doesn't replay. Inline, so it sits on the
+// "Next puzzle in" line where the mistakes dots used to be.
 function Countdown() {
   const [t, setT] = useState(nextMidnight);
   useEffect(() => {
@@ -38,14 +40,12 @@ function Countdown() {
     return () => clearInterval(id);
   }, []);
   return (
-    <div className="text-[27px] font-bold leading-none tracking-[0.03em] tabular-nums text-zinc-200">
-      {t}
-    </div>
+    <span className="font-bold tabular-nums tracking-[0.03em] text-zinc-100">{t}</span>
   );
 }
 
 const TILE =
-  "relative h-20 min-w-0 break-words rounded-lg font-extrabold uppercase tracking-[0.01em] text-[clamp(9px,3vw,17px)] leading-none px-1 text-center flex items-center justify-center cursor-pointer select-none transition duration-150 ease-out";
+  "relative h-[var(--tile-h)] min-w-0 break-words rounded-lg font-extrabold uppercase tracking-[0.01em] text-[clamp(9px,3vw,17px)] leading-none px-1 text-center flex items-center justify-center cursor-pointer select-none transition duration-150 ease-out";
 // Hover lift rides on JS pointer events (mouse-only), NOT CSS :hover — a tap on a
 // touch/hybrid device sets :hover and never clears it, which would strand the tile
 // lifted. Driving it from pointerenter/leave filtered to pointerType==="mouse"
@@ -63,10 +63,10 @@ const TILE_SELECTED_HOVER = " bg-[#66645a] text-white";
 // a tap on touch/hybrid (Discord Activity). :active press feedback stays here since
 // :active clears reliably on touchend. (Same reasoning as TILE_LIFT above.)
 const BTN =
-  "cursor-pointer rounded-full px-5 py-2.5 border border-zinc-600 text-zinc-100 font-semibold text-sm transition duration-150 ease-out active:translate-y-0 active:scale-100 active:bg-zinc-800 disabled:opacity-40 disabled:cursor-default";
+  "inline-flex items-center justify-center cursor-pointer rounded-full px-5 py-2.5 border border-zinc-600 text-zinc-100 font-semibold text-sm transition duration-150 ease-out active:translate-y-0 active:scale-100 active:bg-zinc-800 disabled:opacity-40 disabled:cursor-default";
 const BTN_HOVER = "bg-zinc-800 -translate-y-[1px] scale-[1.02]";
 const BTN_PRIMARY =
-  "cursor-pointer rounded-full px-5 py-2.5 border border-zinc-100 bg-zinc-100 text-zinc-900 font-semibold text-sm transition duration-150 ease-out active:translate-y-0 active:scale-100 active:bg-zinc-200 disabled:opacity-40 disabled:cursor-default";
+  "inline-flex items-center justify-center cursor-pointer rounded-full px-5 py-2.5 border border-zinc-100 bg-zinc-100 text-zinc-900 font-semibold text-sm transition duration-150 ease-out active:translate-y-0 active:scale-100 active:bg-zinc-200 disabled:opacity-40 disabled:cursor-default";
 const BTN_PRIMARY_HOVER =
   "-translate-y-[1px] scale-[1.02] shadow-[0_6px_18px_-8px_rgba(244,244,245,0.55)]";
 
@@ -123,6 +123,8 @@ export function Board({
   const busy = useRef<boolean>(false);
   // word under the mouse, for the hover lift (mouse-only — see TILE_LIFT).
   const [hover, setHover] = useState<string | null>(null);
+  // end screen only: the leaderboard takes over the board area, toggled from the footer.
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
 
   const [, bump] = useReducer((n: number) => n + 1, 0);
   const rerender = () => bump();
@@ -480,7 +482,13 @@ export function Board({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2" ref={boardRef}>
-        <div className="flex flex-col gap-2" ref={solvedRef}>
+        <div
+          className={
+            "flex flex-col gap-2" +
+            (ended.current && showLeaderboard ? " hidden" : "")
+          }
+          ref={solvedRef}
+        >
           {solvedLevels.current.map((lvl) => {
             const g = group(lvl);
             const revealed = revealedLevels.current.includes(lvl);
@@ -489,7 +497,7 @@ export function Board({
                 key={lvl}
                 data-flip={`bar-${lvl}`}
                 className={
-                  "flex h-20 flex-col items-center justify-center rounded-lg px-2 text-center text-[#121212]" +
+                  "flex h-[var(--tile-h)] flex-col items-center justify-center rounded-lg px-2 text-center text-[#121212]" +
                   // loss-revealed bar reads dimmer than a solved one.
                   (revealed ? " opacity-56" : "")
                 }
@@ -538,6 +546,23 @@ export function Board({
             })}
           </div>
         )}
+        {ended.current && showLeaderboard && (
+          // Leaderboard takes over the board area at its exact footprint (4 solved
+          // bars + their 3 gaps), scrolling internally so the end screen never grows.
+          <div
+            className="animate-fade-in overflow-hidden"
+            style={{ height: "calc(var(--tile-h) * 4 + 1.5rem)" }}
+          >
+            <Leaderboard
+              fill
+              season={season}
+              allTime={allTime}
+              selfId={selfId}
+              name={selfName}
+              avatar={selfAvatar}
+            />
+          </div>
+        )}
       </div>
 
       <div ref={tailRef}>
@@ -562,55 +587,91 @@ export function Board({
             />
           ))}
         </div>
-        <div className="flex flex-wrap justify-center gap-2">
-          <HoverButton className={BTN} hover={BTN_HOVER} onClick={doShuffle}>
-            Shuffle
+        {/* @container: when the row gets too narrow for all three labels (it would
+            wrap to two lines, ~below 340px), each button collapses to its icon so
+            they stay on one line. The label <span>s remain in the DOM (display:none),
+            so accessible names and the preview driver's text lookup still work. */}
+        <div className="@container flex flex-wrap justify-center gap-2">
+          <HoverButton
+            className={BTN}
+            hover={BTN_HOVER}
+            onClick={doShuffle}
+            aria-label="Shuffle"
+            title="Shuffle"
+          >
+            <ShuffleIcon
+              className="@min-[340px]:hidden"
+              size={18}
+              strokeWidth={2.5}
+              aria-hidden
+            />
+            <span className="hidden @min-[340px]:inline">Shuffle</span>
           </HoverButton>
           <HoverButton
             className={BTN}
             hover={BTN_HOVER}
             onClick={clearSelection}
             disabled={selected.current.size === 0}
+            aria-label="Deselect all"
+            title="Deselect all"
           >
-            Deselect all
+            <Eraser
+              className="@min-[340px]:hidden"
+              size={18}
+              strokeWidth={2.5}
+              aria-hidden
+            />
+            <span className="hidden @min-[340px]:inline">Deselect all</span>
           </HoverButton>
           <HoverButton
             className={BTN_PRIMARY}
             hover={BTN_PRIMARY_HOVER}
             onClick={() => void submit()}
             disabled={selected.current.size !== 4}
+            aria-label="Submit"
+            title="Submit"
           >
-            Submit
+            <Check
+              className="@min-[340px]:hidden"
+              size={18}
+              strokeWidth={2.75}
+              aria-hidden
+            />
+            <span className="hidden @min-[340px]:inline">Submit</span>
           </HoverButton>
         </div>
       </div>
     );
   }
 
-  // Room standing + next-puzzle countdown, shown below the puzzle on the end screen.
+  // End-screen footer: takes the slot the mistakes row + action buttons held during
+  // play. The next-puzzle countdown sits where the dots were; a "View leaderboard"
+  // button (where Submit was) swaps the board area for the leaderboard and toggles
+  // back. Keeping it the same footprint keeps the whole end screen on one page.
   function renderBelowEnd() {
     // leaderboard only when the room has scored rows.
     const hasBoard = season.board.length > 0 || allTime.board.length > 0;
 
     return (
-      <div className="flex flex-col gap-5.5">
-        {hasBoard && (
-          <Leaderboard
-            season={season}
-            allTime={allTime}
-            selfId={selfId}
-            name={selfName}
-            avatar={selfAvatar}
-          />
-        )}
-
+      <div className="flex flex-col gap-4">
         {/* daily doesn't replay; count down to the next. */}
-        <div className="flex flex-col items-center gap-2 border-t border-white/6 pt-5">
-          <div className="text-[10px] uppercase tracking-[0.15em] whitespace-nowrap text-zinc-500">
+        <div className="flex items-center justify-center gap-2 text-sm text-zinc-400">
+          <span className="text-[10px] uppercase tracking-[0.15em] text-zinc-500">
             Next puzzle in
-          </div>
+          </span>
           <Countdown />
         </div>
+        {hasBoard && (
+          <div className="flex justify-center">
+            <HoverButton
+              className={BTN}
+              hover={BTN_HOVER}
+              onClick={() => setShowLeaderboard((v) => !v)}
+            >
+              {showLeaderboard ? "Back to puzzle" : "View leaderboard"}
+            </HoverButton>
+          </div>
+        )}
       </div>
     );
   }

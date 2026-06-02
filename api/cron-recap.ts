@@ -5,18 +5,22 @@ import { buildRecap, type DayRow, type SeasonRow } from './_recap.js';
 
 // Daily recap cron. Fires after the midnight-ET Connections reset (see the
 // vercel.json schedule) and posts yesterday's results + season standings, with a
-// Play button, to the channel each room last played in. Mirrors the Wordle
-// activity's daily summary.
+// Play button, to each room's recap channel. Mirrors the Wordle activity's daily
+// summary.
 //
-// Only rooms that (a) recorded a recap channel and (b) had at least one finisher
-// yesterday get a post, so dead servers stay quiet. A per-(scope, date) ledger
-// row is claimed before posting, so a retried or doubled cron run can't repost.
+// Posting goes through the per-room incoming webhook an admin set up via the
+// webhook.incoming OAuth flow (/api/install -> /api/discord-callback), so there is
+// no bot in the guild: we just POST to the stored webhook URL. A room with no
+// webhook_url (never ran setup) gets nothing.
 //
-// Recaps are guild-only in practice: a bot can't post to a group DM, so c: scopes
-// are skipped. Vercel injects `Authorization: Bearer $CRON_SECRET` on cron calls;
-// we fail closed without it so the route can't be triggered by anyone else.
+// Only rooms that (a) have a recap webhook and (b) had at least one finisher
+// yesterday get a post, so dead servers stay quiet. A per-(scope, date) ledger row
+// is claimed before posting, so a retried or doubled cron run can't repost.
+//
+// Recaps are guild-only: incoming webhooks live on guild channels, so c: scopes are
+// skipped. Vercel injects `Authorization: Bearer $CRON_SECRET` on cron calls; we
+// fail closed without it so the route can't be triggered by anyone else.
 
-const DISCORD_API = 'https://discord.com/api/v10';
 const SEASON_LIMIT = 5;
 
 type ScopeRow = { scope_id: string | null };
@@ -31,11 +35,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  const token = process.env.DISCORD_BOT_TOKEN ?? '';
-  if (!token) {
-    res.status(503).json({ error: 'bot not configured' });
-    return;
-  }
   const db = admin();
   if (!db) {
     res.status(503).json({ error: 'leaderboard unavailable' });
@@ -45,7 +44,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const date = yesterdayET();
   const since = `${date.slice(0, 8)}01`; // month start of the puzzle's day (avoids a month-boundary skew)
 
-  // Rooms that had a finisher yesterday (skip c: scopes a bot can't post to).
+  // Rooms that had a finisher yesterday (only g: scopes — webhooks live on guild
+  // channels, so c: scopes can't have one).
   const { data: scoredRows } = await db.from('scores').select('scope_id').eq('puzzle_date', date);
   const playedScopes = [
     ...new Set(((scoredRows ?? []) as ScopeRow[]).map((r) => r.scope_id).filter((s): s is string => !!s)),
@@ -56,13 +56,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  // Their recap channels.
+  // Their recap webhooks (rooms that ran the install flow). A row without a
+  // webhook_url predates webhook setup and has nowhere to post.
   const { data: chanRows } = await db
     .from('recap_channels')
-    .select('scope_id, channel_id')
+    .select('scope_id, webhook_url')
     .in('scope_id', playedScopes);
-  const channelByScope = new Map<string, string>(
-    ((chanRows ?? []) as { scope_id: string; channel_id: string }[]).map((r) => [r.scope_id, r.channel_id]),
+  const webhookByScope = new Map<string, string>(
+    ((chanRows ?? []) as { scope_id: string; webhook_url: string | null }[])
+      .filter((r) => !!r.webhook_url)
+      .map((r) => [r.scope_id, r.webhook_url as string]),
   );
 
   // Puzzle number for the embed title (best-effort; NYT fetch may fail).
@@ -78,8 +81,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   let failed = 0;
 
   for (const scope of playedScopes) {
-    const channelId = channelByScope.get(scope);
-    if (!channelId) {
+    const webhookUrl = webhookByScope.get(scope);
+    if (!webhookUrl) {
       skipped++;
       continue;
     }
@@ -105,21 +108,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         season: (season ?? []) as SeasonRow[],
       });
 
-      const r = await fetch(`${DISCORD_API}/channels/${channelId}/messages`, {
+      // Execute the incoming webhook. No auth header — the token is in the URL.
+      // with_components=true ensures the Play button renders on the message.
+      const r = await fetch(`${webhookUrl}?with_components=true`, {
         method: 'POST',
-        headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(message),
       });
       if (r.ok) {
         posted++;
-      } else {
+      } else if (r.status === 404 || r.status === 401) {
+        // Webhook deleted (404) or its token revoked (401): it can never post again.
+        // Forget it so future days skip cleanly; keep the claim so today doesn't
+        // retry. The room must re-run setup to re-enable recaps.
         failed++;
-        // Transient (rate limit / Discord error): release the slot so the next
-        // daily run retries. A 403 (missing perms) is permanent — keep the slot
-        // so we never hammer a channel we can't post to.
-        if (r.status === 429 || r.status >= 500) {
-          await db.from('recap_posts').delete().match({ scope_id: scope, puzzle_date: date });
-        }
+        await db
+          .from('recap_channels')
+          .update({ webhook_url: null, webhook_id: null })
+          .eq('scope_id', scope);
+      } else if (r.status === 429 || r.status >= 500) {
+        // Transient (rate limit / Discord outage): release the slot so the next
+        // daily run retries.
+        failed++;
+        await db.from('recap_posts').delete().match({ scope_id: scope, puzzle_date: date });
+      } else {
+        // Other 4xx (e.g. a malformed payload): keep the slot so we don't loop on it.
+        failed++;
       }
     } catch {
       failed++;

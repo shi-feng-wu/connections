@@ -17,12 +17,15 @@ const SHINE =
 export function LoadingScreen({
   error = false,
   blocked = false,
+  reason = "",
   onRetry,
   players = [],
   selfId = "",
 }: {
   error?: boolean;
   blocked?: boolean;
+  // diagnostic shown on the blocked screen (which handshake step failed + why)
+  reason?: string;
   onRetry: () => void;
   // roster shown alongside the skeleton so it doesn't shift in after load
   players?: PlayerState[];
@@ -78,6 +81,11 @@ export function LoadingScreen({
           <div className="mb-2 text-xs text-zinc-500">
             Connections runs as a Discord Activity — launch it from a server or call.
           </div>
+          {reason && (
+            <div className="mb-2 max-w-[18rem] break-words font-mono text-[10px] leading-tight text-zinc-600">
+              {reason}
+            </div>
+          )}
         </div>
       ) : error ? (
         <div className="flex flex-col items-center gap-1.5 pt-1 text-center">

@@ -21,12 +21,6 @@ import type { Standings } from "./season";
 const EMPTY_STANDINGS: Standings = { board: [], self: null };
 
 const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
-// Must EXACTLY match a redirect registered in the Developer Portal (OAuth2 ▸
-// Redirects) — no trailing slash. The embedded SDK omits redirect_uri and Discord
-// rejects authorize without one ("Missing redirect_uri"), so we pass it explicitly.
-// In the embedded flow this is only validated against the registered list; the auth
-// code comes back over the RPC bridge, not via an actual browser redirect.
-const REDIRECT_URI = "https://connections-olive.vercel.app";
 
 // Best-effort readable form of a thrown value. Discord SDK rejections are plain
 // objects ({ code, message }), not Errors, so String(e) yields "[object Object]";
@@ -266,17 +260,16 @@ export function App({
         client_id: CLIENT_ID,
         response_type: "code",
         state: "",
-        // Not in the SDK's AuthorizeInput type, but commandFactory forwards args
-        // verbatim to Discord, so this lands in the OAuth request. Without it Discord
-        // returns invalid_request: Missing "redirect_uri".
-        redirect_uri: REDIRECT_URI,
-        // No `prompt: "none"`. When the user hasn't granted these scopes yet — first
-        // launch, or after re-adding the app with only `applications.commands` — the
-        // SDK opens the one-time OAuth consent modal. Suppressing it (`"none"`) just
-        // fails the handshake and dumps the player on the blocked screen.
+        // Keep `prompt: "none"`. The embedded SDK uses Discord's RPC OAuth2 flow, which
+        // forbids a redirect_uri ("Redirect URI cannot be used in the RPC ... flow"),
+        // while the full consent flow requires one ("Missing redirect_uri"). prompt:none
+        // takes the short-circuit path that needs no redirect and returns a code when the
+        // user has already granted these scopes (consent is collected by Discord at
+        // activity-launch time).
+        prompt: "none",
         // `guilds` lets /api/score confirm membership before writing a guild board.
         scope: ["identify", "guilds"],
-      } as Parameters<typeof sdk.commands.authorize>[0]);
+      });
       step = "token-exchange";
       const res = await fetch("/api/token", {
         method: "POST",

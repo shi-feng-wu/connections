@@ -22,27 +22,6 @@ const EMPTY_STANDINGS: Standings = { board: [], self: null };
 
 const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
 
-// Best-effort readable form of a thrown value. Discord SDK rejections are plain
-// objects ({ code, message }), not Errors, so String(e) yields "[object Object]";
-// pull out the useful fields for the blocked-screen diagnostic.
-function describeError(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (e && typeof e === "object") {
-    const o = e as Record<string, unknown>;
-    const parts: string[] = [];
-    if ("code" in o) parts.push(`code=${String(o.code)}`);
-    if ("message" in o) parts.push(`message=${String(o.message)}`);
-    if (parts.length) return parts.join(" ");
-    try {
-      const j = JSON.stringify(o);
-      if (j && j !== "{}") return j;
-    } catch {
-      /* fall through to String() */
-    }
-  }
-  return String(e);
-}
-
 // Outside Discord: standalone with a guest identity and a room from `?room=`
 // (lets two browser tabs share live progress for testing).
 export function App({
@@ -79,10 +58,6 @@ export function App({
   // True once a Realtime JWT is held, so presence joins the private channel.
   const realtimeAuthedRef = useRef(false);
   const joinedRef = useRef(false);
-  // Why the Discord handshake failed, surfaced on the blocked screen so activity
-  // setup problems are debuggable without opening the in-client devtools. Set at
-  // each failure point in setupDiscord.
-  const blockReasonRef = useRef<string>("");
   const didInit = useRef(false);
   const loadSeq = useRef(0);
 
@@ -230,14 +205,8 @@ export function App({
   // `authorize()` needs Discord to mint the code. A false return (or a stuck
   // handshake, hence the timeout) gates the app behind the "Open in Discord" screen.
   async function setupDiscord(): Promise<boolean> {
-    let step = "init";
     try {
-      if (!CLIENT_ID) {
-        blockReasonRef.current = "config: VITE_DISCORD_CLIENT_ID missing from build";
-        return false;
-      }
       const sdk = new DiscordSDK(CLIENT_ID);
-      step = "ready";
       // ready() never resolves outside Discord; cap the wait so a forged ?frame_id
       // lands on the blocked screen instead of hanging on "Loading…".
       await Promise.race([
@@ -255,7 +224,6 @@ export function App({
       channelIdRef.current = sdk.channelId ?? null;
       scopeRef.current = canonicalScope(sdk.guildId, sdk.channelId);
 
-      step = "authorize";
       const { code } = await sdk.commands.authorize({
         client_id: CLIENT_ID,
         response_type: "code",
@@ -270,24 +238,17 @@ export function App({
         // `guilds` lets /api/score confirm membership before writing a guild board.
         scope: ["identify", "guilds"],
       });
-      step = "token-exchange";
       const res = await fetch("/api/token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code }),
       });
-      if (!res.ok) {
-        blockReasonRef.current = `token-exchange: HTTP ${res.status} ${(await res.text()).slice(0, 140)}`;
-        return false;
-      }
+      if (!res.ok) return false;
       const { access_token, auth } = (await res.json()) as {
         access_token?: string;
         auth?: string;
       };
-      if (!access_token || !auth) {
-        blockReasonRef.current = "token-exchange: response missing access_token/auth";
-        return false;
-      }
+      if (!access_token || !auth) return false;
       // access_token: live identity for /api/score & /api/realtime-token. auth: the
       // signed ticket gating the cheap reads. The server resolves the real user
       // from the token, so the client can't claim to be someone else.
@@ -333,7 +294,6 @@ export function App({
       }
       return true;
     } catch (e) {
-      blockReasonRef.current = `${step}: ${describeError(e)}`;
       console.warn("Discord auth failed:", e);
       return false;
     }
@@ -383,7 +343,6 @@ export function App({
       <LoadingScreen
         error={phase === "error"}
         blocked={phase === "blocked"}
-        reason={blockReasonRef.current}
         onRetry={retry}
         players={roster}
         selfId={meRef.current.id}

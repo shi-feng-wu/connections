@@ -265,6 +265,67 @@ describe("Game · score", () => {
   });
 });
 
+describe("Game · fromGuesses (replay / resume)", () => {
+  it("rebuilds the exact state of an abandoned in-progress game", () => {
+    const live = newGame();
+    guess(live, group(0)); // one solve
+    guess(live, ["A1", "B1", "C1", "A2"]); // one mistake (one-away)
+
+    const resumed = Game.fromGuesses(puzzle, [group(0), ["A1", "B1", "C1", "A2"]]);
+    expect(resumed.status).toBe("playing");
+    expect(resumed.mistakesLeft).toBe(MAX_MISTAKES - 1);
+    expect(resumed.solved.map((s) => s.level)).toEqual([0]);
+    expect(resumed.board).toEqual(live.board); // same words, same order
+    // the duplicate guard is reconstructed too: re-submitting a played wrong guess
+    // is still a duplicate, not a fresh mistake.
+    expect(guess(resumed, ["C1", "B1", "A1", "A2"])).toEqual({ type: "duplicate" });
+    expect(resumed.mistakesLeft).toBe(MAX_MISTAKES - 1);
+  });
+
+  it("rehydrates a finished win and stamps a duration from startedAt", () => {
+    const startedAt = 1_000_000;
+    const g = Game.fromGuesses(
+      puzzle,
+      [group(0), group(1), group(2), group(3)],
+      startedAt,
+    );
+    expect(g.status).toBe("won");
+    expect(g.startedAt).toBe(startedAt);
+    expect(g.solved).toHaveLength(4);
+    expect(g.groupsSolved).toBe(4);
+    expect(g.durationMs).toBeGreaterThan(0); // now - startedAt, set on finish
+  });
+
+  it("rehydrates a finished loss with the back-fill and partial credit", () => {
+    const g = Game.fromGuesses(puzzle, [group(0), ...FOUR_WRONG]);
+    expect(g.status).toBe("lost");
+    expect(g.mistakesLeft).toBe(0);
+    expect(g.solved.map((s) => s.level)).toEqual([0, 1, 2, 3]); // back-filled
+    expect(g.groupsSolved).toBe(1); // only the one deduced
+  });
+
+  it("skips malformed rows and ignores anything after the game ends", () => {
+    const g = Game.fromGuesses(puzzle, [
+      ["A0", "B0", "C0"], // wrong length: skipped
+      "nonsense", // not an array: skipped
+      group(0),
+      group(1),
+      group(2),
+      group(3), // win here
+      ["A0", "B0", "C0", "D0"], // after the win: ignored
+    ]);
+    expect(g.status).toBe("won");
+    expect(g.history).toHaveLength(4); // only the four real solves recorded
+  });
+
+  it("treats a non-array as a fresh game", () => {
+    const g = Game.fromGuesses(puzzle, undefined);
+    expect(g.status).toBe("playing");
+    expect(g.history).toEqual([]);
+    expect(g.board).toEqual(puzzle.layout);
+  });
+});
+
 describe("Game · share grid", () => {
   it("renders each guess as a row of category-color emoji, in order", () => {
     const g = newGame();

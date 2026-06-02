@@ -83,6 +83,7 @@ export type BoardSnapshot = {
 export function Board({
   game,
   onPresence,
+  onCommit,
   onFinish,
   onFeedback,
   season,
@@ -94,6 +95,10 @@ export function Board({
 }: {
   game: Game;
   onPresence: (snap: BoardSnapshot) => void;
+  // Commit a guess server-side before its result is revealed (returns false to
+  // block the reveal on a failed commit). Absent in standalone/practice play, where
+  // the game is purely in-memory. See commit-then-reveal in submit().
+  onCommit?: (guess: string[]) => Promise<boolean>;
   onFinish: () => void;
   // transient guess feedback ("One away…", "Already guessed"), surfaced as text
   // in the header score slot.
@@ -422,6 +427,18 @@ export function Board({
       return;
     busy.current = true;
     const words = [...selected.current];
+
+    // Commit-then-reveal: record the guess server-side BEFORE showing its result,
+    // so a player can't see the outcome and then leave to erase it (the server
+    // replays the committed list to score). On a failed commit we don't touch the
+    // local game — the player retries rather than revealing an uncommitted guess.
+    // The board stays locked (busy) across the await, so nothing else mutates it.
+    if (onCommit && !(await onCommit(words))) {
+      onFeedback("Connection issue — try again");
+      busy.current = false;
+      return;
+    }
+
     game.selected = new Set(words);
     const result = game.submit();
 

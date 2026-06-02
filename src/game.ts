@@ -75,6 +75,29 @@ export class Game {
     this.board = puzzle.layout.slice();
   }
 
+  // Rebuild a game by replaying an ordered guess list (each four words) from the
+  // start. One shared path with two callers: the server treats its stored guesses
+  // as the authoritative record (/api/guess appends, /api/score replays), and the
+  // client rehydrates from that same record on reopen — so an abandoned game
+  // resumes at the exact state it left (mistakes spent, groups solved, clock
+  // intact) instead of resetting to a fresh board and handing out infinite tries.
+  // Malformed rows and anything after the game ends are skipped, mirroring live
+  // play. Pass startedAt so a replay that finishes stamps a real duration.
+  static fromGuesses(puzzle: Puzzle, guesses: unknown, startedAt?: number): Game {
+    const game = new Game(puzzle);
+    if (startedAt != null) game.startedAt = startedAt;
+    if (Array.isArray(guesses)) {
+      for (const guess of guesses) {
+        if (game.status !== 'playing') break;
+        if (!Array.isArray(guess) || guess.length !== 4) continue;
+        game.clear();
+        for (const w of guess) game.toggle(String(w));
+        game.submit();
+      }
+    }
+    return game;
+  }
+
   // difficulty level (0-3) of a word, or undefined if not on this board.
   levelOf(word: string): number | undefined {
     return this.wordLevel.get(word);

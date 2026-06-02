@@ -37,3 +37,53 @@ describe("session signing", () => {
     expect(session.verifySession(null)).toBeNull();
   });
 });
+
+describe("auth ticket", () => {
+  it("round-trips a fresh auth ticket", () => {
+    const a = { uid: "123", iat: Date.now() };
+    expect(session.verifyAuth(session.signAuth(a))).toEqual(a);
+  });
+
+  it("rejects a ticket older than its max age", () => {
+    const a = { uid: "123", iat: Date.now() - 25 * 60 * 60 * 1000 };
+    expect(session.verifyAuth(session.signAuth(a))).toBeNull();
+  });
+
+  it("rejects a ticket dated in the future", () => {
+    const a = { uid: "123", iat: Date.now() + 60 * 60 * 1000 };
+    expect(session.verifyAuth(session.signAuth(a))).toBeNull();
+  });
+
+  it("won't accept a session token as an auth ticket, or vice versa", () => {
+    const sess = session.signSession({ date: "2026-06-01", iat: Date.now() });
+    expect(session.verifyAuth(sess)).toBeNull();
+    const auth = session.signAuth({ uid: "123", iat: Date.now() });
+    expect(session.verifySession(auth)).toBeNull();
+  });
+
+  it("rejects a tampered auth ticket", () => {
+    const tok = session.signAuth({ uid: "123", iat: Date.now() });
+    const flipped = tok.slice(0, -1) + (tok.at(-1) === "A" ? "B" : "A");
+    expect(session.verifyAuth(flipped)).toBeNull();
+  });
+});
+
+describe("isLocalDev", () => {
+  // read at call time, so toggling process.env between assertions is fine.
+  it("is true only when no Vercel system env vars are present (local vercel dev)", () => {
+    delete process.env.VERCEL;
+    delete process.env.VERCEL_ENV;
+    expect(session.isLocalDev()).toBe(true);
+  });
+
+  it("fails closed on any deploy signal", () => {
+    process.env.VERCEL_ENV = "production";
+    expect(session.isLocalDev()).toBe(false);
+    process.env.VERCEL_ENV = "preview";
+    expect(session.isLocalDev()).toBe(false);
+    delete process.env.VERCEL_ENV;
+    process.env.VERCEL = "1";
+    expect(session.isLocalDev()).toBe(false);
+    delete process.env.VERCEL;
+  });
+});

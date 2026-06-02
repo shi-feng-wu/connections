@@ -12,6 +12,8 @@
   --animate-dots: dots 1.4s steps(4, end) infinite;
   --animate-overlay-fade: ovfade 0.16s ease;
   --animate-sheet-rise: sheetrise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* score hero easing into the header row at game end */
+  --animate-hero-in: heroIn 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
   /* Loading screen: shimmer sweep + category colors pulsing in sequence. */
   --animate-shimmer: shimmer 1.7s ease-in-out infinite;
   --animate-qpulse: qpulse 1.5s ease-in-out infinite;
@@ -71,6 +73,16 @@
     }
     to {
       opacity: 1;
+    }
+  }
+  @keyframes heroIn {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
     }
   }
   @keyframes sheetrise {

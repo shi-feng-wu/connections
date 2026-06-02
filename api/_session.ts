@@ -1,24 +1,44 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-// HMAC-signed game session, minted by /api/start and verified by /api/score.
-// Binds a submission to a puzzle date and a server-measured start time, so a
-// client can't score a puzzle it never started or fake a fast solve time. Leading
-// underscore keeps Vercel from treating this file as a route.
+// HMAC-signed tokens, all keyed by SESSION_SECRET. Leading underscore keeps Vercel
+// from treating this file as a route.
+//
+//  • Session — minted by /api/start, verified by /api/score. Binds a submission to
+//    a puzzle date and a server-measured start time, so a client can't score a
+//    puzzle it never started or fake a fast solve time.
+//  • Auth — minted by /api/token after one Discord /users/@me check, verified by
+//    /api/puzzle and /api/start. Vouches that a Discord identity was confirmed, so
+//    those endpoints gate on a cheap HMAC instead of a Discord round-trip each call.
 
 const SECRET = process.env.SESSION_SECRET ?? '';
 
 export type Session = { date: string; iat: number };
+export type Auth = { uid: string; iat: number };
+
+// An auth ticket is good for a day — longer than any single sitting, short enough
+// that a leaked one ages out.
+const AUTH_MAX_AGE = 24 * 60 * 60 * 1000;
+
+// `vercel dev` injects none of Vercel's system env vars (verified: VERCEL,
+// VERCEL_ENV, NODE_ENV all unset locally), while every real deploy sets them. So
+// "no Vercel env at all" means local dev — where the Discord-only gate is skipped
+// for the standalone fallback. Anything else fails closed (gated).
+export function isLocalDev(): boolean {
+  return !process.env.VERCEL && !process.env.VERCEL_ENV;
+}
 
 const b64url = (s: string): string => Buffer.from(s).toString('base64url');
 const mac = (body: string): string =>
   createHmac('sha256', SECRET).update(body).digest('base64url');
 
-export function signSession(s: Session): string {
-  const body = b64url(JSON.stringify(s));
+function sign(payload: object): string {
+  const body = b64url(JSON.stringify(payload));
   return `${body}.${mac(body)}`;
 }
 
-export function verifySession(token: unknown): Session | null {
+// Returns the parsed payload iff the signature checks out, else null. Shape
+// validation is the caller's job (Session vs Auth are distinguished by fields).
+function verify(token: unknown): unknown {
   if (!SECRET || typeof token !== 'string') return null;
   const dot = token.indexOf('.');
   if (dot < 0) return null;
@@ -27,9 +47,31 @@ export function verifySession(token: unknown): Session | null {
   const expected = Buffer.from(mac(body));
   if (sig.length !== expected.length || !timingSafeEqual(sig, expected)) return null;
   try {
-    const s = JSON.parse(Buffer.from(body, 'base64url').toString()) as Session;
-    return typeof s.date === 'string' && typeof s.iat === 'number' ? s : null;
+    return JSON.parse(Buffer.from(body, 'base64url').toString());
   } catch {
     return null;
   }
+}
+
+export function signSession(s: Session): string {
+  return sign(s);
+}
+
+export function verifySession(token: unknown): Session | null {
+  const s = verify(token) as Session | null;
+  return s && typeof s.date === 'string' && typeof s.iat === 'number' ? s : null;
+}
+
+export function signAuth(a: Auth): string {
+  return sign(a);
+}
+
+// Verify an auth ticket's signature, shape, and freshness. The `uid` (no `date`)
+// also keeps a Session token from ever passing as an Auth ticket and vice versa.
+export function verifyAuth(token: unknown): Auth | null {
+  const a = verify(token) as Auth | null;
+  if (!a || typeof a.uid !== 'string' || typeof a.iat !== 'number') return null;
+  const age = Date.now() - a.iat;
+  if (age < 0 || age > AUTH_MAX_AGE) return null;
+  return a;
 }

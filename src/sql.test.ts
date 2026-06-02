@@ -9,7 +9,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 const fnBlocks = [
   ...schema.matchAll(
-    /create or replace function public\.(?:current_streak|room_board|room_self)[\s\S]*?\$\$;/g,
+    /create or replace function public\.(?:current_streak|room_board|room_self|day_results)[\s\S]*?\$\$;/g,
   ),
 ].map((m) => m[0]);
 
@@ -48,10 +48,10 @@ beforeAll(async () => {
       scope_id text, user_id text not null, name text not null, avatar text,
       score int not null default 0, mistakes int not null default 0,
       solved boolean not null default false, groups_solved smallint not null default 0,
-      puzzle_date date, created_at timestamptz not null default now()
+      duration_ms int, puzzle_date date, created_at timestamptz not null default now()
     );
   `);
-  expect(fnBlocks).toHaveLength(3); // current_streak, room_board, room_self
+  expect(fnBlocks).toHaveLength(4); // current_streak, room_board, room_self, day_results
   for (const block of fnBlocks) await db.exec(block);
   for (const [scope, user, name, score, mistakes, solved, date] of SEED) {
     await db.query(
@@ -151,5 +151,28 @@ describe("room_self", () => {
     expect(s.rank).toBeNull();
     expect(s.total_players).toBe(4);
     expect(s).toMatchObject({ total: 0, plays: 0, wins: 0, win_pct: 0, streak: 0 });
+  });
+});
+
+type DayRow = { user_id: string; score: number; mistakes: number; solved: boolean };
+const dayResults = async (scope: string, date: string): Promise<DayRow[]> =>
+  (await db.query<DayRow>(`select * from public.day_results($1, $2::date)`, [scope, date])).rows.map((r) => ({
+    ...r,
+    score: Number(r.score),
+    mistakes: Number(r.mistakes),
+  }));
+
+describe("day_results", () => {
+  it("returns one room's finishers for a single day, scoped and ranked", async () => {
+    // 2026-06-05 in g1: alice 1000/win, bob 900/win, dave 0/loss. carol didn't play
+    // that day; eve is in g2. Order: solved first, then by score.
+    const rows = await dayResults("g1", "2026-06-05");
+    expect(rows.map((r) => r.user_id)).toEqual(["alice", "bob", "dave"]);
+    expect(rows[0]).toMatchObject({ user_id: "alice", score: 1000, mistakes: 0, solved: true });
+    expect(rows[2]).toMatchObject({ user_id: "dave", score: 0, solved: false });
+  });
+
+  it("is empty for a day nobody played", async () => {
+    expect(await dayResults("g1", "2025-01-01")).toEqual([]);
   });
 });

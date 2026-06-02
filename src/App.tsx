@@ -48,9 +48,12 @@ export function App({
   const scopeRef = useRef<string | null>(null);
   // Only the daily counts toward the leaderboard. Enforced server-side too.
   const isDailyRef = useRef(true);
-  // Access token proves identity to /api/score & /api/realtime-token; signed
+  // Access token proves identity to /api/score & /api/realtime-token (they need
+  // live Discord data); the signed auth ticket from /api/token gates the cheap
+  // reads (/api/puzzle, /api/start) without a Discord round-trip each call. Signed
   // session from /api/start anchors solve timing server-side.
   const accessTokenRef = useRef<string | null>(null);
+  const authTicketRef = useRef<string | null>(null);
   const sessionRef = useRef<string | null>(null);
   // True once a Realtime JWT is held, so presence joins the private channel.
   const realtimeAuthedRef = useRef(false);
@@ -64,7 +67,9 @@ export function App({
   const [season, setSeason] = useState<Standings>(EMPTY_STANDINGS);
   const [allTime, setAllTime] = useState<Standings>(EMPTY_STANDINGS);
   const [gameKey, setGameKey] = useState("0");
-  const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
+  const [phase, setPhase] = useState<"loading" | "ready" | "error" | "blocked">(
+    "loading",
+  );
 
   function selfState(): PlayerState {
     const g = gameRef.current;
@@ -140,13 +145,20 @@ export function App({
     })();
   }
 
+  // Signed auth ticket as a Bearer header for the gated reads. Empty when
+  // standalone (DEV only), where those endpoints skip the check.
+  function authHeaders(): Record<string, string> {
+    const t = authTicketRef.current;
+    return t ? { Authorization: `Bearer ${t}` } : {};
+  }
+
   // Signed session: server-stamped start time bound to this puzzle date.
   // Best-effort; without it, finishes won't be scored.
   async function startSession(date: string): Promise<string | null> {
     try {
       const r = await fetch("/api/start", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ date }),
       });
       if (!r.ok) return null;
@@ -163,7 +175,7 @@ export function App({
     if (opts.date) qs.set("date", opts.date);
     if (opts.random) qs.set("random", "1");
     try {
-      const res = await fetch("/api/puzzle?" + qs.toString());
+      const res = await fetch("/api/puzzle?" + qs.toString(), { headers: authHeaders() });
       if (!res.ok) throw new Error(String(res.status));
       const puzzle = (await res.json()) as Puzzle;
       gameRef.current = new Game(puzzle);
@@ -188,18 +200,30 @@ export function App({
     }
   }
 
-  async function setupDiscord(): Promise<void> {
-    const sdk = new DiscordSDK(CLIENT_ID);
-    await sdk.ready();
-    // Same channel launch = same instance.
-    roomRef.current = sdk.instanceId;
-    // Season scope persists across launches (instanceId resets). Prefer the guild
-    // (whole server shares one season); fall back to channel in a DM/group chat.
-    // Raw ids go to /api/score (which authorizes); canonical g:/c: keys the reads.
-    guildIdRef.current = sdk.guildId ?? null;
-    channelIdRef.current = sdk.channelId ?? null;
-    scopeRef.current = canonicalScope(sdk.guildId, sdk.channelId);
+  // Runs the Discord handshake and returns true once a verified access token is in
+  // hand. A plain browser can't get here: `ready()` needs a real Discord parent and
+  // `authorize()` needs Discord to mint the code. A false return (or a stuck
+  // handshake, hence the timeout) gates the app behind the "Open in Discord" screen.
+  async function setupDiscord(): Promise<boolean> {
     try {
+      const sdk = new DiscordSDK(CLIENT_ID);
+      // ready() never resolves outside Discord; cap the wait so a forged ?frame_id
+      // lands on the blocked screen instead of hanging on "Loading…".
+      await Promise.race([
+        sdk.ready(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("discord-ready-timeout")), 8000),
+        ),
+      ]);
+      // Same channel launch = same instance.
+      roomRef.current = sdk.instanceId;
+      // Season scope persists across launches (instanceId resets). Prefer the guild
+      // (whole server shares one season); fall back to channel in a DM/group chat.
+      // Raw ids go to /api/score (which authorizes); canonical g:/c: keys the reads.
+      guildIdRef.current = sdk.guildId ?? null;
+      channelIdRef.current = sdk.channelId ?? null;
+      scopeRef.current = canonicalScope(sdk.guildId, sdk.channelId);
+
       const { code } = await sdk.commands.authorize({
         client_id: CLIENT_ID,
         response_type: "code",
@@ -213,23 +237,38 @@ export function App({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code }),
       });
-      const { access_token } = (await res.json()) as { access_token: string };
-      // Proves identity to /api/score and /api/realtime-token; server resolves the
-      // real user from it, so the client can't claim to be someone else.
+      if (!res.ok) return false;
+      const { access_token, auth } = (await res.json()) as {
+        access_token?: string;
+        auth?: string;
+      };
+      if (!access_token || !auth) return false;
+      // access_token: live identity for /api/score & /api/realtime-token. auth: the
+      // signed ticket gating the cheap reads. The server resolves the real user
+      // from the token, so the client can't claim to be someone else.
       accessTokenRef.current = access_token;
-      const auth = await sdk.commands.authenticate({ access_token });
-      if (auth?.user) {
-        const u = auth.user;
-        meRef.current = {
-          id: u.id,
-          name: u.global_name ?? u.username,
-          // CDN avatar; `a_` (animated) hashes still return a static .png frame.
-          // No hash: leave unset, roster shows the color+initial placeholder.
-          avatar: u.avatar
-            ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=64`
-            : undefined,
-        };
+      authTicketRef.current = auth;
+
+      // Display identity (the server still trusts only the token). Non-fatal: a
+      // failure here shouldn't lock out an otherwise-authenticated player.
+      try {
+        const auth = await sdk.commands.authenticate({ access_token });
+        if (auth?.user) {
+          const u = auth.user;
+          meRef.current = {
+            id: u.id,
+            name: u.global_name ?? u.username,
+            // CDN avatar; `a_` (animated) hashes still return a static .png frame.
+            // No hash: leave unset, roster shows the color+initial placeholder.
+            avatar: u.avatar
+              ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=64`
+              : undefined,
+          };
+        }
+      } catch (e) {
+        console.warn("Discord authenticate failed:", e);
       }
+
       // Realtime JWT so presence joins the private channel (only verified users
       // can broadcast). Falls back to a public channel if unavailable.
       try {
@@ -247,24 +286,31 @@ export function App({
       } catch {
         /* presence stays on the public fallback channel */
       }
+      return true;
     } catch (e) {
-      console.warn("Discord auth skipped:", e);
+      console.warn("Discord auth failed:", e);
+      return false;
     }
   }
 
-  // Bootstrap once: Discord auth when embedded, then load today's puzzle.
+  // Bootstrap once: require the Discord handshake, then load today's puzzle.
   // Guarded against the dev double-effect.
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
     void (async () => {
       if (isEmbedded) {
-        try {
-          await setupDiscord();
-        } catch (e) {
-          console.warn("Discord SDK setup failed:", e);
+        // Production gate: no playable app without a completed Discord handshake.
+        if (!(await setupDiscord())) {
+          setPhase("blocked");
+          return;
         }
+      } else if (!import.meta.env.DEV) {
+        // Opened outside Discord in a real build — nothing to play here.
+        setPhase("blocked");
+        return;
       }
+      // Embedded + authenticated, or the DEV-only standalone fallback.
       await loadPuzzle();
       await refreshLeaderboard();
     })();
@@ -286,8 +332,16 @@ export function App({
       })();
     };
     // Loading takes precedence (gameRef null until first fetch); error only once
-    // a fetch has failed.
-    return <LoadingScreen error={phase === "error"} onRetry={retry} />;
+    // a fetch has failed; blocked when opened outside Discord.
+    return (
+      <LoadingScreen
+        error={phase === "error"}
+        blocked={phase === "blocked"}
+        onRetry={retry}
+        players={roster}
+        selfId={meRef.current.id}
+      />
+    );
   }
 
   return (

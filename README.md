@@ -29,9 +29,10 @@ static client + functions, Supabase handles realtime/DB.
 1. Create a project at [supabase.com](https://supabase.com).
 2. SQL Editor → New query → paste `supabase/schema.sql` → Run. Presence
    needs no table; this creates the `scores` table, the leaderboard functions
-   (`room_board` / `room_self` / `current_streak`), and policies. It's
-   idempotent: re-run it after pulling scoring changes to pick up new columns
-   and functions.
+   (`room_board` / `room_self` / `current_streak`), the daily-recap tables
+   (`recap_channels` / `recap_posts`) and its `day_results` function, and
+   policies. It's idempotent: re-run it after pulling scoring changes to pick up
+   new columns and functions.
 3. Project Settings → API → copy the Project URL, the anon public
    key, the service_role key (secret, server only), and the JWT Secret
    (Settings → API → JWT Settings). The last two power server-side scoring and
@@ -56,6 +57,12 @@ Fill in `.env`:
   gate live presence to verified users.
 - `SESSION_SECRET`: any long random string. HMAC key for the signed game session
   that anchors solve timing. Generate e.g. `openssl rand -base64 32`.
+
+The next three are only needed for the `/connections` launch command and the
+daily recap (section 5); leave them blank to ship just the Activity:
+- `DISCORD_BOT_TOKEN`: Developer Portal → Bot → Reset Token.
+- `DISCORD_PUBLIC_KEY`: Developer Portal → General Information → Public Key.
+- `CRON_SECRET`: any long random string; guards the recap cron. `openssl rand -base64 32`.
 
 ## 3. Run locally
 
@@ -92,11 +99,41 @@ screenshot harness (`preview.html` + `src/preview.tsx`).
 3. Settings → Environment Variables → add everything from your `.env`
    (`VITE_DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `VITE_SUPABASE_URL`,
    `VITE_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`,
-   `SESSION_SECRET`). The `VITE_*` ones are needed at build time; the rest are
-   server-only secrets (no `VITE_` prefix, so they never reach the browser).
+   `SESSION_SECRET`, and — if you want section 5 — `DISCORD_BOT_TOKEN`,
+   `DISCORD_PUBLIC_KEY`, `CRON_SECRET`). The `VITE_*` ones are needed at build
+   time; the rest are server-only secrets (no `VITE_` prefix, so they never reach
+   the browser). `vercel.json` registers the daily recap cron automatically.
 4. Deploy → copy your `https://<project>.vercel.app` URL.
 5. Discord Portal → Activities → URL Mappings → `/` → that host (no `https://`).
    Set once.
+
+## 5. Launch command + daily recap (optional bot)
+
+Adds a `/connections` command that launches the Activity and, on the midnight-ET
+reset, a recap of yesterday's results + season standings — with a Play button —
+posted to the channel each server last played in. This is how the Wordle activity
+behaves. It needs a real bot (the Activity install alone can't post messages), so
+it's optional; skip it to ship just the game.
+
+After deploying section 4 with `DISCORD_BOT_TOKEN`, `DISCORD_PUBLIC_KEY`, and
+`CRON_SECRET` set:
+
+1. Developer Portal → **Bot** → add a bot user, copy its token into
+   `DISCORD_BOT_TOKEN` (local `.env` and Vercel).
+2. Developer Portal → **Installation** (or OAuth2 → URL Generator) → add the
+   `bot` scope with the **Send Messages** + **View Channel** permissions, and
+   re-invite the app to your server with that link. (The Activity install doesn't
+   grant message permissions.)
+3. Developer Portal → **General Information** → set **Interactions Endpoint URL**
+   to `https://<project>.vercel.app/api/interactions` and save. Discord sends a
+   signed PING; it only saves if `DISCORD_PUBLIC_KEY` is deployed and correct.
+4. Rename the auto-created Entry Point command so it's `/connections`:
+   ```bash
+   npm run register-commands   # uses VITE_DISCORD_CLIENT_ID + DISCORD_BOT_TOKEN from .env
+   ```
+5. Play a game in a server once (this records that channel as the recap target).
+   The cron (`vercel.json`, daily at 06:00 UTC — just after the ET reset) then
+   posts the recap there. Recaps are guild-only: a bot can't post to a group DM.
 
 ## How multiplayer works
 

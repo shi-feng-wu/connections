@@ -12,11 +12,14 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "register-commands": "node --env-file=.env scripts/register-commands.mjs",
+    "discord:entry-point": "node --env-file=.env scripts/ensure-entry-point.mjs"
   },
   "dependencies": {
     "@discord/embedded-app-sdk": "^2.5.0",
     "@supabase/supabase-js": "^2.106.2",
+    "lucide-react": "^1.17.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },

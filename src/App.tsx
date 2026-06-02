@@ -22,6 +22,32 @@ const EMPTY_STANDINGS: Standings = { board: [], self: null };
 
 const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
 
+// What /api/start hands back: the signed session, the pinned start time, the last
+// write time, and the committed guess list to rehydrate the board from.
+type StartInfo = {
+  session: string | null;
+  startedAt: number;
+  updatedAt: number;
+  guesses: string[][];
+};
+
+// Groups the player actually deduced, excluding the back-fill a loss adds to
+// `solved`. Matches what the Board broadcasts during play, so a rehydrated finished
+// loss doesn't report four solved in the roster.
+function deducedLevels(g: Game): number[] {
+  const deduced = new Set<number>();
+  for (const row of g.history) if (row.every((l) => l === row[0])) deduced.add(row[0]);
+  return g.solved.map((s) => s.level).filter((l) => deduced.has(l));
+}
+
+// Loss back-fill levels (solved minus deduced). Seeds the Board's revealed-on-loss
+// bars when rehydrating a finished loss, so they render dimmed rather than as solves.
+function revealedLevelsOf(g: Game): number[] {
+  if (g.status !== "lost") return [];
+  const deduced = new Set(deducedLevels(g));
+  return g.solved.map((s) => s.level).filter((l) => !deduced.has(l));
+}
+
 // Outside Discord: standalone with a guest identity and a room from `?room=`
 // (lets two browser tabs share live progress for testing).
 export function App({
@@ -73,13 +99,15 @@ export function App({
 
   function selfState(): PlayerState {
     const g = gameRef.current;
+    // Deduced-only (no loss back-fill), matching the Board's broadcast.
+    const solved = g ? deducedLevels(g) : [];
     return {
       userId: meRef.current.id,
       name: meRef.current.name,
       avatar: meRef.current.avatar,
       mistakesLeft: g?.mistakesLeft ?? MAX_MISTAKES,
-      solvedCount: g?.solved.length ?? 0,
-      solvedLevels: g ? g.solved.map((s) => s.level) : [],
+      solvedCount: solved.length,
+      solvedLevels: solved,
       picking: false,
       done: g ? (g.status === "playing" ? null : g.status) : null,
       startedAt: g?.startedAt ?? Date.now(),
@@ -139,10 +167,32 @@ export function App({
         accessToken,
         guildId: guildIdRef.current,
         channelId: channelIdRef.current,
-        guesses: g.guesses,
       });
       await refreshLeaderboard();
     })();
+  }
+
+  // Commit a guess to the server's authoritative record BEFORE its result is shown
+  // (see /api/guess). Returns whether the board may advance: true once the guess is
+  // safely recorded, false on a network/persist failure so the Board asks the player
+  // to retry rather than revealing — then abandoning — an uncommitted result.
+  // Standalone (no auth ticket) and practice (non-daily) have nothing to track, so
+  // they advance locally.
+  async function commitGuess(guess: string[]): Promise<boolean> {
+    if (!isDailyRef.current || !authTicketRef.current) return true;
+    const g = gameRef.current;
+    if (!g) return true;
+    try {
+      const r = await fetch("/api/guess", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ date: g.puzzle.date, guess }),
+      });
+      if (!r.ok) return false;
+      return ((await r.json()) as { ok?: boolean }).ok !== false;
+    } catch {
+      return false;
+    }
   }
 
   // Signed auth ticket as a Bearer header for the gated reads. Empty when
@@ -152,9 +202,10 @@ export function App({
     return t ? { Authorization: `Bearer ${t}` } : {};
   }
 
-  // Signed session: server-stamped start time bound to this puzzle date.
-  // Best-effort; without it, finishes won't be scored.
-  async function startSession(date: string): Promise<string | null> {
+  // Opens (or resumes) the day server-side: a signed session that times + binds the
+  // score, the pinned start time, and the committed guess list to rebuild the board
+  // from. Best-effort; without it a fresh in-memory game starts and won't score.
+  async function startSession(date: string): Promise<StartInfo | null> {
     try {
       const r = await fetch("/api/start", {
         method: "POST",
@@ -162,7 +213,13 @@ export function App({
         body: JSON.stringify({ date }),
       });
       if (!r.ok) return null;
-      return ((await r.json()) as { session?: string }).session ?? null;
+      const d = (await r.json()) as Partial<StartInfo>;
+      return {
+        session: d.session ?? null,
+        startedAt: typeof d.startedAt === "number" ? d.startedAt : Date.now(),
+        updatedAt: typeof d.updatedAt === "number" ? d.updatedAt : Date.now(),
+        guesses: Array.isArray(d.guesses) ? d.guesses : [],
+      };
     } catch {
       return null;
     }
@@ -178,10 +235,20 @@ export function App({
       const res = await fetch("/api/puzzle?" + qs.toString(), { headers: authHeaders() });
       if (!res.ok) throw new Error(String(res.status));
       const puzzle = (await res.json()) as Puzzle;
-      gameRef.current = new Game(puzzle);
 
-      // Open a signed session to time and bind this game's score.
-      sessionRef.current = await startSession(puzzle.date);
+      // Open/resume the day, then rebuild the game from the committed guesses so a
+      // relaunch resumes the exact board (mistakes, solved groups) instead of
+      // resetting. Only the daily is tracked; random/by-date practice starts clean.
+      const start = isDailyRef.current ? await startSession(puzzle.date) : null;
+      const game = Game.fromGuesses(puzzle, start?.guesses ?? [], start?.startedAt);
+      // Rehydrated finished game: stamp the duration the server scored (last guess
+      // minus start) so the end-screen hero matches the locked score and stays
+      // stable across reopens, instead of inflating with wall-clock since start.
+      if (game.status !== "playing" && start) {
+        game.durationMs = Math.max(1000, start.updatedAt - start.startedAt);
+      }
+      gameRef.current = game;
+      sessionRef.current = start?.session ?? null;
 
       const s = selfState();
       setSelf(s);
@@ -361,7 +428,9 @@ export function App({
       season={season}
       allTime={allTime}
       onPresence={onPresence}
+      onCommit={commitGuess}
       onFinish={onFinish}
+      initialRevealed={revealedLevelsOf(gameRef.current)}
     />
   );
 }

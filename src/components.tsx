@@ -225,6 +225,7 @@ export function GameView({
   season,
   allTime,
   onPresence,
+  onCommit,
   onFinish,
   initialRevealed,
 }: {
@@ -237,6 +238,7 @@ export function GameView({
   season: Standings;
   allTime: Standings;
   onPresence: (snap: BoardSnapshot) => void;
+  onCommit?: (guess: string[]) => Promise<boolean>;
   onFinish: () => void;
   initialRevealed?: number[];
 }) {
@@ -297,6 +299,7 @@ export function GameView({
         selfName={selfName}
         selfAvatar={selfAvatar}
         onPresence={onPresence}
+        onCommit={onCommit}
         onFeedback={showFeedback}
         onFinish={() => {
           setFinished(true);

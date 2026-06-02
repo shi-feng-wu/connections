@@ -7,17 +7,17 @@ import { supabase } from './supabase';
 // "all-time" (no lower bound), via the room_board / room_self RPCs. A room is the
 // guild, or the channel in a DM/group chat.
 
-// Submit a finished game. Client sends only raw inputs: signed session (which
-// puzzle + start time), Discord token (identity), raw guild/channel ids, guesses.
+// Post a finished game for scoring. Client sends only raw inputs: signed session
+// (which puzzle + start time), Discord token (identity), raw guild/channel ids.
 // /api/score verifies identity, confirms guild membership, derives the canonical
-// scope, replays, times, and computes the score. The browser is never trusted
-// with the number or with which board it lands on.
+// scope, then replays the player's server-side committed guesses (api/guess) —
+// never the browser's word — to time and compute the score. The browser is trusted
+// neither with the number nor with which board it lands on.
 export async function submitScore(input: {
   session: string;
   accessToken: string;
   guildId: string | null;
   channelId: string | null;
-  guesses: string[][];
 }): Promise<void> {
   try {
     await fetch('/api/score', {

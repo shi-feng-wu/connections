@@ -288,3 +288,25 @@ as $$
 $$;
 
 grant execute on function public.day_results(text, date) to anon, authenticated;
+
+-- In-progress / finished daily state, per player per puzzle: the authoritative
+-- record of what a player has actually guessed today. /api/guess appends each
+-- guess (commit-then-reveal, so an outcome can't be seen and then abandoned to
+-- erase it), /api/start reads it back to resume the exact state on reopen, and
+-- /api/score replays it to compute the final score. Because the server owns this
+-- list, leaving and relaunching the Activity can't reset mistakes, drop guesses,
+-- or re-roll the clock — the "infinite tries" hole. started_at is stamped once via
+-- the column default and never written again, so the speed bonus is measured from
+-- the real first touch. Written only by the service role; the client never reads
+-- it directly (/api/start returns the guesses), so RLS with no policy denies the
+-- anon key entirely (same posture as the recap tables above).
+create table if not exists public.progress (
+  user_id     text        not null,
+  puzzle_date date        not null,
+  guesses     jsonb       not null default '[]'::jsonb, -- ordered [[w,w,w,w], …]
+  started_at  timestamptz not null default now(),       -- pinned on first insert
+  updated_at  timestamptz not null default now(),
+  primary key (user_id, puzzle_date)
+);
+
+alter table public.progress enable row level security;

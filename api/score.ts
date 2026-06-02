@@ -6,14 +6,16 @@ import { fetchDiscordUser, fetchUserGuildIds } from './_discord.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
 import { verifySession } from './_session.js';
 
-// The only path a score reaches the leaderboard. The client is trusted for nothing
-// but the raw guess list and the requested room; the room is authorized, not just
-// accepted. Identity comes from the Discord token via /users/@me (not the body),
-// outcome from replaying the guesses against the real solution, duration from the
-// signed session's start time, score from the shared Game logic. A guild board is
-// written only after confirming the user belongs to that guild (guild ids are
-// public); the g:/c: prefix stops a guild id smuggled in via the channel slot.
-// Writes use the service role, so the anon key can't touch the table.
+// The only path a score reaches the leaderboard. The client is trusted only for
+// the requested room (authorized, not just accepted) — not for the outcome. Identity
+// comes from the Discord token via /users/@me (not the body); the guess list comes
+// from the server's own append-only record (api/guess), NOT the request body, so
+// leaving and retrying is pointless — only what was actually committed during play
+// is scored. Duration comes from the pinned session start, score from the shared
+// Game logic. A guild board is written only after confirming the user belongs to
+// that guild (guild ids are public); the g:/c: prefix stops a guild id smuggled in
+// via the channel slot. Writes use the service role, so the anon key can't touch
+// the table.
 
 const SESSION_MAX_AGE = 18 * 60 * 60 * 1000; // daily session shouldn't outlive its day
 const DURATION_CAP = 6 * 60 * 60 * 1000;
@@ -56,21 +58,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
-    // 4. Replay the guesses against the real solution for the outcome; a client
-    //    can't claim a solve it didn't produce.
+    // 4. Replay this player's committed guesses — the append-only record written by
+    //    /api/guess as they actually played — for the outcome. The request body is
+    //    NOT trusted for the guess list; that's what makes leaving-and-retrying
+    //    pointless. No record means nothing legitimately started/finished to score.
     const puzzle = await fetchPuzzle(session.date);
-    const game = new Game(puzzle);
-    const guesses: unknown = body.guesses;
-    if (Array.isArray(guesses)) {
-      for (const guess of guesses.slice(0, MAX_GUESSES)) {
-        if (game.status !== 'playing') break;
-        if (!Array.isArray(guess) || guess.length !== 4) continue;
-        game.clear();
-        for (const w of guess) game.toggle(String(w));
-        game.submit();
-      }
+    const { data: progress } = await db
+      .from('progress')
+      .select('guesses')
+      .eq('user_id', user.id)
+      .eq('puzzle_date', session.date)
+      .maybeSingle();
+    const committed: unknown = progress?.guesses;
+    if (!Array.isArray(committed)) {
+      res.status(200).json({ ok: false, reason: 'no-progress' });
+      return;
     }
-    // 5. Server-measured duration drives the speed component of the score.
+    const game = Game.fromGuesses(puzzle, committed.slice(0, MAX_GUESSES));
+    // Only a finished game scores. A still-playing record means the client posted
+    // early; bail rather than writing (and locking, via ignoreDuplicates) a 0.
+    if (game.status === 'playing') {
+      res.status(200).json({ ok: false, reason: 'not-finished' });
+      return;
+    }
+    // 5. Server-measured duration drives the speed component. age = now - session
+    //    iat, and iat is the pinned started_at, so a relaunch can't shrink it.
     game.durationMs = Math.min(DURATION_CAP, Math.max(1000, age));
 
     // 6. Authorize the room. Guild ids aren't secret, so write a guild board only

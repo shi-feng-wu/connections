@@ -16,11 +16,12 @@ import { PLAY_CUSTOM_ID } from './_recap.js';
 // A launch command opens the Activity AND, where the app is installed to the server
 // (so the bot is present), the bot posts the "who's playing" card as a REPLY to the
 // launcher's "<user> used /connections" message. A LAUNCH_ACTIVITY response has no
-// editable message of its own (Discord returns 10008), so we launch via the callback
-// endpoint with `with_response` to learn the launch message's id, then the bot replies
-// to it (`POST /channels/:id/messages` with message_reference) — and edits that one
-// message in place all day (bot messages don't expire). User-installed launches (no
-// bot in the guild) get no card, by design. See postLaunchCard.
+// editable message of its own (Discord returns 10008) and doesn't hand back the launch
+// message's id, so the bot finds that message by scanning the channel's recent messages
+// for the launcher's command (findLaunchMessageId), then replies to it (`POST
+// /channels/:id/messages` with message_reference) — and edits that one message in place
+// all day (bot messages don't expire). User-installed launches (no bot in the guild) get
+// no card, by design. See postLaunchCard.
 //
 // Every request is Ed25519-signed; an unverified request must get a 401 (Discord
 // rejects the endpoint at setup time otherwise). The signature covers the exact
@@ -111,34 +112,45 @@ type LaunchInteraction = Interaction & {
   authorizing_integration_owners?: Record<string, string>;
 };
 
-// Launch the Activity via the callback endpoint (instead of an inline response) so we can
-// read `response_message_id` — the id of the "<user> used /connections" message — which
-// the bot then replies to. Returns ok=false if the launch call itself failed (the caller
-// falls back to an inline launch so the game still opens).
-async function launchActivity(
-  body: LaunchInteraction,
-): Promise<{ ok: boolean; messageId: string | null }> {
-  if (!body.id || !body.token) return { ok: false, messageId: null };
-  try {
-    const r = await fetch(
-      `https://discord.com/api/v10/interactions/${body.id}/${body.token}/callback?with_response=true`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: LAUNCH_ACTIVITY }) },
-    );
-    if (!r.ok) {
-      console.error('[launch] callback failed', r.status, await r.text().catch(() => ''));
-      return { ok: false, messageId: null };
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+// A LAUNCH_ACTIVITY response doesn't hand back the launch message's id (its callback's
+// response_message_id is null), so to reply we locate the "<user> used /connections"
+// message by scanning the channel's recent messages for this user's most recent launch
+// command. Newest-first, so the first match is this launch. Needs the bot's Read Message
+// History permission (the same one a reply needs); a brief retry covers the message not
+// being indexed the instant after launch. Returns null if it can't be found.
+async function findLaunchMessageId(channelId: string, userId: string, botToken: string): Promise<string | null> {
+  type Meta = { user?: { id?: string }; name?: string };
+  type Msg = { id: string; interaction_metadata?: Meta; interaction?: Meta };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages?limit=10`, {
+        headers: { Authorization: `Bot ${botToken}` },
+      });
+      if (!r.ok) {
+        console.error('[findLaunch] list messages failed', r.status, await r.text().catch(() => ''));
+        return null;
+      }
+      const msgs = (await r.json()) as Msg[];
+      // Interaction messages this user triggered, newest first (Discord returns newest first).
+      const mine = msgs.filter((m) => (m.interaction_metadata ?? m.interaction)?.user?.id === userId);
+      // Prefer an explicit /connections command; else their most recent interaction message
+      // (they just launched, so that's almost certainly the "used /connections" one).
+      const named = mine.find((m) => {
+        const name = m.interaction?.name ?? m.interaction_metadata?.name;
+        return name !== undefined && LAUNCH_COMMANDS.has(name);
+      });
+      const match = named ?? mine[0];
+      if (match) return match.id;
+    } catch (e) {
+      console.error('[findLaunch] threw', e instanceof Error ? e.message : e);
+      return null;
     }
-    const cb = (await r.json()) as {
-      interaction?: { response_message_id?: string };
-      resource?: { message?: { id?: string } };
-    };
-    const messageId = cb.interaction?.response_message_id ?? cb.resource?.message?.id ?? null;
-    console.log('[launch] launched; response_message_id', messageId);
-    return { ok: true, messageId };
-  } catch (e) {
-    console.error('[launch] callback threw', e instanceof Error ? e.message : e);
-    return { ok: false, messageId: null };
+    await sleep(500);
   }
+  console.warn('[findLaunch] no matching launch message found');
+  return null;
 }
 
 // Best-effort: post (or refresh) the room's "who's playing" card as the bot, replying to
@@ -146,7 +158,7 @@ async function launchActivity(
 // launch creates it (as a reply); later launches/joins/guesses edit that same message in
 // place. Skipped where the app isn't installed to the guild (no bot). Runs after the
 // launch reply is already sent, so any failure here never delays the game.
-async function postLaunchCard(body: LaunchInteraction, launchMessageId: string | null): Promise<void> {
+async function postLaunchCard(body: LaunchInteraction): Promise<void> {
   const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
   if (!botToken) {
     console.warn('[postLaunchCard] skip: no DISCORD_BOT_TOKEN');
@@ -231,8 +243,9 @@ async function postLaunchCard(body: LaunchInteraction, launchMessageId: string |
   }
   // Establish: post a fresh card as a reply to the launcher's /connections message.
   if (!messageId) {
+    const launchMessageId = await findLaunchMessageId(channelId, u.id, botToken);
     const replyTo = launchMessageId ? { messageId: launchMessageId, channelId } : undefined;
-    if (!replyTo) console.warn('[postLaunchCard] no launch message id — posting card without a reply');
+    if (!replyTo) console.warn('[postLaunchCard] launch message not found — posting card without a reply');
     console.log('[postLaunchCard] creating card', { scope, replying: !!replyTo, players: players.length });
     let r = await sendCard(botCardUrl(channelId), cardPayload(replyTo), png, 'POST', 'card.png', auth);
     // If the REPLY specifically failed (e.g. the bot lacks Read Message History), still
@@ -294,25 +307,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  // Launch commands go out-of-band: we call the callback endpoint ourselves (to learn the
-  // launch message's id for the bot reply), ACK Discord's request with 202, and post the
-  // card in the background. Everything else (PING, the Play button) replies inline.
+  // Reply first so opening the game is never delayed (Discord enforces a 3s deadline).
+  res.status(200).json(routeInteraction(body));
+
+  // After launching, the bot finds the "<user> used /connections" message and replies to
+  // it with the card. waitUntil keeps the function alive past the response flush (a plain
+  // await after res.json() can be frozen on Vercel). Best-effort — the launch already went.
   if (isLaunchCommand(body)) {
-    const launch = await launchActivity(body);
-    if (!launch.ok) {
-      // The out-of-band launch failed → guarantee the game still opens via an inline
-      // response, and skip the card this time.
-      res.status(200).json({ type: LAUNCH_ACTIVITY });
-      return;
-    }
-    res.status(202).end();
     waitUntil(
-      postLaunchCard(body, launch.messageId).catch((e) => {
+      postLaunchCard(body).catch((e) => {
         console.error('[postLaunchCard] threw', e instanceof Error ? e.message : e);
       }),
     );
-    return;
   }
-
-  res.status(200).json(routeInteraction(body));
 }

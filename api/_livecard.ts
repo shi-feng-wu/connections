@@ -103,11 +103,19 @@ export async function sendCard(
   return fetch(url, { method, body: form, headers });
 }
 
-// POST/PATCH target for the bot-owned card in a channel. The bot creates the card as a
-// reply to the launch message (message_reference in the payload) and edits it in place
-// after — bot messages don't expire, so one card stays live all day. Authorized by the
-// bot token in the Authorization header (see sendCard's `headers` arg), so the card only
-// exists where the bot is (a guild install); user-install launches get no card.
+// Edit target for an interaction's original response (the deferred "<user> used
+// /connections" message). /api/interactions fills it with the card via the interaction
+// token — no bot needed — so the card lands natively under "used /connections", like the
+// Wordle card. After that, the message is authored by the app, so the bot edits it in
+// place via botCardUrl (no 15-minute token limit).
+export function interactionCardUrl(appId: string, token: string): string {
+  return `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/@original?with_components=true`;
+}
+
+// PATCH target for the card in a channel, by message id, using the bot token (the bot can
+// edit it because the app authored the interaction response). /api/join and
+// /api/refresh-card use this to keep the card live all day, past the interaction token's
+// 15-minute window. The bot must be in the guild, so live edits are guild-install only.
 export function botCardUrl(channelId: string, messageId?: string): string {
   const base = `https://discord.com/api/v10/channels/${channelId}/messages`;
   return messageId ? `${base}/${messageId}` : base;

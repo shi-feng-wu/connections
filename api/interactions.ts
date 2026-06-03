@@ -115,17 +115,23 @@ type LaunchInteraction = Interaction & {
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 // A LAUNCH_ACTIVITY response doesn't hand back the launch message's id (its callback's
-// response_message_id is null), so to reply we locate the "<user> used /connections"
-// message by scanning the channel's recent messages. That message has type 20
-// (CHAT_INPUT_COMMAND) and `interaction_metadata.user` = the launcher; the command name
-// only lives on the deprecated `interaction` field, so we match on the message type +
-// user and use the name as a bonus. Newest-first, so the first match is this launch.
-// Needs the bot's Read Message History permission (also required to reply); a brief retry
-// covers the message not being indexed the instant after launch. Null if not found.
+// response_message_id is null — a launch isn't a "response message"), so to reply we
+// locate the "<user> used /connections" command message by scanning the channel's recent
+// messages. The match is deterministic: that message's `interaction_metadata.id` equals
+// the id of THIS interaction. (Fallback: the launcher's most recent command message, by
+// `interaction_metadata.user` + message type 20/23, in case metadata is absent.) Needs
+// the bot's Read Message History permission — the same one a reply needs, and without it
+// GET returns []. A brief retry covers the message not being indexed the instant after
+// launch. Null if not found.
 const CHAT_INPUT_COMMAND_MSG = 20;
 const CONTEXT_MENU_COMMAND_MSG = 23;
-async function findLaunchMessageId(channelId: string, userId: string, botToken: string): Promise<string | null> {
-  type Meta = { user?: { id?: string }; name?: string };
+async function findLaunchMessageId(
+  channelId: string,
+  interactionId: string | undefined,
+  userId: string,
+  botToken: string,
+): Promise<string | null> {
+  type Meta = { id?: string; user?: { id?: string }; name?: string };
   type Msg = { id: string; type?: number; interaction_metadata?: Meta; interaction?: Meta };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -144,15 +150,17 @@ async function findLaunchMessageId(channelId: string, userId: string, botToken: 
         await sleep(500);
         continue;
       }
-      // Messages this user triggered as an interaction, newest first (Discord's order).
-      const mine = msgs.filter((m) => (m.interaction_metadata?.user?.id ?? m.interaction?.user?.id) === userId);
+      // Exact: the message created by THIS interaction (metadata.id === the interaction id).
+      const exact = interactionId
+        ? msgs.find((m) => m.interaction_metadata?.id === interactionId)
+        : undefined;
+      if (exact) return exact.id;
+      // Fallback if metadata.id is unavailable: the launcher's most recent command message.
       const isCommandMsg = (t?: number) => t === CHAT_INPUT_COMMAND_MSG || t === CONTEXT_MENU_COMMAND_MSG;
+      const mine = msgs.filter((m) => (m.interaction_metadata?.user?.id ?? m.interaction?.user?.id) === userId);
       const match =
-        // Prefer an explicit /connections command (deprecated `interaction.name`)…
         mine.find((m) => m.interaction?.name !== undefined && LAUNCH_COMMANDS.has(m.interaction.name)) ??
-        // …else a command message by this user…
         mine.find((m) => isCommandMsg(m.type)) ??
-        // …else their most recent interaction message (they just launched).
         mine[0];
       if (match) return match.id;
     } catch (e) {
@@ -164,6 +172,10 @@ async function findLaunchMessageId(channelId: string, userId: string, botToken: 
   console.warn('[findLaunch] no matching launch message found');
   return null;
 }
+
+// TEMP (testing): post a FRESH reply on every /connections launch instead of editing the
+// room's one existing card. Restore to false when done so it's one-card-per-room again.
+const ALWAYS_POST_FRESH = true;
 
 // Best-effort: post (or refresh) the room's "who's playing" card as the bot, replying to
 // the launcher's "<user> used /connections" message. One card per room per day: the first
@@ -242,7 +254,8 @@ async function postLaunchCard(body: LaunchInteraction): Promise<void> {
 
   const auth = { Authorization: `Bot ${botToken}` };
   const cardChannel = (card?.channel_id as string | null | undefined) || channelId;
-  let messageId = (card?.message_id as string | null | undefined) ?? null;
+  // ALWAYS_POST_FRESH (testing) ignores the existing card so every launch posts a new one.
+  let messageId = ALWAYS_POST_FRESH ? null : ((card?.message_id as string | null | undefined) ?? null);
 
   // Edit the room's existing card in place; if it was deleted (404), make a fresh one.
   if (messageId) {
@@ -255,7 +268,7 @@ async function postLaunchCard(body: LaunchInteraction): Promise<void> {
   }
   // Establish: post a fresh card as a reply to the launcher's /connections message.
   if (!messageId) {
-    const launchMessageId = await findLaunchMessageId(channelId, u.id, botToken);
+    const launchMessageId = await findLaunchMessageId(channelId, body.id, u.id, botToken);
     const replyTo = launchMessageId ? { messageId: launchMessageId, channelId } : undefined;
     if (!replyTo) console.warn('[postLaunchCard] launch message not found — posting card without a reply');
     console.log('[postLaunchCard] creating card', { scope, replying: !!replyTo, players: players.length });

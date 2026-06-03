@@ -1,8 +1,27 @@
-/* Fonts first: @import rules must precede all other rules, and Tailwind inlines its
-   own @import into real CSS. Loaded here (not just index.html) so the dev preview
-   harness — which renders preview.html without the index.html <link> — gets them. */
-@import url("https://fonts.googleapis.com/css2?family=Libre+Franklin:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Newsreader:opsz,wght@6..72,600;6..72,700&display=swap");
+/* @import must precede all other rules (Tailwind inlines its own @import too). */
 @import "tailwindcss";
+
+/* Self-hosted fonts. Discord Activities sandbox every network request through
+   *.discordsays.com and only the mapped prefixes (/, /supabase) resolve, so a
+   direct fonts.googleapis.com / fonts.gstatic.com load is blocked there and the
+   serif silently falls back to flat Georgia. Serving from our own origin (the `/`
+   mapping) makes them load inside Discord. Both are variable woff2 (one file per
+   family spans the whole weight range); regenerate with scripts/vendor-fonts.mjs.
+   Defined here (not only in index.html) so the dev preview harness gets them too. */
+@font-face {
+  font-family: "Libre Franklin";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/fonts/libre-franklin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Newsreader";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/newsreader.woff2") format("woff2");
+}
 
 @theme {
   --font-sans: "Libre Franklin", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;

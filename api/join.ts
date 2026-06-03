@@ -70,13 +70,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       .maybeSingle();
     const existing: CardPlayer[] = Array.isArray(card?.players) ? (card.players as CardPlayer[]) : [];
 
-    // Already on today's card → nothing to do (skip the membership round-trip too).
-    if (existing.some((p) => p.id === user.id)) {
-      res.status(200).json({ ok: true, changed: false });
-      return;
-    }
-
-    // New addition: authorize the guild before writing its card (guild ids are public).
+    // Post/refresh the card on every launch — even if you're already on today's card
+    // (mergePlayer just won't re-add you). Authorize the guild before writing its card
+    // (guild ids are public).
     const guilds = await fetchUserGuildIds(body.accessToken);
     if (!guilds || !guilds.includes(guildId)) {
       res.status(403).json({ ok: false, reason: 'not-a-member' });

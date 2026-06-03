@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
+// The card's font (the app UI uses different fonts). These live under src/, NOT
+// api/_assets — under `vercel dev` anything served from /api/ is routed to the
+// functions and 404s, which would fail this module's load and white-screen the whole
+// preview. Dev-only copy of api/_assets/*.ttf; preview.tsx isn't in the prod build.
+import InterRegularUrl from "./preview-assets/Inter-Regular.ttf?url";
+import InterSemiBoldUrl from "./preview-assets/Inter-SemiBold.ttf?url";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
+import { cardLayout, type CardPlayer, drawRoster } from "./card-draw";
 import { GameView, LoadingScreen } from "./components";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import type { Standings } from "./season";
@@ -141,6 +148,79 @@ const ALLTIME: Standings = {
 };
 
 const noop = (): void => {};
+
+// The "who's playing today" Discord card, drawn live on a browser <canvas> with the
+// SAME code the server uses for the PNG (src/card-draw.ts) — so this preview is the
+// real thing, not a replica. The card uses Inter (the app UI doesn't), so register the
+// bundled TTFs via FontFace; offline, no network — keeps the screenshot harness happy.
+let interReady: Promise<void> | null = null;
+function ensureInter(): Promise<void> {
+  if (!interReady) {
+    interReady = (async () => {
+      const reg = new FontFace("Inter", `url(${InterRegularUrl})`);
+      const semi = new FontFace("Inter SemiBold", `url(${InterSemiBoldUrl})`);
+      await Promise.all([reg.load(), semi.load()]);
+      document.fonts.add(reg);
+      document.fonts.add(semi);
+    })();
+  }
+  return interReady;
+}
+
+// Browser avatar loader (the server passes @napi-rs/canvas loadImage instead).
+const loadCardImg = (url: string): Promise<CanvasImageSource | null> =>
+  new Promise((res) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => res(null);
+    img.src = url;
+  });
+
+// Sample guess grids (each row = four group-levels 0..3): a win with one miss, a loss,
+// a game in progress, and an untouched board.
+const G: Record<string, number[][]> = {
+  won: [[0, 1, 0, 0], [2, 2, 2, 2], [0, 0, 0, 0], [1, 1, 1, 1], [3, 3, 3, 3]],
+  lost: [[0, 1, 0, 2], [1, 1, 3, 1], [0, 0, 0, 0], [2, 3, 2, 2]],
+  mid: [[0, 0, 0, 0], [3, 1, 2, 3]],
+  fresh: [],
+};
+const CARD_ROOM: CardPlayer[] = [
+  { id: "p-jun", name: "Jun Park", avatar: pfp("#2f6fed"), grid: G.won },
+  { id: "p-aria", name: "Aria Voss", avatar: pfp("#d9457a"), grid: G.lost },
+  { id: "p-theo", name: "Theo Lindqvist", avatar: null, grid: G.mid },
+  { id: "p-mei", name: "Mei Tanaka", avatar: pfp("#1f9e6a"), grid: G.fresh },
+  { id: "p-noa", name: "Noa Friedman", avatar: null, grid: G.won },
+  { id: "p-omar", name: "Omar Haddad", avatar: pfp("#e0a32e"), grid: G.lost },
+];
+const CARD_SOLO: CardPlayer[] = [
+  { id: SELF_ID, name: "Mara Okafor", avatar: pfp("#b06bd6"), grid: G.mid },
+];
+
+function Card({ label, players }: { label: string; players: CardPlayer[] }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await ensureInter().catch(() => {}); // fall back to a system font if it won't load
+      const canvas = ref.current;
+      if (cancelled || !canvas) return;
+      const { W, height } = cardLayout(players);
+      canvas.width = W; // true pixel size (CSS scales it down to fit the page)
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (ctx) await drawRoster(ctx, players, { puzzleNo: 1170 }, loadCardImg);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [players]);
+  return (
+    <section className="w-full max-w-[940px] px-4">
+      <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">{label}</div>
+      <canvas ref={ref} className="rounded-xl shadow-lg" style={{ width: "min(560px, 100%)" }} />
+    </section>
+  );
+}
 
 const SIMBTN =
   "cursor-pointer rounded-full border border-zinc-700 bg-zinc-900 px-3.5 py-1.5 text-[12px] font-semibold text-zinc-200 transition hover:bg-zinc-800 hover:text-white disabled:cursor-default disabled:opacity-40";
@@ -332,22 +412,30 @@ const STATES = [
   <State key="l" label="Results · lost" game={lost} revealed={[2, 3]} />,
 ];
 const pick = decodeURIComponent(location.hash.slice(1)).toLowerCase();
-const known = ["progress", "perfect", "won", "lost", "loading", "error", "blocked", "simulate", "feedback"];
+const known = ["progress", "perfect", "won", "lost", "loading", "error", "blocked", "simulate", "feedback", "card"];
 // #simulate and #feedback both isolate the Simulate playground (#feedback also
-// auto-fires a one-away guess to surface the header feedback pill).
+// auto-fires a one-away guess to surface the header feedback pill); #card isolates the
+// Discord "who's playing" card.
 const onlySim = pick === "simulate" || pick === "feedback";
+const onlyCard = pick === "card";
 const shown =
-  known.includes(pick) && !onlySim
+  known.includes(pick) && !onlySim && !onlyCard
     ? STATES.filter((s) => String(s.props.label).toLowerCase().includes(pick))
-    : STATES;
-// Simulate playground rides on top by default; #simulate / #feedback isolate it.
+    : onlyCard
+      ? []
+      : STATES;
+// Simulate playground rides on top by default; #simulate / #feedback isolate it. The
+// cards ride at the bottom by default; #card isolates them.
 const showSim = pick === "" || onlySim;
+const showCards = pick === "" || onlyCard;
 
 createRoot(document.getElementById("preview")!).render(
   <div className="flex flex-col items-center gap-16 py-10">
     {showSim && <Simulate />}
     {!onlySim && shown}
-    {!onlySim && (
+    {showCards && <Card label="Discord card · who's playing today" players={CARD_ROOM} />}
+    {showCards && <Card label="Discord card · single player" players={CARD_SOLO} />}
+    {!onlySim && !onlyCard && (
       <section className="w-full max-w-[360px] px-4">
         <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
           Roster panel · standalone (Live / Leaderboard tabs)

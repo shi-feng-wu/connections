@@ -77,11 +77,11 @@ export function toRecapData(opts: {
 }
 
 // The Discord message: the rendered recap PNG plus the Play button. The image carries
-// everything (title, results, standings), so the embed is just a frame for it — the
-// same shape as the live card's cardPayload, with a recap.png attachment.
+// everything (title, results, standings), so it's sent as a bare inline attachment — no
+// embed, so Discord draws no frame/border or coloured side bar; the PNG sits directly in
+// the message. Same shape as the live card's cardPayload, with a recap.png attachment.
 export function recapPayload(): object {
   return {
-    embeds: [{ image: { url: 'attachment://recap.png' }, color: 0x5865f2 }],
     components: [
       { type: 1, components: [{ type: 2, style: 1, label: 'Play now!', custom_id: PLAY_CUSTOM_ID }] },
     ],

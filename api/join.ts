@@ -4,20 +4,19 @@ import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import { type CardPlayer, mergePlayer, renderRoster } from './_card.js';
 import { fetchDiscordUser, fetchUserGuildIds } from './_discord.js';
-import { activeToken, cardEditUrl, cardPayload, sendCard, withGrids } from './_livecard.js';
+import { botCardUrl, cardPayload, sendCard, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
 
 // Registers a player on the room's "who's playing today" card when they open the
-// Activity, then refreshes the card. The card is the launcher's /connections interaction
-// response (established by /api/interactions), edited in place via the interaction token
-// stored on live_cards — so there's no bot or webhook in the guild. Identity is resolved
-// from the Discord token (not the body), and a guild board is only touched after
-// confirming membership (same gate as /api/score). The roster is append-only — opening
-// adds you, leaving never removes you. The card can only be edited while the establishing
-// launch's token is still alive (~15 min, which covers a game); once it has expired the
-// new roster is still recorded so the next launch shows it. Each tile shows the player's
-// live guess grid, kept current by /api/refresh-card as they play. Best-effort: any
-// failure just means no card.
+// Activity, then refreshes the card. The card is a bot message in the channel (posted
+// as a reply to a /connections launch by /api/interactions), edited in place via the
+// bot token. Identity is resolved from the Discord token (not the body), and a guild
+// board is only touched after confirming membership (same gate as /api/score). The
+// roster is append-only — opening adds you, leaving never removes you. /api/join only
+// EDITS an existing card; the first card is established by a launch (which knows the
+// message to reply to). If no card exists yet (e.g. the launcher's wasn't a guild
+// install), the roster is still recorded. Each tile shows the player's live guess grid,
+// kept current by /api/refresh-card. Best-effort: any failure just means no card.
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
@@ -35,7 +34,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
-    // The card lives on a guild channel's interaction response, so only g: scopes get one.
+    // The card lives on a guild channel, so only g: scopes get one.
     const guildId = typeof body.guildId === 'string' ? body.guildId : null;
     const channelId = typeof body.channelId === 'string' ? body.channelId : null;
     const scope = canonicalScope(guildId, channelId);
@@ -53,7 +52,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const date = todayET();
     const { data: card } = await db
       .from('live_cards')
-      .select('players, interaction_token, token_at')
+      .select('players, message_id, channel_id')
       .eq('scope_id', scope)
       .eq('puzzle_date', date)
       .maybeSingle();
@@ -72,14 +71,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       avatar: user.avatar ?? null,
     });
 
-    // Edit the room's active card now if its establishing launch's token is still alive;
-    // otherwise just record the roster so the next launch (which mints a fresh token)
-    // shows this player. The launch that opened the Activity normally just established
-    // the card, so the token is fresh here.
-    const appId = process.env.VITE_DISCORD_CLIENT_ID ?? '';
-    const token = activeToken(card, Date.now());
+    // Edit the room's card in place if one exists (a launch established it). /api/join
+    // never creates the card itself — it has no launch message to reply to — so without
+    // an existing card it just records the roster for the next launch/refresh to show.
+    const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
+    const messageId = (card?.message_id as string | null | undefined) ?? null;
+    const cardChannel = (card?.channel_id as string | null | undefined) || channelId;
     let edited = false;
-    if (token && appId) {
+    if (messageId && botToken && cardChannel) {
       let puzzle: Puzzle | null = null;
       try {
         puzzle = await fetchPuzzle(date);
@@ -88,12 +87,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       }
       const renderPlayers = puzzle ? await withGrids(db, puzzle, date, players) : players;
       const png = await renderRoster(renderPlayers, { puzzleNo: puzzle?.id, puzzleDate: date });
-      const r = await sendCard(cardEditUrl(appId, token), cardPayload(), png, 'PATCH');
+      const r = await sendCard(botCardUrl(cardChannel, messageId), cardPayload(), png, 'PATCH', 'card.png', {
+        Authorization: `Bot ${botToken}`,
+      });
       edited = r.ok;
     }
 
     const now = new Date().toISOString();
-    // interaction_token/token_at are omitted so the establishing launch's values survive
+    // message_id/channel_id are omitted so the launch-established values survive
     // (an upsert only overwrites the columns it lists).
     await db.from('live_cards').upsert(
       {

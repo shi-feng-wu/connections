@@ -20,12 +20,17 @@ const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const API = 'https://discord.com/api/v10';
 
 // Bot permissions requested for the guild install: View Channel | Send Messages |
-// Embed Links | Attach Files — the minimum to post the recap PNG to a channel.
+// Embed Links | Attach Files | Read Message History. Read Message History is required to
+// post a *reply* (the "who's playing" card replies to the /connections launch message);
+// the rest are the minimum to post the card / recap PNG to a channel.
 const VIEW_CHANNEL = 1 << 10;
 const SEND_MESSAGES = 1 << 11;
 const EMBED_LINKS = 1 << 14;
 const ATTACH_FILES = 1 << 15;
-const GUILD_BOT_PERMISSIONS = String(VIEW_CHANNEL | SEND_MESSAGES | EMBED_LINKS | ATTACH_FILES);
+const READ_MESSAGE_HISTORY = 1 << 16;
+const GUILD_BOT_PERMISSIONS = String(
+  VIEW_CHANNEL | SEND_MESSAGES | EMBED_LINKS | ATTACH_FILES | READ_MESSAGE_HISTORY,
+);
 
 if (!TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN. Set it in .env.');
@@ -59,7 +64,7 @@ console.log(
   `Configured install for "${app.name}" (id ${app.id}):\n` +
     `  • User install  → scopes [applications.commands]\n` +
     `  • Guild install → scopes [applications.commands, bot], permissions ${GUILD_BOT_PERMISSIONS} ` +
-    `(View Channel | Send Messages | Embed Links | Attach Files)\n` +
+    `(View Channel | Send Messages | Embed Links | Attach Files | Read Message History)\n` +
     `  • custom_install_url cleared → native "Add App" two-option screen.\n` +
     'Confirm in Developer Portal ▸ Installation that Install Link = "Discord Provided Link" and both contexts are checked.',
 );

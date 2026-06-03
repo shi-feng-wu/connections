@@ -4,8 +4,9 @@ import { LEVELS, MAX_MISTAKES } from "./game";
 import type { PlayerState } from "./realtime";
 import { HoverButton } from "./hoverbutton";
 
-// Live room tracker: ranked list (avatar, mini-board, mistake dots, status),
-// pinned "your standing", and a "see all" full-room overlay.
+// Live room tracker, redesigned as a Live / Leaderboard tab heading over one ranked
+// list (rank, avatar, mini-board, name, mistake dots, time + ✓/✗), with a bottom
+// fade and an optional pinned "Your standing" (desktop rail only).
 // Avatars stand in for Discord photos. Category colors only mean "solved";
 // emerald is reserved for "live" (picking / pulse).
 
@@ -104,33 +105,27 @@ function useFlash(players: PlayerState[]): Set<string> {
   return flashing;
 }
 
-type Size = "row" | "full";
-
+// Colored initial circle. `picking` adds the emerald pulse ring (live view only);
+// the self avatar keeps a light ring. Photo layers over the initial placeholder.
 function Avatar({
   p,
   selfId,
-  tip = true,
-  size = "row",
+  picking,
 }: {
   p: PlayerState;
   selfId: string;
-  tip?: boolean;
-  size?: Size;
+  picking: boolean;
 }) {
   const you = p.userId === selfId;
-  const dims = size === "row" ? "h-7.5 w-7.5 text-[11px]" : "h-7 w-7 text-[10px]";
-  // Photo layers over the initial placeholder; `broken` tracks a failed src so
-  // a missing/broken image falls back to it.
   const [broken, setBroken] = useState<string | null>(null);
   const showPhoto = p.avatar && broken !== p.avatar;
   return (
     <div
       className={
-        "group relative grid flex-none place-items-center rounded-full font-extrabold text-[#0c0c0c] select-none " +
-        dims +
-        (you ? " shadow-[0_0_0_2px_#000,0_0_0_4px_#f4f4f5]" : "") +
-        (p.picking
-          ? " before:absolute before:-inset-1 before:animate-pick-ring before:rounded-full before:shadow-[0_0_0_2px_#34d399] before:content-['']"
+        "relative grid h-6.5 w-6.5 flex-none place-items-center rounded-full text-[11px] font-extrabold text-[#0c0c0c] select-none min-[820px]:h-8 min-[820px]:w-8 min-[820px]:text-[13px] " +
+        (you ? "shadow-[0_0_0_2px_#09090b,0_0_0_4px_#f4f4f5] " : "") +
+        (picking
+          ? "before:absolute before:-inset-1 before:animate-pick-ring before:rounded-full before:shadow-[0_0_0_2px_#34d399] before:content-['']"
           : "")
       }
       style={{ background: colorFor(p.userId) }}
@@ -145,46 +140,28 @@ function Avatar({
           onError={() => setBroken(p.avatar ?? null)}
         />
       )}
-      {tip && (
-        <span className="pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 z-30 -translate-x-1/2 translate-y-1 rounded-md bg-zinc-100 px-2.25 py-1 text-xs font-semibold whitespace-nowrap text-zinc-900 opacity-0 transition group-hover:translate-y-0 group-hover:opacity-100 after:absolute after:top-full after:left-1/2 after:-translate-x-1/2 after:border-[5px] after:border-transparent after:border-t-zinc-100 after:content-['']">
-          {p.name + (you ? " (you)" : "")}
-        </span>
-      )}
     </div>
   );
 }
 
-function MiniBoard({
-  p,
-  flash,
-  size = "row",
-}: {
-  p: PlayerState;
-  flash: boolean;
-  size?: Size;
-}) {
+// Vertical stack: a solid colored bar per solved group (in difficulty order), grey
+// segmented rows for the rest. Flashes the newest bar when a group just landed.
+function MiniBoard({ p, flash }: { p: PlayerState; flash: boolean }) {
   const solved = [...p.solvedLevels].sort((a, b) => a - b);
-  const width = size === "row" ? "w-7.5" : "w-6.5";
-  const rowH = size === "row" ? "h-1.5" : "h-[5.5px]";
   return (
-    <div className={"flex flex-none flex-col gap-[1.5px] " + width}>
+    <div className="flex w-5.5 flex-none flex-col gap-[2px] min-[820px]:w-7.5">
       {solved.map((lvl, i) => (
         <div
           key={`s${lvl}`}
           className={
-            "flex gap-0 overflow-hidden rounded-xs " +
-            rowH +
-            (flash && i === solved.length - 1 ? " animate-solve-flash" : "")
+            "h-[5px] overflow-hidden rounded-[2px] min-[820px]:h-1.5 " +
+            (flash && i === solved.length - 1 ? "animate-solve-flash" : "")
           }
           style={{ background: LEVELS[lvl].color }}
-        >
-          {[0, 1, 2, 3].map((c) => (
-            <div className="flex-1 bg-inherit" key={c} />
-          ))}
-        </div>
+        />
       ))}
       {Array.from({ length: 4 - solved.length }, (_, r) => (
-        <div className={"flex gap-[1.5px] rounded-xs " + rowH} key={`e${r}`}>
+        <div className="flex h-[5px] gap-[1.5px] min-[820px]:h-1.5" key={`e${r}`}>
           {[0, 1, 2, 3].map((c) => (
             <div className="flex-1 rounded-[1px] bg-zinc-700" key={c} />
           ))}
@@ -196,7 +173,7 @@ function MiniBoard({
 
 function Mistakes({ p }: { p: PlayerState }) {
   return (
-    <span className="inline-flex items-center gap-0.75">
+    <span className="inline-flex flex-none items-center gap-[3px]">
       {Array.from({ length: MAX_MISTAKES }, (_, i) => (
         <span
           key={i}
@@ -210,22 +187,23 @@ function Mistakes({ p }: { p: PlayerState }) {
   );
 }
 
-const TIME = "text-[13px] tabular-nums tracking-[0.01em]";
+const TIME = "text-[12px] tabular-nums tracking-[0.01em] min-[820px]:text-[13px]";
 
-function Status({ p, now, wide = false }: { p: PlayerState; now: number; wide?: boolean }) {
+function Status({ p, now }: { p: PlayerState; now: number }) {
   const time = fmtElapsed(p, now);
-  const box = "flex items-center justify-end gap-1.75" + (wide ? " min-w-14" : "");
+  const box =
+    "flex min-w-12 flex-none items-center justify-end gap-1.5 min-[820px]:min-w-14";
   if (p.done === "lost")
     return (
       <div className={box}>
-        <X className="flex-none text-zinc-500" size={16} strokeWidth={2.6} aria-label="Out" />
+        <X className="flex-none text-zinc-500" size={15} strokeWidth={2.6} aria-label="Out" />
         <span className={TIME + " text-zinc-600"}>{time}</span>
       </div>
     );
   if (p.done === "won")
     return (
       <div className={box}>
-        <Check className="flex-none text-zinc-100" size={16} strokeWidth={2.8} aria-label="Solved" />
+        <Check className="flex-none text-zinc-100" size={15} strokeWidth={2.8} aria-label="Solved" />
         <span className={TIME + " text-zinc-200"}>{time}</span>
       </div>
     );
@@ -236,17 +214,17 @@ function Status({ p, now, wide = false }: { p: PlayerState; now: number; wide?: 
   );
 }
 
-function Rank({ rank, w }: { rank: number; w: string }) {
+function Rank({ rank }: { rank: number }) {
   if (rank === 1)
     return (
-      <div className={"flex-none text-center text-[13px] tabular-nums " + w}>
+      <div className="w-4 flex-none text-center text-[13px] tabular-nums min-[820px]:w-4.5">
         <span className="inline-grid h-5 w-5 place-items-center rounded-md bg-zinc-100 text-[12px] font-extrabold text-zinc-900">
           1
         </span>
       </div>
     );
   return (
-    <div className={"flex-none text-center text-[13px] tabular-nums text-zinc-500 " + w}>
+    <div className="w-4 flex-none text-center text-[13px] tabular-nums text-zinc-500 min-[820px]:w-4.5">
       {rank}
     </div>
   );
@@ -258,80 +236,137 @@ function RosterRow({
   selfId,
   now,
   flash,
+  picking,
 }: {
   p: PlayerState;
   rank: number;
   selfId: string;
   now: number;
   flash: boolean;
+  picking: boolean;
 }) {
   const you = p.userId === selfId;
   return (
     <div
       className={
-        "flex items-center gap-2.75 rounded-lg px-3 py-2.5 " +
+        "flex flex-none items-center gap-2 rounded-[9px] px-2.5 py-1.5 min-[820px]:gap-2.75 min-[820px]:px-3 min-[820px]:py-2.25 " +
         (you ? "bg-zinc-100/10" : "bg-zinc-900/60")
       }
     >
-      <Rank rank={rank} w="w-5.5" />
-      <Avatar p={p} selfId={selfId} />
+      <Rank rank={rank} />
+      <Avatar p={p} selfId={selfId} picking={picking} />
       <MiniBoard p={p} flash={flash} />
-      <div className="min-w-0 flex-1" />
-      <div className="ml-auto flex items-center gap-2.75">
-        <Mistakes p={p} />
-        <Status p={p} now={now} wide />
-      </div>
+      <span
+        className={
+          "min-w-0 flex-1 truncate text-[13px] " +
+          (you ? "font-bold text-zinc-100" : "text-zinc-300")
+        }
+      >
+        {p.name}
+        {you ? " (you)" : ""}
+      </span>
+      <Mistakes p={p} />
+      <Status p={p} now={now} />
     </div>
   );
 }
 
+export type RosterView = "live" | "board";
+
+const TAB =
+  "relative inline-flex cursor-pointer items-center gap-1.5 bg-transparent px-0 pt-0.5 pb-1.75 font-sans text-[11px] font-bold uppercase tracking-[0.07em] transition-opacity duration-150 ease-out";
+const TAB_ON =
+  " text-zinc-100 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-zinc-300 after:content-['']";
+const TAB_OFF = " text-zinc-600";
+
+// Subtle tab heading that flips the list between the live room and today's standings.
+function Tabs({
+  view,
+  setView,
+}: {
+  view: RosterView;
+  setView: (v: RosterView) => void;
+}) {
+  return (
+    <div className="flex flex-none items-center gap-4 px-0.5 pb-0.5">
+      <HoverButton
+        hover="opacity-60"
+        onClick={() => setView("live")}
+        className={TAB + (view === "live" ? TAB_ON : TAB_OFF)}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+        Live
+      </HoverButton>
+      <HoverButton
+        hover="opacity-60"
+        onClick={() => setView("board")}
+        className={TAB + (view === "board" ? TAB_ON : TAB_OFF)}
+      >
+        Leaderboard
+      </HoverButton>
+    </div>
+  );
+}
+
+const ORD = ["", "1st", "2nd", "3rd", "4th", "5th"];
+const ordinal = (n: number): string => ORD[n] ?? `${n}th`;
+
+// Renders as a fragment: the tab heading, the scrolling ranked list (bottom fade),
+// and — on the desktop rail only — a pinned "Your standing". On mobile the list is
+// capped and scrolls; on the desktop rail it flexes to fill the column height.
 export function Roster({
   players,
   selfId,
-  defaultOpen = false,
-  sidebar = false,
+  view: viewProp,
+  onViewChange,
+  showStanding = false,
 }: {
   players: PlayerState[];
   selfId: string;
-  // preview harness can force the "see all" overlay open
-  defaultOpen?: boolean;
-  // in the sidebar the scroll area flexes to fill the column; standalone uses a fixed cap
-  sidebar?: boolean;
+  // controlled by GameView (so finishing can flip to the leaderboard); uncontrolled
+  // (own state) when omitted, e.g. the standalone preview panel.
+  view?: RosterView;
+  onViewChange?: (v: RosterView) => void;
+  // pinned "Your standing" row — desktop rail only (hidden on mobile).
+  showStanding?: boolean;
 }) {
+  const [viewState, setViewState] = useState<RosterView>("live");
+  const view = viewProp ?? viewState;
+  const setView = onViewChange ?? setViewState;
+  const live = view === "live";
+
   const now = useNow(players.some((p) => p.done === null));
   const flashing = useFlash(players);
-  const [open, setOpen] = useState(defaultOpen);
-
   const sorted = useMemo(() => sortRoster(players, now), [players, now]);
   const selfIdx = sorted.findIndex((p) => p.userId === selfId);
   const self = selfIdx >= 0 ? sorted[selfIdx] : null;
 
   return (
-    <div className="flex w-full flex-col">
-      <div
-        className={
-          "flex flex-col gap-1.5 overflow-y-auto scrollbar-thin " +
-          (sidebar
-            ? "min-h-0 flex-1 max-h-75 min-[820px]:max-h-[min(60vh,460px)]"
-            : "max-h-81.5")
-        }
-      >
-        {sorted.map((p, i) => (
-          <RosterRow
-            key={p.userId}
-            p={p}
-            rank={i + 1}
-            selfId={selfId}
-            now={now}
-            flash={flashing.has(p.userId)}
-          />
-        ))}
+    <>
+      <Tabs view={view} setView={setView} />
+      <div className="list-fade flex max-h-[42vh] min-h-0 flex-col gap-1.25 overflow-y-auto scrollbar-thin min-[820px]:max-h-none min-[820px]:flex-1 min-[820px]:gap-1.5">
+        {sorted.length ? (
+          sorted.map((p, i) => (
+            <RosterRow
+              key={p.userId}
+              p={p}
+              rank={i + 1}
+              selfId={selfId}
+              now={now}
+              flash={flashing.has(p.userId)}
+              picking={live && p.picking}
+            />
+          ))
+        ) : (
+          <div className="px-2 py-6 text-center text-[13px] text-zinc-600">
+            No one here yet.
+          </div>
+        )}
       </div>
-
-      {self && (
-        <div className="mt-2 border-t border-dashed border-white/12 pt-2.5 pb-0.5">
+      {showStanding && self && (
+        <div className="hidden flex-none border-t border-dashed border-white/12 pt-2.5 min-[820px]:block">
           <div className="px-1 pb-1.5 text-[10px] uppercase tracking-[0.07em] text-zinc-600">
-            Your standing
+            Your standing · {ordinal(selfIdx + 1)} of {sorted.length}
           </div>
           <RosterRow
             p={self}
@@ -339,228 +374,10 @@ export function Roster({
             selfId={selfId}
             now={now}
             flash={false}
+            picking={false}
           />
         </div>
       )}
-
-      {open && (
-        <SeeAll
-          players={players}
-          selfId={selfId}
-          onClose={() => setOpen(false)}
-        />
-      )}
-    </div>
-  );
-}
-
-type Filter = "all" | "playing" | "picking" | "solved" | "out";
-const FILTERS: { f: Filter; label: string }[] = [
-  { f: "all", label: "All" },
-  { f: "playing", label: "Playing" },
-  { f: "picking", label: "Picking now" },
-  { f: "solved", label: "Solved" },
-  { f: "out", label: "Out" },
-];
-
-function FullRow({
-  p,
-  rank,
-  selfId,
-  now,
-}: {
-  p: PlayerState;
-  rank: number;
-  selfId: string;
-  now: number;
-}) {
-  const you = p.userId === selfId;
-  return (
-    <div
-      className={
-        "flex items-center gap-2.75 px-1 py-2 first:border-t-transparent " +
-        (you
-          ? "rounded-lg border-t border-t-transparent bg-zinc-100/6"
-          : "border-t border-white/4")
-      }
-      data-self={you || undefined}
-    >
-      <Rank rank={rank} w="w-7.5" />
-      <Avatar p={p} selfId={selfId} tip={false} size="full" />
-      <div
-        className={
-          "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13.5px] " +
-          (you ? "font-bold text-zinc-100" : "text-[#d4d4d8]")
-        }
-      >
-        {p.name + (you ? " (you)" : "")}
-      </div>
-      <MiniBoard p={p} flash={false} size="full" />
-      <div className="flex flex-none items-center gap-2.5">
-        <Mistakes p={p} />
-        <Status p={p} now={now} />
-      </div>
-    </div>
-  );
-}
-
-function SeeAll({
-  players,
-  selfId,
-  onClose,
-}: {
-  players: PlayerState[];
-  selfId: string;
-  onClose: () => void;
-}) {
-  const now = useNow(players.some((p) => p.done === null));
-  const [filter, setFilter] = useState<Filter>("all");
-  const [query, setQuery] = useState("");
-  const listRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
-
-  const ranked = useMemo(() => sortRoster(players, now), [players, now]);
-  const rankById = useMemo(() => {
-    const m = new Map<string, number>();
-    ranked.forEach((p, i) => m.set(p.userId, i + 1));
-    return m;
-  }, [ranked]);
-  const self = ranked.find((p) => p.userId === selfId) ?? null;
-
-  useEffect(() => {
-    searchRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  function matches(p: PlayerState): boolean {
-    if (filter === "picking" && !p.picking) return false;
-    if (filter === "solved" && p.done !== "won") return false;
-    if (filter === "out" && p.done !== "lost") return false;
-    if (filter === "playing" && p.done !== null) return false;
-    const q = query.trim().toLowerCase();
-    if (q && !p.name.toLowerCase().includes(q)) return false;
-    return true;
-  }
-  const rows = ranked.filter(matches);
-
-  function jumpToMe(): void {
-    setFilter("all");
-    setQuery("");
-    // wait for the unfiltered re-render, then scroll the self row into view
-    requestAnimationFrame(() => {
-      const me = listRef.current?.querySelector<HTMLElement>("[data-self]");
-      if (me && listRef.current)
-        listRef.current.scrollTop = Math.max(0, me.offsetTop - 90);
-    });
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-100 flex animate-overlay-fade items-center justify-center bg-[#030304]/66 p-6"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div
-        className="flex max-h-[88vh] w-[min(560px,94vw)] animate-sheet-rise flex-col overflow-hidden rounded-2xl border border-[#26262a] bg-zinc-950 shadow-[0_40px_120px_-30px_#000]"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Everyone playing"
-      >
-        <div className="flex items-center gap-3 px-4.5 pt-4.5 pb-3.5">
-          <h3 className="m-0 font-serif text-[22px] font-bold tracking-[-0.02em] text-[#efefe6]">
-            Everyone playing
-          </h3>
-          <span className="flex items-center gap-1.75 text-[12px] text-zinc-500">
-            <span className="h-1.75 w-1.75 animate-livedot rounded-full bg-emerald-400" />
-            {rows.length === ranked.length
-              ? `${ranked.length} playing`
-              : `${rows.length} of ${ranked.length}`}
-          </span>
-          <HoverButton
-            className="ml-auto grid h-7.5 w-7.5 flex-none cursor-pointer place-items-center rounded-lg bg-transparent text-zinc-400 transition duration-150 ease-out hover:bg-zinc-800 hover:text-zinc-100"
-            hover="scale-110"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            <X size={16} strokeWidth={2.2} aria-hidden />
-          </HoverButton>
-        </div>
-        <div className="flex flex-col gap-2.75 border-b border-[#1c1c1f] px-4.5 pb-3.5">
-          <input
-            ref={searchRef}
-            className="w-full rounded-full border border-[#2a2a2e] bg-zinc-900 px-3.75 py-2.25 font-sans text-[13.5px] text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 hover:border-zinc-600 focus:border-zinc-500"
-            type="text"
-            placeholder="Search players by name…"
-            autoComplete="off"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <div className="flex flex-wrap gap-1.5">
-            {FILTERS.map(({ f, label }) => (
-              <HoverButton
-                key={f}
-                hover="-translate-y-[1px]"
-                className={
-                  "cursor-pointer rounded-full border px-2.75 py-1.25 font-sans text-[11px] font-semibold uppercase tracking-wider transition duration-150 ease-out " +
-                  (filter === f
-                    ? "border-zinc-100 bg-zinc-100 text-zinc-900"
-                    : "border-zinc-700 bg-transparent text-zinc-400 hover:border-zinc-500 hover:text-zinc-100")
-                }
-                onClick={() => setFilter(f)}
-              >
-                {label}
-              </HoverButton>
-            ))}
-          </div>
-        </div>
-        <div
-          className="relative flex-1 overflow-y-auto px-4 pt-1.5 pb-2.5 scrollbar-thin"
-          ref={listRef}
-        >
-          {rows.length ? (
-            rows.map((p) => (
-              <FullRow
-                key={p.userId}
-                p={p}
-                rank={rankById.get(p.userId)!}
-                selfId={selfId}
-                now={now}
-              />
-            ))
-          ) : (
-            <div className="py-10 text-center text-[13px] text-zinc-600">
-              No players match.
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-3 border-t border-dashed border-white/13 px-4 py-2.75">
-          <div className="min-w-0 flex-1">
-            {self && (
-              <>
-                <div className="px-1 pb-1.25 text-[10px] uppercase tracking-[0.07em] text-zinc-600">
-                  Your standing · #{rankById.get(self.userId)} of {ranked.length}
-                </div>
-                <FullRow
-                  p={self}
-                  rank={rankById.get(self.userId)!}
-                  selfId={selfId}
-                  now={now}
-                />
-              </>
-            )}
-          </div>
-          <HoverButton
-            className="flex-none cursor-pointer rounded-full border border-zinc-600 bg-transparent px-3.75 py-2.25 font-sans text-[12.5px] font-semibold text-zinc-100 transition duration-150 ease-out hover:bg-zinc-800"
-            hover="-translate-y-[1px]"
-            onClick={jumpToMe}
-          >
-            Jump to me
-          </HoverButton>
-        </div>
-      </div>
-    </div>
+    </>
   );
 }

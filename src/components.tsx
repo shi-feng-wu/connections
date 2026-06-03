@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Board, type BoardSnapshot } from "./board";
 import { HoverButton } from "./hoverbutton";
-import { LEVELS, MAX_MISTAKES, type Game, type Puzzle } from "./game";
+import { LEVELS, type Game, type Puzzle } from "./game";
 import type { PlayerState } from "./realtime";
-import { Roster } from "./roster";
-import type { Standings } from "./season";
+import { Roster, type RosterView } from "./roster";
+import { LeaderboardModal, type Standings } from "./season";
 
 // Loading / error / blocked screen, centered on the page. The in-progress state is
 // deliberately minimal: just the four category squares pulsing in sequence. Once the
@@ -33,8 +33,8 @@ export function LoadingScreen({
       <HoverButton
         type="button"
         onClick={onRetry}
-        hover="-translate-y-[1px] shadow-[0_6px_18px_-8px_rgba(244,244,245,0.55)]"
-        className="mt-1 cursor-pointer rounded-full border border-zinc-100 bg-zinc-100 px-5.5 py-2.5 text-sm font-semibold text-zinc-900 transition duration-150 ease-out hover:bg-white"
+        hover="opacity-85"
+        className="mt-1 cursor-pointer rounded-full border border-zinc-100 bg-zinc-100 px-5.5 py-2.5 text-sm font-semibold text-zinc-900 transition-opacity duration-150 ease-out"
       >
         Try again
       </HoverButton>
@@ -58,104 +58,60 @@ export function LoadingScreen({
   );
 }
 
-function Header({ puzzle }: { puzzle: Puzzle }) {
+// "Connections #642 · · · June 2, 2026" lockup. The wordmark + number sit left; the
+// date rides the right edge. During play the date slot cross-fades to transient
+// guess feedback ("One away…") and back. Lives above the board on mobile and atop
+// the players rail on desktop (rendered twice, one hidden per breakpoint).
+function Header({
+  puzzle,
+  feedbackText,
+  feedbackOn,
+  className = "",
+}: {
+  puzzle: Puzzle;
+  feedbackText: string;
+  feedbackOn: boolean;
+  className?: string;
+}) {
   const dateLabel = new Date(`${puzzle.date}T00:00:00`).toLocaleDateString(
     "en-US",
-    {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    },
+    { year: "numeric", month: "long", day: "numeric" },
   );
   return (
-    <header className="font-serif">
-      <h1 className="text-4xl font-bold tracking-tight text-[#efefe6]">
+    <header className={"flex items-baseline gap-3 " + className}>
+      <span className="font-display text-[23px] font-bold tracking-[-0.02em] text-[#efefe6] min-[820px]:text-[21px]">
         Connections
-      </h1>
-      <p className="font-sans text-xs text-zinc-500">
-        #{puzzle.id} · {dateLabel}
-      </p>
+      </span>
+      <span className="font-sans text-[11px] text-zinc-500">#{puzzle.id}</span>
+      <span className="relative ml-auto inline-flex items-center justify-end text-right">
+        <span
+          className={
+            "font-sans text-[11px] whitespace-nowrap text-zinc-500 transition-opacity duration-300 " +
+            (feedbackOn ? "opacity-0" : "opacity-100")
+          }
+        >
+          {dateLabel}
+        </span>
+        <span
+          aria-live="polite"
+          className={
+            "pointer-events-none absolute right-0 font-sans text-[12px] font-bold whitespace-nowrap text-zinc-100 transition-all duration-300 ease-out " +
+            (feedbackOn ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0")
+          }
+        >
+          {feedbackText}
+        </span>
+      </span>
     </header>
   );
 }
 
-const fmtTime = (ms: number | null): string => {
-  const s = Math.max(1, Math.round((ms ?? 0) / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-};
-
-// Score hero, shown opposite the title once the game ends. It's an absolute
-// overlay (see GameView) so revealing it reflows nothing — the title block and
-// board stay exactly where they were during play; the hero's extra height just
-// spills into the gap below the title rather than shoving the board down.
-function Hero({ game }: { game: Game }) {
-  const won = game.status === "won";
-  const perfect = won && game.mistakesLeft === MAX_MISTAKES;
-  const status = perfect ? "Perfect" : won ? "Solved" : "Out of guesses";
-  const made = MAX_MISTAKES - game.mistakesLeft;
-  // groups deduced (excludes the loss back-fill), so a loss reads e.g. 2/4.
-  const solved = game.groupsSolved;
-
-  return (
-    <div className="flex flex-none animate-hero-in flex-col items-end text-right">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-400">
-        {status}
-      </div>
-      <div className="text-[clamp(30px,5.5vw,44px)] font-extrabold leading-[1.02] tracking-[-0.02em] tabular-nums text-[#efefe6]">
-        +{game.score.toLocaleString()}
-      </div>
-      <div className="mt-1 flex items-center gap-1.5 text-[12px] leading-4 text-zinc-400 [&>span]:whitespace-nowrap">
-        <span className="inline-flex items-center gap-1">
-          {Array.from({ length: MAX_MISTAKES }, (_, i) => (
-            <span
-              key={i}
-              className={
-                "h-1.5 w-1.5 rounded-full " +
-                (i < MAX_MISTAKES - made ? "bg-zinc-300" : "bg-zinc-700")
-              }
-            />
-          ))}
-        </span>
-        <span className="text-zinc-700">·</span>
-        <span className="tabular-nums tracking-[0.01em]">{fmtTime(game.durationMs)}</span>
-        <span className="text-zinc-700">·</span>
-        <span className="tabular-nums">{solved}/4</span>
-      </div>
-    </div>
-  );
-}
-
-// Two-column game shell: board + content left, live Roster sidebar right; they
-// stack below the 820px breakpoint. className lets GameView fade the whole shell
-// in over the loader once the puzzle lands.
-function GameShell({
-  children,
-  sidebar,
-  className = "",
-}: {
-  children: ReactNode;
-  sidebar: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div
-      className={
-        "flex w-full flex-col items-stretch justify-center gap-5.5 min-[820px]:flex-row min-[820px]:items-start" +
-        (className ? " " + className : "")
-      }
-    >
-      <div className="flex w-full min-w-0 flex-col gap-4 min-[820px]:max-w-xl min-[820px]:flex-1">
-        {children}
-      </div>
-      <aside className="flex w-full flex-col gap-5 min-[820px]:w-75 min-[820px]:flex-none">
-        {sidebar}
-      </aside>
-    </div>
-  );
-}
-
-// Puzzle owns the left column, live Roster rides the sidebar. Leaderboard moved to
-// the end screen, so the sidebar is just the Roster now.
+// Responsive game shell. Mobile: a single column — header, board + footer, then the
+// players section (Live / Leaderboard tabs + list). Desktop (≥820px): a 50/50 split
+// — board + footer on the left, and a right rail (header, tabs, list, pinned "Your
+// standing") that absolute-fills the column so it matches the board's height and
+// scrolls its list rather than driving the layout taller. The season leaderboard
+// (cumulative stats) opens in a modal from the end-screen trophy.
 export function GameView({
   game,
   gameKey,
@@ -183,16 +139,20 @@ export function GameView({
   onFinish: () => void;
   initialRevealed?: number[];
 }) {
-  // hero rides the header row once the game ends; init from status so rehydrated
-  // (preview) finished games show it at once, and reset when a new puzzle loads.
-  const [finished, setFinished] = useState(game.status !== "playing");
-  // transient guess feedback ("One away…") occupies the same header slot the
-  // score hero will, so wrong-guess results land where the final score lands.
+  // transient guess feedback ("One away…") rides the header date slot during play.
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackOn, setFeedbackOn] = useState(false);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  // which list the rail/section shows: the live room or today's standings. Starts on
+  // the leaderboard for an already-finished (rehydrated) game.
+  const [view, setView] = useState<RosterView>(
+    game.status === "playing" ? "live" : "board",
+  );
+  // season leaderboard modal (opened by the end-screen trophy).
+  const [seasonOpen, setSeasonOpen] = useState(false);
+
   function showFeedback(msg: string): void {
     setFeedbackText(msg);
     setFeedbackOn(true);
@@ -201,53 +161,66 @@ export function GameView({
   }
   useEffect(() => () => clearTimeout(feedbackTimer.current), []);
   useEffect(() => {
-    setFinished(game.status !== "playing");
     setFeedbackOn(false);
+    setView(game.status === "playing" ? "live" : "board");
   }, [game]);
 
+  const hasSeason = season.board.length > 0 || allTime.board.length > 0;
+
+  const header = (className: string) => (
+    <Header
+      puzzle={game.puzzle}
+      feedbackText={feedbackText}
+      feedbackOn={feedbackOn}
+      className={className}
+    />
+  );
+
   return (
-    <GameShell className="animate-fade-in" sidebar={<Roster players={players} selfId={selfId} sidebar />}>
-      <div className="relative flex items-start justify-between gap-4">
-        <Header puzzle={game.puzzle} />
-        {/* Title block stays flush and the board never moves: the scorecard is
-            an absolute overlay over this row, so its extra height spills upward
-            rather than reflowing anything. Bottom-aligned so its stats line ends
-            level with the title's sub-line — both the same distance from the grid.
-            During play this same slot carries transient guess feedback. */}
-        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-end">
-          {finished ? (
-            <Hero game={game} />
-          ) : (
-            <div
-              className={
-                "text-sm font-bold text-zinc-100 transition-all duration-300 ease-out " +
-                (feedbackOn
-                  ? "opacity-100 translate-y-0"
-                  : "opacity-0 translate-y-1.5")
-              }
-            >
-              {feedbackText}
-            </div>
-          )}
+    <div className="flex w-full animate-fade-in flex-col gap-3 min-[820px]:mx-auto min-[820px]:max-w-[860px] min-[820px]:flex-row min-[820px]:items-stretch min-[820px]:gap-6">
+      {/* main column — board + footer (header above it on mobile only) */}
+      <div className="flex w-full min-w-0 flex-col gap-3 min-[820px]:flex-1">
+        {header("min-[820px]:hidden")}
+        <Board
+          key={gameKey}
+          game={game}
+          onPresence={onPresence}
+          onCommit={onCommit}
+          onFeedback={showFeedback}
+          onFinish={() => {
+            setView("board");
+            onFinish();
+          }}
+          onShowSeason={() => setSeasonOpen(true)}
+          hasSeason={hasSeason}
+          initialRevealed={initialRevealed}
+        />
+      </div>
+
+      {/* players column — desktop rail absolute-fills to match the board's height */}
+      <div className="relative flex w-full min-w-0 flex-col min-[820px]:flex-1">
+        <div className="flex min-h-0 flex-col gap-2.5 min-[820px]:absolute min-[820px]:inset-0">
+          {header("hidden min-[820px]:flex")}
+          <Roster
+            players={players}
+            selfId={selfId}
+            view={view}
+            onViewChange={setView}
+            showStanding
+          />
         </div>
       </div>
-      <Board
-        key={gameKey}
-        game={game}
-        season={season}
-        allTime={allTime}
-        selfId={selfId}
-        selfName={selfName}
-        selfAvatar={selfAvatar}
-        onPresence={onPresence}
-        onCommit={onCommit}
-        onFeedback={showFeedback}
-        onFinish={() => {
-          setFinished(true);
-          onFinish();
-        }}
-        initialRevealed={initialRevealed}
-      />
-    </GameShell>
+
+      {seasonOpen && (
+        <LeaderboardModal
+          season={season}
+          allTime={allTime}
+          selfId={selfId}
+          name={selfName}
+          avatar={selfAvatar}
+          onClose={() => setSeasonOpen(false)}
+        />
+      )}
+    </div>
   );
 }

@@ -1,10 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { Puzzle } from '../src/game.js';
 import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import { type CardPlayer, mergePlayer, renderRoster, shouldRepost } from './_card.js';
 import { fetchDiscordUser, fetchUserGuildIds } from './_discord.js';
+import { cardPayload, sendCard, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
-import { PLAY_CUSTOM_ID } from './_recap.js';
 
 // Registers a player on the room's "who's playing today" card when they open the
 // Activity. Identity is resolved from the Discord token (not the body), and a guild
@@ -13,33 +14,9 @@ import { PLAY_CUSTOM_ID } from './_recap.js';
 // posted/edited on the room's incoming webhook (the one /api/discord-callback stored),
 // so there's no bot in the guild. A fresh card is posted at most once per cooldown
 // (earlier ones stay as a timeline of who was playing when); rapid joins between bumps
-// edit the latest card in place. Best-effort: any failure just means no card.
-
-// Send the card as a multipart message (image attachment). method = POST to create,
-// PATCH to edit an existing message. Returns the raw Response.
-async function sendCard(url: string, payload: object, png: Buffer, method: 'POST' | 'PATCH'): Promise<Response> {
-  const form = new FormData();
-  form.append('payload_json', JSON.stringify(payload));
-  form.append('files[0]', new Blob([new Uint8Array(png)], { type: 'image/png' }), 'card.png');
-  return fetch(url, { method, body: form });
-}
-
-function cardPayload(count: number, puzzleNo?: number): object {
-  return {
-    embeds: [
-      {
-        title: `Connections${puzzleNo ? ` #${puzzleNo}` : ''}`,
-        description: `${count} ${count === 1 ? 'player' : 'players'} playing today`,
-        image: { url: 'attachment://card.png' },
-        color: 0x5865f2,
-      },
-    ],
-    components: [
-      { type: 1, components: [{ type: 2, style: 1, label: 'Play today', custom_id: PLAY_CUSTOM_ID }] },
-    ],
-    attachments: [{ id: 0, filename: 'card.png' }],
-  };
-}
+// edit the latest card in place. Each tile shows the player's live guess grid, kept
+// current by /api/refresh-card as they play. Best-effort: any failure just means no
+// card.
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
@@ -112,15 +89,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       avatar: user.avatar ?? null,
     });
 
-    let puzzleNo: number | undefined;
+    let puzzle: Puzzle | null = null;
     try {
-      puzzleNo = (await fetchPuzzle(date)).id;
+      puzzle = await fetchPuzzle(date);
     } catch {
-      /* title falls back to no number */
+      /* title falls back to no number; grids render blank */
     }
 
-    const png = await renderRoster(players, { puzzleNo });
-    const payload = cardPayload(players.length, puzzleNo);
+    // Replay each player's committed guesses into their grid (blank without a puzzle).
+    const renderPlayers = puzzle ? await withGrids(db, puzzle, date, players) : players;
+    const png = await renderRoster(renderPlayers, { puzzleNo: puzzle?.id });
+    const payload = cardPayload();
 
     // The webhook token is in the URL, so no auth header. with_components renders the
     // Play button on the (app-owned) webhook message.
@@ -162,6 +141,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       }
     }
 
+    const now = new Date().toISOString();
     await db.from('live_cards').upsert(
       {
         scope_id: scope,
@@ -169,7 +149,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         players,
         message_id: messageId,
         posted_at: postedAt,
-        updated_at: new Date().toISOString(),
+        edited_at: now, // anchors the live-edit throttle in /api/refresh-card
+        updated_at: now,
       },
       { onConflict: 'scope_id,puzzle_date' },
     );

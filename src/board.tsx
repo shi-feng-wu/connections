@@ -1,6 +1,6 @@
-import { Check, Eraser, Shuffle as ShuffleIcon } from "lucide-react";
+import { Eraser, Shuffle as ShuffleIcon, Trophy } from "lucide-react";
 import {
-  useEffect,
+  useLayoutEffect,
   useReducer,
   useRef,
   useState,
@@ -9,7 +9,6 @@ import {
 import { flushSync } from "react-dom";
 import { Game, LEVELS, MAX_MISTAKES, shuffle, type Group } from "./game";
 import { HoverButton } from "./hoverbutton";
-import { Leaderboard, type Standings } from "./season";
 
 // Playable board + solve animations (correct: pop, FLIP gather, morph to bar;
 // wrong: shake, spend a dot; end: fade controls, reveal missed groups on loss).
@@ -19,56 +18,90 @@ import { Leaderboard, type Standings } from "./season";
 const wait = (ms: number): Promise<void> =>
   new Promise((r) => setTimeout(r, ms));
 
-// Time until next daily puzzle (local midnight), HH:MM:SS.
-function nextMidnight(): string {
-  const now = new Date();
-  const next = new Date(now);
-  next.setHours(24, 0, 0, 0);
-  const s = Math.max(0, Math.floor((next.getTime() - now.getTime()) / 1000));
-  const h = String(Math.floor(s / 3600)).padStart(2, "0");
-  const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
-  const sec = String(s % 60).padStart(2, "0");
-  return `${h}:${m}:${sec}`;
-}
-
-// End-screen footer countdown; the daily doesn't replay. Inline, so it sits on the
-// "Next puzzle in" line where the mistakes dots used to be.
-function Countdown() {
-  const [t, setT] = useState(nextMidnight);
-  useEffect(() => {
-    const id = setInterval(() => setT(nextMidnight()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  return (
-    <span className="font-bold tabular-nums tracking-[0.03em] text-zinc-100">{t}</span>
-  );
-}
+// Final solve time, MM:SS, for the end-screen score summary.
+const fmtClock = (ms: number | null): string => {
+  const s = Math.max(1, Math.round((ms ?? 0) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
 
 const TILE =
-  "relative h-[var(--tile-h)] min-w-0 break-words rounded-lg font-extrabold uppercase tracking-[0.01em] text-[clamp(9px,3vw,17px)] leading-none px-1 text-center flex items-center justify-center cursor-pointer select-none transition duration-150 ease-out";
-// Hover lift rides on JS pointer events (mouse-only), NOT CSS :hover — a tap on a
-// touch/hybrid device sets :hover and never clears it, which would strand the tile
-// lifted. Driving it from pointerenter/leave filtered to pointerType==="mouse"
-// means touch gets only the press-pop, never a sticky lift. Press feedback is the
-// WAAPI scale in onTileClick, so the press still works for both touch and mouse.
-const TILE_LIFT = " z-10 -translate-y-[1px] scale-[1.03]";
-// palette is [selected][hovered]; exactly one bg utility applies per state so no
-// two background utilities ever collide.
+  "relative h-[var(--tile-h)] min-w-0 rounded-lg font-extrabold uppercase tracking-[0.01em] leading-none px-1.5 flex items-center justify-center cursor-pointer select-none transition duration-150 ease-out";
+// Ideal/ceiling word size (responsive); FitText only shrinks below this to fit.
+const TILE_TEXT = "block w-full text-center text-[clamp(9px,3vw,17px)]";
+
+// Tile word, auto-fitted to the tile like NYT Connections: short words render at the
+// responsive ceiling; a word that would touch the edges has its font scaled down
+// (never the tile padding) until it fits the content box — measured, not guessed, so
+// it holds at any tile width. Multi-word entries wrap at spaces first; a single token
+// that still won't fit at the floor breaks as an absolute last resort so nothing spills.
+function FitText({ text }: { text: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const box = el?.parentElement;
+    if (!el || !box) return;
+    const FLOOR = 6;
+    const fit = (): void => {
+      el.style.fontSize = "";
+      el.style.overflowWrap = "normal";
+      const cs = getComputedStyle(box);
+      const availH =
+        box.clientHeight -
+        parseFloat(cs.paddingTop) -
+        parseFloat(cs.paddingBottom);
+      const fits = (): boolean =>
+        el.scrollWidth <= el.clientWidth + 0.5 &&
+        el.scrollHeight <= availH + 0.5;
+      if (el.clientWidth <= 0 || fits()) return; // fits at the ceiling → keep it
+      let lo = FLOOR;
+      let hi = parseFloat(getComputedStyle(el).fontSize); // the resolved ceiling
+      let best = FLOOR;
+      for (let i = 0; i < 9; i++) {
+        const mid = (lo + hi) / 2;
+        el.style.fontSize = mid + "px";
+        if (fits()) {
+          best = mid;
+          lo = mid;
+        } else hi = mid;
+      }
+      el.style.fontSize = best + "px";
+      if (!fits()) el.style.overflowWrap = "anywhere";
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(box);
+    let live = true;
+    // the bold sans webfont can swap in after first paint and change metrics
+    void document.fonts?.ready.then(() => live && fit()).catch(() => {});
+    return () => {
+      live = false;
+      ro.disconnect();
+    };
+  }, [text]);
+  return (
+    <span ref={ref} className={TILE_TEXT}>
+      {text}
+    </span>
+  );
+}
+// Hover is a subtle opacity dim (per the redesign — no lift/scale), and it rides on
+// JS pointer events (mouse-only), NOT CSS :hover — a tap on a touch/hybrid device
+// sets :hover and never clears it, which would strand the tile dimmed. Driving it
+// from pointerenter/leave filtered to pointerType==="mouse" means touch gets only
+// the press-pop, never a sticky hover. Press feedback is the WAAPI scale in
+// onTileClick, so the press still works for both touch and mouse.
+const TILE_HOVER = " opacity-90";
 const TILE_DEFAULT = " bg-[#efefe6] text-[#121212] active:bg-[#e3e3d9]";
-const TILE_DEFAULT_HOVER = " bg-[#f5f5ee] text-[#121212] active:bg-[#e3e3d9]";
 const TILE_SELECTED = " bg-[#5a594e] text-white";
-const TILE_SELECTED_HOVER = " bg-[#66645a] text-white";
-// cursor-pointer (default cursor when disabled). The hover lift/scale is the
-// *_HOVER fragment, applied mouse-only via <HoverButton> — CSS :hover sticks after
-// a tap on touch/hybrid (Discord Activity). :active press feedback stays here since
-// :active clears reliably on touchend. (Same reasoning as TILE_LIFT above.)
-const BTN =
-  "inline-flex items-center justify-center cursor-pointer rounded-full px-5 py-2.5 border border-zinc-600 text-zinc-100 font-semibold text-sm transition duration-150 ease-out active:translate-y-0 active:scale-100 active:bg-zinc-800 disabled:opacity-40 disabled:cursor-default";
-const BTN_HOVER = "bg-zinc-800 -translate-y-[1px] scale-[1.02]";
+// Pill buttons. Hover is opacity-only (mouse-only via <HoverButton>, since CSS
+// :hover sticks after a tap on touch/hybrid Discord). :active press feedback stays
+// in className since :active clears reliably on touchend.
+const BTN_ICON =
+  "inline-flex h-[42px] w-[42px] flex-none items-center justify-center cursor-pointer rounded-full border border-zinc-600 text-zinc-100 transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
 const BTN_PRIMARY =
-  "inline-flex items-center justify-center cursor-pointer rounded-full px-5 py-2.5 border border-zinc-100 bg-zinc-100 text-zinc-900 font-semibold text-sm transition duration-150 ease-out active:translate-y-0 active:scale-100 active:bg-zinc-200 disabled:opacity-40 disabled:cursor-default";
-const BTN_PRIMARY_HOVER =
-  "-translate-y-[1px] scale-[1.02] shadow-[0_6px_18px_-8px_rgba(244,244,245,0.55)]";
+  "inline-flex h-[42px] items-center justify-center cursor-pointer rounded-full px-5.5 border border-zinc-100 bg-zinc-100 text-zinc-900 font-semibold text-sm transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
+const BTN_ICON_PRIMARY =
+  "inline-flex h-[42px] w-[42px] flex-none items-center justify-center cursor-pointer rounded-full border border-zinc-100 bg-zinc-100 text-zinc-900 transition-opacity duration-150 ease-out active:scale-[0.97]";
 
 const SPRING = "cubic-bezier(.34,1.56,.64,1)";
 const GLIDE = "cubic-bezier(.22,.61,.36,1)";
@@ -86,11 +119,8 @@ export function Board({
   onCommit,
   onFinish,
   onFeedback,
-  season,
-  allTime,
-  selfId,
-  selfName,
-  selfAvatar,
+  onShowSeason,
+  hasSeason,
   initialRevealed = [],
 }: {
   game: Game;
@@ -101,14 +131,12 @@ export function Board({
   onCommit?: (guess: string[]) => Promise<boolean>;
   onFinish: () => void;
   // transient guess feedback ("One away…", "Already guessed"), surfaced as text
-  // in the header score slot.
+  // in the header date slot.
   onFeedback: (msg: string) => void;
-  // end-screen leaderboard; empty in standalone play or before today's score posts.
-  season: Standings;
-  allTime: Standings;
-  selfId: string;
-  selfName: string;
-  selfAvatar?: string;
+  // open the season leaderboard modal (end-screen trophy). No-op possible.
+  onShowSeason: () => void;
+  // whether the room has any scored rows yet — gates the trophy.
+  hasSeason: boolean;
   // seeds revealed-on-loss bars when rehydrating a finished game (preview harness).
   initialRevealed?: number[];
 }) {
@@ -121,10 +149,8 @@ export function Board({
   const shownMistakes = useRef<number>(game.mistakesLeft);
   const ended = useRef<boolean>(game.status !== "playing");
   const busy = useRef<boolean>(false);
-  // word under the mouse, for the hover lift (mouse-only — see TILE_LIFT).
+  // word under the mouse, for the hover dim (mouse-only — see TILE_HOVER).
   const [hover, setHover] = useState<string | null>(null);
-  // end screen only: the leaderboard takes over the board area, toggled from the footer.
-  const [showLeaderboard, setShowLeaderboard] = useState(false);
 
   const [, bump] = useReducer((n: number) => n + 1, 0);
   const rerender = () => bump();
@@ -392,7 +418,7 @@ export function Board({
         await wait(90);
       }
     }
-    // await the webfont; the Fraunces headline would reflow mid-swap otherwise.
+    // await the webfont; the Newsreader score would reflow mid-swap otherwise.
     if (document.fonts?.ready) {
       try {
         await document.fonts.ready;
@@ -480,15 +506,9 @@ export function Board({
   const showGrid = !ended.current && remaining.current.length > 0;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-2" ref={boardRef}>
-        <div
-          className={
-            "flex flex-col gap-2" +
-            (ended.current && showLeaderboard ? " hidden" : "")
-          }
-          ref={solvedRef}
-        >
+        <div className="flex flex-col gap-2" ref={solvedRef}>
           {solvedLevels.current.map((lvl) => {
             const g = group(lvl);
             const revealed = revealedLevels.current.includes(lvl);
@@ -518,20 +538,14 @@ export function Board({
             {remaining.current.map((w) => {
               const sel = selected.current.has(w);
               const lifted = hover === w;
-              const palette = sel
-                ? lifted
-                  ? TILE_SELECTED_HOVER
-                  : TILE_SELECTED
-                : lifted
-                  ? TILE_DEFAULT_HOVER
-                  : TILE_DEFAULT;
+              const palette = sel ? TILE_SELECTED : TILE_DEFAULT;
               return (
                 <button
                   key={w}
                   data-flip={w}
-                  className={TILE + palette + (lifted ? TILE_LIFT : "")}
+                  className={TILE + palette + (lifted ? TILE_HOVER : "")}
                   onClick={(e) => onTileClick(e, w)}
-                  // mouse-only so a touch tap never strands the tile lifted
+                  // mouse-only so a touch tap never strands the tile dimmed
                   onPointerEnter={(e) => {
                     if (e.pointerType === "mouse") setHover(w);
                   }}
@@ -540,27 +554,10 @@ export function Board({
                       setHover((h) => (h === w ? null : h));
                   }}
                 >
-                  {w}
+                  <FitText text={w} />
                 </button>
               );
             })}
-          </div>
-        )}
-        {ended.current && showLeaderboard && (
-          // Leaderboard takes over the board area at its exact footprint (4 solved
-          // bars + their 3 gaps), scrolling internally so the end screen never grows.
-          <div
-            className="animate-fade-in overflow-hidden"
-            style={{ height: "calc(var(--tile-h) * 4 + 1.5rem)" }}
-          >
-            <Leaderboard
-              fill
-              season={season}
-              allTime={allTime}
-              selfId={selfId}
-              name={selfName}
-              avatar={selfAvatar}
-            />
           </div>
         )}
       </div>
@@ -571,11 +568,17 @@ export function Board({
     </div>
   );
 
+  // Playing footer — one compact row: mistakes dots pinned left, controls right.
+  // Shuffle/Deselect collapse to icons; their labels stay in the DOM (sr-only) so
+  // accessible names and the preview driver's text lookup still resolve.
   function renderControls() {
     return (
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-center gap-2 text-sm text-zinc-400">
-          Mistakes remaining:
+      <div className="flex items-center gap-3">
+        <span
+          className="inline-flex flex-none items-center gap-1.75"
+          aria-label="Mistakes remaining"
+          title="Mistakes remaining"
+        >
           {Array.from({ length: MAX_MISTAKES }, (_, i) => (
             <span
               key={i}
@@ -586,92 +589,101 @@ export function Board({
               }
             />
           ))}
-        </div>
-        {/* @container: when the row gets too narrow for all three labels (it would
-            wrap to two lines, ~below 340px), each button collapses to its icon so
-            they stay on one line. The label <span>s remain in the DOM (display:none),
-            so accessible names and the preview driver's text lookup still work. */}
-        <div className="@container flex flex-wrap justify-center gap-2">
+        </span>
+        <div className="ml-auto flex items-center gap-2">
           <HoverButton
-            className={BTN}
-            hover={BTN_HOVER}
+            className={BTN_ICON}
+            hover="opacity-80"
             onClick={doShuffle}
             aria-label="Shuffle"
             title="Shuffle"
           >
-            <ShuffleIcon
-              className="@min-[340px]:hidden"
-              size={18}
-              strokeWidth={2.5}
-              aria-hidden
-            />
-            <span className="hidden @min-[340px]:inline">Shuffle</span>
+            <ShuffleIcon size={18} strokeWidth={2.5} aria-hidden />
+            <span className="sr-only">Shuffle</span>
           </HoverButton>
           <HoverButton
-            className={BTN}
-            hover={BTN_HOVER}
+            className={BTN_ICON}
+            hover="opacity-80"
             onClick={clearSelection}
             disabled={selected.current.size === 0}
             aria-label="Deselect all"
             title="Deselect all"
           >
-            <Eraser
-              className="@min-[340px]:hidden"
-              size={18}
-              strokeWidth={2.5}
-              aria-hidden
-            />
-            <span className="hidden @min-[340px]:inline">Deselect all</span>
+            <Eraser size={18} strokeWidth={2.5} aria-hidden />
+            <span className="sr-only">Deselect all</span>
           </HoverButton>
           <HoverButton
             className={BTN_PRIMARY}
-            hover={BTN_PRIMARY_HOVER}
+            hover="opacity-85"
             onClick={() => void submit()}
             disabled={selected.current.size !== 4}
             aria-label="Submit"
             title="Submit"
           >
-            <Check
-              className="@min-[340px]:hidden"
-              size={18}
-              strokeWidth={2.75}
-              aria-hidden
-            />
-            <span className="hidden @min-[340px]:inline">Submit</span>
+            Submit
           </HoverButton>
         </div>
       </div>
     );
   }
 
-  // End-screen footer: takes the slot the mistakes row + action buttons held during
-  // play. The next-puzzle countdown sits where the dots were; a "View leaderboard"
-  // button (where Submit was) swaps the board area for the leaderboard and toggles
-  // back. Keeping it the same footprint keeps the whole end screen on one page.
+  // End-screen footer — replaces the controls with the score summary at the same
+  // footprint: mistakes dots pinned left (same spot as in play), the solve time and
+  // groups centered, and the score (right-aligned, serif) with an optional trophy
+  // that opens the season leaderboard.
   function renderBelowEnd() {
-    // leaderboard only when the room has scored rows.
-    const hasBoard = season.board.length > 0 || allTime.board.length > 0;
-
+    const won = game.status === "won";
+    const perfect = won && game.mistakesLeft === MAX_MISTAKES;
+    const label = perfect ? "Perfect" : won ? "Solved" : "Out of guesses";
     return (
-      <div className="flex flex-col gap-4">
-        {/* daily doesn't replay; count down to the next. */}
-        <div className="flex items-center justify-center gap-2 text-sm text-zinc-400">
-          <span className="text-[10px] uppercase tracking-[0.15em] text-zinc-500">
-            Next puzzle in
-          </span>
-          <Countdown />
-        </div>
-        {hasBoard && (
-          <div className="flex justify-center">
-            <HoverButton
-              className={BTN}
-              hover={BTN_HOVER}
-              onClick={() => setShowLeaderboard((v) => !v)}
-            >
-              {showLeaderboard ? "Back to puzzle" : "View leaderboard"}
-            </HoverButton>
+      <div className="flex items-center gap-3">
+        <span
+          className="inline-flex flex-none items-center gap-1.75"
+          aria-label="Mistakes remaining"
+        >
+          {Array.from({ length: MAX_MISTAKES }, (_, i) => (
+            <span
+              key={i}
+              className={
+                "inline-block h-3.5 w-3.5 rounded-full " +
+                (i < game.mistakesLeft ? "bg-zinc-300" : "bg-zinc-700")
+              }
+            />
+          ))}
+        </span>
+        <div className="flex flex-1 justify-center">
+          <div className="flex items-center gap-1.75 text-[13px] tabular-nums text-zinc-400">
+            <span>{fmtClock(game.durationMs)}</span>
+            <span className="text-zinc-700">·</span>
+            <span>{game.groupsSolved}/4</span>
           </div>
-        )}
+        </div>
+        <div className="flex flex-none items-center gap-3.5">
+          <div className="flex flex-col items-end gap-0.75">
+            <span
+              className={
+                "text-[10px] font-semibold uppercase tracking-[0.16em] " +
+                (won ? "text-emerald-400" : "text-zinc-400")
+              }
+            >
+              {label}
+            </span>
+            <span className="font-display text-[26px] font-bold leading-none tracking-[-0.02em] text-[#efefe6]">
+              +{game.score.toLocaleString()}
+            </span>
+          </div>
+          {hasSeason && (
+            <HoverButton
+              className={BTN_ICON_PRIMARY}
+              hover="opacity-85"
+              onClick={onShowSeason}
+              aria-label="Season standings"
+              title="Season standings"
+            >
+              <Trophy size={18} strokeWidth={2.25} aria-hidden />
+            </HoverButton>
+          )}
+        </div>
       </div>
     );
   }

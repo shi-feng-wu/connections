@@ -52,19 +52,12 @@ describe("routeInteraction", () => {
     expect(r.type).not.toBe(12);
   });
 
-  it("defers the typed /connections command so the card can fill the response", () => {
-    // CHAT_INPUT (data.type 1, or absent) defers — the card is filled into @original after.
-    expect(routeInteraction({ type: 2, data: { name: "connections", type: 1 } })).toEqual({ type: 5 });
+  it("launches the Activity for the /connections slash command", () => {
+    expect(routeInteraction({ type: 2, data: { name: "connections" } })).toEqual({ type: 12 });
   });
 
-  it("launches the Activity for the App-Launcher Entry Point command", () => {
-    // PRIMARY_ENTRY_POINT (data.type 4) can't carry a message response, so it launches.
-    expect(routeInteraction({ type: 2, data: { name: "connections", type: 4 } })).toEqual({ type: 12 });
-  });
-
-  it("does not defer or launch for an unknown slash command", () => {
+  it("does not launch for an unknown slash command", () => {
     const r = routeInteraction({ type: 2, data: { name: "nope" } }) as { type: number };
     expect(r.type).not.toBe(12);
-    expect(r.type).not.toBe(5);
   });
 });

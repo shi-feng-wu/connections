@@ -11,7 +11,9 @@ import { PLAY_CUSTOM_ID } from './_recap.js';
 // Throttle live edits so a flurry of guesses can't spam the webhook. A refresh inside
 // this window is dropped (the next event carries the latest state from the DB); a
 // player who just finished bypasses it so the final grid always lands.
-export const CARD_EDIT_THROTTLE_MS = 2500;
+// TEMP (testing): set to 0 so every guess edits the card immediately. Restore to 2500
+// when done testing.
+export const CARD_EDIT_THROTTLE_MS = 0;
 
 // Attach each player's current Connections grid by replaying their committed guesses.
 // One query for the whole roster; players who haven't guessed get an empty grid.

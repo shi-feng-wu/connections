@@ -152,10 +152,15 @@ body {
 }
 
 :root {
-  /* Board tile + solved-bar + skeleton height. Full size on tall viewports; shrinks
-     on short ones so the playing board always fits its Discord iframe without
-     scrolling. Capped at 80px (≈ 667px tall and up keeps the original look). */
-  --tile-h: clamp(52px, 11.5vh, 80px);
+  /* Board tile + solved-bar + skeleton height. The board is always 4 rows, so keep
+     tiles at the full 80px and only shrink once the viewport is genuinely too short
+     to fit those 4 rows + the surrounding chrome (Discord's wide-but-short desktop
+     case) — then scale down with the viewport. The reserve is the non-board vertical
+     space (container padding + footer + the inter-row gaps), so the fixed→scaling
+     crossover lands where the board would actually start to clip (~460px tall),
+     instead of early. Below ~350px it bottoms out at 52px. dvh matches the
+     min-h-dvh container and tracks mobile browser chrome. */
+  --tile-h: clamp(52px, calc((100dvh - 140px) / 4), 80px);
 }
 
 /* Discord activity iframe can be narrow; never scroll sideways. */

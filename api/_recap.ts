@@ -48,6 +48,7 @@ export function toRecapData(opts: {
   results: DayRow[];
   season: SeasonRow[];
   streak?: number | null;
+  longest?: number | null;
   winRate?: number | null;
 }): RecapData {
   return {
@@ -55,6 +56,7 @@ export function toRecapData(opts: {
     puzzleDate: opts.puzzleDate,
     season: monthOf(opts.puzzleDate),
     streak: opts.streak ?? null,
+    longest: opts.longest ?? null,
     winRate: opts.winRate ?? null,
     results: opts.results.map((r) => ({
       id: r.user_id,
@@ -76,75 +78,15 @@ export function toRecapData(opts: {
   };
 }
 
-// Fire-emoji intensity for the streak headline — more days, more flames (capped at 3).
-function streakFlames(streak: number): string {
-  const n = streak >= 100 ? 3 : streak >= 30 ? 2 : 1;
-  return '🔥'.repeat(n);
-}
-
-// The label for one result group, Wordle-style: solvers are grouped by their mistake
-// count (0 reads as a clean "Perfect"); non-solvers land under "X" (see recapText).
-function resultLabel(mistakes: number): string {
-  if (mistakes <= 0) return 'Perfect';
-  return `${mistakes} mistake${mistakes === 1 ? '' : 's'}`;
-}
-
-// A Discord user mention; the recap pings each finisher, like the Wordle bot's summary.
-function mention(r: DayRow): string {
-  return `<@${r.user_id}>`;
-}
-
-// "N day"/"N days".
-function days(n: number): string {
-  return `${n} day${n === 1 ? '' : 's'}`;
-}
-
-// Wordle-style text body posted above the recap PNG: a headline (current group streak, the
-// all-time longest streak, and a 🏆 when the current run ties the record) followed by
-// yesterday's finishers grouped by result — solvers best-first (fewest mistakes, crown on
-// the top group), non-solvers under "X" — each player @mentioned. Mirrors the Wordle bot's
-// daily recap. Assembled under Discord's 2000-char message limit; overflow groups are
-// dropped rather than truncated mid-mention.
-export function recapText(opts: { streak: number | null; longest?: number | null; results: DayRow[] }): string {
+// The text body posted above the recap PNG (the PNG carries the per-player results and the
+// streak stats). One line: a bold streak clause naming the room's current solve streak
+// (with a 🔥), then the results intro; the longest streak lives in the graphic's stat
+// cluster, not here. No @mentions — the card lists who played.
+export function recapText(opts: { streak: number | null }): string {
   const streak = opts.streak ?? 0;
-  const longest = opts.longest ?? 0; // longest >= streak always (the current run is one island)
-
-  // Headline: the current streak (with a 🏆 when it's the room's best ever), then the
-  // record on its own when a past run beat the current one.
-  const headline: string[] = [];
-  if (streak >= 1) {
-    const record = longest >= 1 && streak >= longest;
-    headline.push(`Your group is on a ${streak} day streak! ${streakFlames(streak)}${record ? ' 🏆' : ''}`);
-  }
-  if (longest >= 1 && longest > streak) headline.push(`Longest streak: ${days(longest)}.`);
-  headline.push("Here are yesterday's results:");
-  const head = headline.join(' ');
-
-  // Group solvers by mistakes (ascending key = best first); collect non-solvers for "X".
-  const byMistakes = new Map<number, DayRow[]>();
-  const losers: DayRow[] = [];
-  for (const r of opts.results) {
-    if (!r.solved) {
-      losers.push(r);
-      continue;
-    }
-    const list = byMistakes.get(r.mistakes) ?? [];
-    list.push(r);
-    byMistakes.set(r.mistakes, list);
-  }
-
-  const groups: string[] = [...byMistakes.keys()]
-    .sort((a, b) => a - b)
-    .map((m, i) => `${i === 0 ? '👑 ' : ''}${resultLabel(m)}: ${byMistakes.get(m)!.map(mention).join(' ')}`);
-  if (losers.length) groups.push(`X: ${losers.map(mention).join(' ')}`);
-
-  // Stay under Discord's 2000-char limit by dropping trailing groups that don't fit.
-  let text = head;
-  for (const line of groups) {
-    if (text.length + 1 + line.length > 1990) break;
-    text += `\n${line}`;
-  }
-  return text;
+  const tail = "Here are yesterday's results:";
+  if (streak < 1) return tail;
+  return `**Your group is on a ${streak} day streak! 🔥** ${tail}`;
 }
 
 // The Discord message: the rendered recap PNG plus the Play button, with an optional

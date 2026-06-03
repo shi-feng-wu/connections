@@ -556,6 +556,7 @@ export type RecapData = {
   puzzleDate?: string; // "2026-05-30" → "May 30"
   season?: string; // standings window label, e.g. "May"
   streak?: number | null; // room win streak in days (null hides the stat)
+  longest?: number | null; // room's all-time longest win streak in days (null hides the stat)
   winRate?: number | null; // room season solve rate %, 0–100 (null hides the stat)
   results: RecapResult[];
   standings: RecapStanding[];
@@ -786,12 +787,15 @@ function recapSubline(data: RecapData): string {
   return parts.join(" · ");
 }
 
-// Recap header stats: win streak (emerald) then win rate, each shown only when known
-// (null hides it). Left-to-right order; drawStatCluster anchors them to the right edge.
+// Recap header stats: win streak (emerald), longest streak, then win rate, each shown only
+// when known (null hides it). Left-to-right order; drawStatCluster anchors them to the
+// right edge.
 function recapStats(data: RecapData): BrandStat[] {
   const stats: BrandStat[] = [];
   if (data.streak != null)
     stats.push({ num: String(data.streak), unit: "d", label: "WIN STREAK", accent: true });
+  if (data.longest != null)
+    stats.push({ num: String(data.longest), unit: "d", label: "LONGEST", accent: false });
   if (data.winRate != null)
     stats.push({ num: String(data.winRate), unit: "%", label: "WIN RATE", accent: false });
   return stats;

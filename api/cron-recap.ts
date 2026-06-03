@@ -113,8 +113,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       ]);
       const stat = ((stats ?? []) as { streak: number; win_pct: number; max_streak: number }[])[0];
       const dayRows = (results ?? []) as DayRow[];
-      // Wordle-style text body (streak headline + @mentioned finishers) above the PNG.
-      const text = recapText({ streak: stat?.streak ?? null, longest: stat?.max_streak ?? null, results: dayRows });
+      // Text body is just the streak headline; the longest streak rides in the PNG's stats.
+      const text = recapText({ streak: stat?.streak ?? null });
       const png = await renderRecap(
         toRecapData({
           puzzleDate: date,
@@ -122,6 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
           results: dayRows,
           season: (season ?? []) as SeasonRow[],
           streak: stat?.streak ?? null,
+          longest: stat?.max_streak ?? null,
           winRate: stat?.win_pct ?? null,
         }),
       );

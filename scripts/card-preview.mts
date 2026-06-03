@@ -32,6 +32,7 @@ const RECAP: RecapData = {
   puzzleDate: '2026-05-30',
   season: 'May',
   streak: 12,
+  longest: 21,
   winRate: 84,
   results: [
     { id: 'p-noa', name: 'Noa Friedman', solved: true, score: 96, mistakes: 0, sec: 102 },

@@ -82,9 +82,27 @@ const rows: Row[] = [
   { puzzle_id: 1091, puzzle_date: PUZZLE_DATE, scope_id: scope, user_id: 'fake_bob', name: 'Bob', avatar: null, score: 80, mistakes: 1, solved: true, groups_solved: 4, duration_ms: 88_000 },
   { puzzle_id: 1091, puzzle_date: PUZZLE_DATE, scope_id: scope, user_id: 'fake_carol', name: 'Carol', avatar: null, score: 72, mistakes: 2, solved: true, groups_solved: 4, duration_ms: 153_000 },
   { puzzle_id: 1091, puzzle_date: PUZZLE_DATE, scope_id: scope, user_id: 'fake_dave', name: 'Dave', avatar: null, score: 30, mistakes: 4, solved: false, groups_solved: 2, duration_ms: null },
-  // PREV_DATE — builds a 2-day room streak + fuller June season standings.
+  // PREV_DATE — with PUZZLE_DATE this is the *current* 2-day room streak + fuller June
+  // season standings.
   { puzzle_id: 1090, puzzle_date: PREV_DATE, scope_id: scope, user_id: 'fake_alice', name: 'Alice', avatar: null, score: 90, mistakes: 0, solved: true, groups_solved: 4, duration_ms: 60_000 },
   { puzzle_id: 1090, puzzle_date: PREV_DATE, scope_id: scope, user_id: 'fake_bob', name: 'Bob', avatar: null, score: 70, mistakes: 2, solved: true, groups_solved: 4, duration_ms: 110_000 },
+  // A longer past run (May 20–24, all solved) then a gap before June — so the room's
+  // *longest* streak is 5 while the current is 2, which makes the "(longest: 5 days)"
+  // headline appear. These May rows predate the June season window, so they don't touch
+  // the standings.
+  ...['2026-05-20', '2026-05-21', '2026-05-22', '2026-05-23', '2026-05-24'].map((d, i) => ({
+    puzzle_id: 1078 + i,
+    puzzle_date: d,
+    scope_id: scope,
+    user_id: 'fake_alice',
+    name: 'Alice',
+    avatar: null,
+    score: 90,
+    mistakes: 0,
+    solved: true,
+    groups_solved: 4,
+    duration_ms: 60_000,
+  })),
 ];
 
 // Idempotent: clear any prior fake rows for this scope, then insert fresh.

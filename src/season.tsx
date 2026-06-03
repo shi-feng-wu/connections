@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
 import { Flame, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { HoverButton } from "./hoverbutton";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import { colorFor, initials } from "./roster";
-import { HoverButton } from "./hoverbutton";
 
 // End-screen room leaderboard: two tabs ("This season" = the month, "All-time")
 // over the same scores rows, differing only by window. Dense table per tab
@@ -46,11 +46,22 @@ function LeaderAvatar({
 
 // Streak as a flame + count. Cold/zinc at 0, warms and brightens past a week-long run.
 function Streak({ n }: { n: number }) {
-  const flame = n === 0 ? "text-zinc-700" : n >= 7 ? "text-orange-400" : "text-orange-300/70";
+  const flame =
+    n === 0
+      ? "text-zinc-700"
+      : n >= 7
+        ? "text-orange-400"
+        : "text-orange-300/70";
   const num = n === 0 ? "text-zinc-600" : "text-zinc-200";
   return (
     <span className="inline-flex items-center gap-1 font-bold tabular-nums">
-      <Flame className={flame} size={11} fill="currentColor" strokeWidth={0} aria-hidden />
+      <Flame
+        className={flame}
+        size={11}
+        fill="currentColor"
+        strokeWidth={0}
+        aria-hidden
+      />
       <span className={num}>{n}</span>
     </span>
   );
@@ -83,13 +94,25 @@ type LedgerEntry = {
   avg_mistakes: number;
 };
 
-function LedgerRow({ e, you, first }: { e: LedgerEntry; you: boolean; first: boolean }) {
+function LedgerRow({
+  e,
+  you,
+  first,
+}: {
+  e: LedgerEntry;
+  you: boolean;
+  first: boolean;
+}) {
   return (
     <div
       className={
         LGRID +
         " px-2 py-2 " +
-        (you ? "rounded-lg bg-zinc-100/6" : first ? "" : "border-t border-white/[0.045]")
+        (you
+          ? "rounded-lg bg-zinc-100/6"
+          : first
+            ? ""
+            : "border-t border-white/[0.045]")
       }
     >
       {e.rank === 1 ? (
@@ -99,7 +122,9 @@ function LedgerRow({ e, you, first }: { e: LedgerEntry; you: boolean; first: boo
           </span>
         </div>
       ) : (
-        <div className="text-center text-[13px] tabular-nums text-zinc-500">{e.rank}</div>
+        <div className="text-center text-[13px] tabular-nums text-zinc-500">
+          {e.rank}
+        </div>
       )}
       <div className="flex min-w-0 items-center gap-2.5">
         <LeaderAvatar id={e.id} name={e.name} avatar={e.avatar} you={you} />
@@ -118,7 +143,9 @@ function LedgerRow({ e, you, first }: { e: LedgerEntry; you: boolean; first: boo
       <div className="flex justify-end">
         <Streak n={e.streak} />
       </div>
-      <div className="text-right text-[13px] tabular-nums text-zinc-400">{e.plays}</div>
+      <div className="text-right text-[13px] tabular-nums text-zinc-400">
+        {e.plays}
+      </div>
       <div className="text-right text-[13px] text-zinc-400">
         <span className="font-semibold text-zinc-300">{e.win_pct}</span>%
       </div>
@@ -163,7 +190,9 @@ function LedgerBody({
   const { board, self } = data;
   if (!board.length) {
     return (
-      <div className="px-2 py-7 text-center text-[13px] text-zinc-600">No games yet.</div>
+      <div className="px-2 py-7 text-center text-[13px] text-zinc-600">
+        No games yet.
+      </div>
     );
   }
   const q = query.trim().toLowerCase();
@@ -189,7 +218,12 @@ function LedgerBody({
 
   return (
     <>
-      <div className={LGRID + " px-2 pb-2 text-[10px] uppercase tracking-[0.055em] text-zinc-600"}>
+      <div
+        className={
+          LGRID +
+          " px-2 pb-2 text-[10px] uppercase tracking-[0.055em] text-zinc-600"
+        }
+      >
         <span />
         <span className="text-left">Player</span>
         <span className="text-right text-zinc-500">Score</span>
@@ -229,7 +263,8 @@ function LedgerBody({
       {!q && below > 0 && (
         <div className="mt-1 flex items-center justify-between border-t border-dashed border-white/12 px-1.5 pt-2.75 pb-0.5">
           <div className="text-[12.5px] text-zinc-500">
-            + {below.toLocaleString()} {below === 1 ? "player" : "players"} below you
+            + {below.toLocaleString()} {below === 1 ? "player" : "players"}{" "}
+            below you
           </div>
           <div className="flex items-center gap-1 text-[11px] text-zinc-600">
             <X size={10} strokeWidth={2.6} aria-hidden /> = mistakes per game
@@ -278,12 +313,14 @@ export function Leaderboard({
       className={
         (bare
           ? "flex min-h-0 flex-col"
-          : "rounded-lg bg-zinc-900/60 p-3" + (fill ? " flex min-h-0 flex-col" : "")) +
-        (fill ? " h-full" : "")
+          : "rounded-lg bg-zinc-900/60 p-3" +
+            (fill ? " flex min-h-0 flex-col" : "")) + (fill ? " h-full" : "")
       }
     >
       <div className="flex flex-wrap items-center justify-between gap-2 px-1.5 pt-0.5 pb-3">
-        <span className="text-xs uppercase tracking-[0.05em] text-zinc-500">Leaderboard</span>
+        <span className="text-xs uppercase tracking-[0.05em] text-zinc-500">
+          Leaderboard
+        </span>
         <div className="flex items-center gap-2">
           <div className="inline-flex gap-0.5 rounded-full border border-[#26262a] bg-zinc-900 p-0.75">
             {tabs.map(([k, label]) => (

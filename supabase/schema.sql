@@ -346,4 +346,9 @@ create table if not exists public.live_cards (
 -- join after the cooldown bumps a fresh message (and deletes the old) so it resurfaces.
 alter table public.live_cards add column if not exists posted_at timestamptz;
 
+-- edited_at is the last time the card image was written to Discord (post or live
+-- refresh). /api/refresh-card throttles its per-guess edits against it so a flurry of
+-- guesses can't spam the webhook (a just-finished player bypasses the throttle).
+alter table public.live_cards add column if not exists edited_at timestamptz;
+
 alter table public.live_cards enable row level security;

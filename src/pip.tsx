@@ -18,7 +18,7 @@ export function PipThumbnail({
   if (!game) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-black p-[4%]">
-        <div className="font-serif text-[clamp(13px,7vw,30px)] font-bold tracking-tight text-[#efefe6]">
+        <div className="font-display text-[clamp(13px,7vw,30px)] font-bold tracking-tight text-[#efefe6]">
           Connections
         </div>
       </div>
@@ -31,7 +31,7 @@ export function PipThumbnail({
 
   return (
     <div className="flex h-full w-full flex-col gap-[2.5%] bg-black p-[4%]">
-      <div className="font-serif text-[clamp(9px,4.5vw,20px)] font-bold leading-none tracking-tight text-[#efefe6]">
+      <div className="font-display text-[clamp(9px,4.5vw,20px)] font-bold leading-none tracking-tight text-[#efefe6]">
         Connections
       </div>
 

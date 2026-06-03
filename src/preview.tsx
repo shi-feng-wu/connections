@@ -350,9 +350,9 @@ createRoot(document.getElementById("preview")!).render(
     {!onlySim && (
       <section className="w-full max-w-[360px] px-4">
         <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
-          Roster panel · standalone (#seeall opens the overlay)
+          Roster panel · standalone (Live / Leaderboard tabs)
         </div>
-        <Roster players={ROSTER} selfId={SELF_ID} defaultOpen={location.hash === "#seeall"} />
+        <Roster players={ROSTER} selfId={SELF_ID} />
       </section>
     )}
   </div>,

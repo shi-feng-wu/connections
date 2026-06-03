@@ -1,9 +1,15 @@
+/* Fonts first: @import rules must precede all other rules, and Tailwind inlines its
+   own @import into real CSS. Loaded here (not just index.html) so the dev preview
+   harness — which renders preview.html without the index.html <link> — gets them. */
+@import url("https://fonts.googleapis.com/css2?family=Libre+Franklin:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Newsreader:opsz,wght@6..72,600;6..72,700&display=swap");
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Libre Franklin", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-serif: Georgia, "Times New Roman", serif;
-  --font-display: "Fraunces", Georgia, serif;
+  /* Wordmark + score serif. Newsreader is an optical-size editorial serif that
+     stays sturdy at the small (21–26px) sizes the redesign uses. font-display utility. */
+  --font-display: "Newsreader", Georgia, serif;
 
   /* Defining keyframes here exposes them as `animate-*` utilities. */
   --animate-pick-ring: pickRing 1.4s ease-in-out infinite;
@@ -116,6 +122,13 @@
       transform: scale(1.06);
     }
   }
+}
+
+/* Soft fade on the bottom edge of the scrollable players/leaderboard list, so it
+   reads as scrollable while the pinned "Your standing" row below stays crisp. */
+@utility list-fade {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
 }
 
 /* Thin dark scrollbar; Firefox + WebKit pieces can't be inline utilities. */

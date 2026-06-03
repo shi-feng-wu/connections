@@ -1,4 +1,5 @@
 import { createPublicKey, verify as edVerify } from 'node:crypto';
+import { waitUntil } from '@vercel/functions';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { Puzzle } from '../src/game.js';
 import { canonicalScope } from '../src/scope.js';
@@ -116,7 +117,10 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 async function postLaunchCard(body: LaunchInteraction): Promise<void> {
   const appId = body.application_id ?? process.env.VITE_DISCORD_CLIENT_ID ?? '';
   const myToken = body.token ?? '';
-  if (!appId || !myToken) return;
+  if (!appId || !myToken) {
+    console.warn('[postLaunchCard] skip: no appId/token', { hasAppId: !!appId, hasToken: !!myToken });
+    return;
+  }
 
   // The card only makes sense in a guild channel (mirrors /api/join's scope gate).
   const guildId = typeof body.guild_id === 'string' ? body.guild_id : null;
@@ -127,12 +131,18 @@ async function postLaunchCard(body: LaunchInteraction): Promise<void> {
         ? body.channel.id
         : null;
   const scope = canonicalScope(guildId, channelId);
-  if (!scope || !scope.startsWith('g:')) return;
+  if (!scope || !scope.startsWith('g:')) {
+    console.warn('[postLaunchCard] skip: not a guild scope', { guildId, channelId, scope });
+    return;
+  }
 
   // Identity comes from the (Discord-verified) interaction, so no OAuth round-trip:
   // invoking a guild command already proves membership.
   const u = body.member?.user ?? body.user;
-  if (!u?.id) return;
+  if (!u?.id) {
+    console.warn('[postLaunchCard] skip: no user on interaction');
+    return;
+  }
   const player: CardPlayer = {
     id: u.id,
     name: u.global_name ?? u.username ?? 'Player',
@@ -140,15 +150,19 @@ async function postLaunchCard(body: LaunchInteraction): Promise<void> {
   };
 
   const db = admin();
-  if (!db) return;
+  if (!db) {
+    console.warn('[postLaunchCard] skip: no db (admin client unconfigured)');
+    return;
+  }
 
   const date = todayET();
-  const { data: card } = await db
+  const { data: card, error: selErr } = await db
     .from('live_cards')
     .select('players, interaction_token, token_at')
     .eq('scope_id', scope)
     .eq('puzzle_date', date)
     .maybeSingle();
+  if (selErr) console.error('[postLaunchCard] live_cards select error (schema migrated?)', selErr.message);
 
   // renderRoster/mergePlayer pull @napi-rs/canvas; load them lazily so PING and other
   // light interactions don't pay the native-addon cold start.
@@ -172,6 +186,7 @@ async function postLaunchCard(body: LaunchInteraction): Promise<void> {
   const renderPlayers = puzzle ? await withGrids(db, puzzle, date, players) : players;
   const png = await renderRoster(renderPlayers, { puzzleNo: puzzle?.id, puzzleDate: date });
 
+  console.log('[postLaunchCard] editing @original', { scope, establishing: useToken === myToken, players: players.length });
   let r = await sendCard(cardEditUrl(appId, useToken), cardPayload(), png, 'PATCH');
   // The stored card's message was deleted → restart the card on this launch's own response.
   if (!r.ok && r.status === 404 && useToken !== myToken) {
@@ -184,9 +199,12 @@ async function postLaunchCard(body: LaunchInteraction): Promise<void> {
     await sleep(600);
     r = await sendCard(cardEditUrl(appId, useToken), cardPayload(), png, 'PATCH');
   }
+  if (!r.ok) {
+    console.error('[postLaunchCard] @original edit failed', r.status, await r.text().catch(() => ''));
+  }
 
   const nowIso = new Date().toISOString();
-  await db.from('live_cards').upsert(
+  const { error: upErr } = await db.from('live_cards').upsert(
     {
       scope_id: scope,
       puzzle_date: date,
@@ -199,6 +217,7 @@ async function postLaunchCard(body: LaunchInteraction): Promise<void> {
     },
     { onConflict: 'scope_id,puzzle_date' },
   );
+  if (upErr) console.error('[postLaunchCard] live_cards upsert error (schema migrated?)', upErr.message);
 }
 
 async function rawBody(req: VercelRequest): Promise<string> {
@@ -229,15 +248,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  // Reply first so opening the game is never delayed (Discord enforces a 3s deadline);
-  // the function stays alive for the awaited card work below, which is pure best-effort.
+  // Reply first so opening the game is never delayed (Discord enforces a 3s deadline).
   res.status(200).json(routeInteraction(body));
 
+  // Render + fill the launcher's message AFTER replying. waitUntil keeps the function
+  // alive for this work — on Vercel a plain `await` after res.json() can be frozen the
+  // moment the response flushes, so the card would silently never post. Best-effort.
   if (isLaunchCommand(body)) {
-    try {
-      await postLaunchCard(body);
-    } catch {
-      /* the card is best-effort — the launch reply already went out */
-    }
+    waitUntil(
+      postLaunchCard(body).catch((e) => {
+        console.error('[postLaunchCard] threw', e instanceof Error ? e.message : e);
+      }),
+    );
   }
 }

@@ -32,7 +32,10 @@ export type DrawEnv = {
 export type CardOpts = { puzzleNo?: number; puzzleDate?: string };
 
 // ---- palette (lifted from the app: brand.css / game.ts LEVELS / roster.tsx) ----
-const BG = "#09090b"; // zinc-950 — body
+// Card background = Discord's default dark message surface, so the card blends into the
+// channel instead of sitting on a darker rectangle. (Opaque, not transparent, so the
+// light text stays legible regardless of the viewer's Discord theme.)
+const BG = "#1a1a1e"; // Discord default dark background
 const PANEL = "rgba(24,24,27,0.6)"; // zinc-900/60 — composited over BG
 const PANEL_BORDER = "#232327";
 const TITLE = "#efefe6"; // warm off-white wordmark
@@ -362,6 +365,7 @@ export async function drawRoster(
 ): Promise<void> {
   const { shown, cols, panelW, W, height, leader } = layout;
 
+  // Discord-default-dark background, so the card blends into the channel.
   ctx.fillStyle = BG;
   ctx.fillRect(0, 0, W, height);
 
@@ -844,6 +848,7 @@ export async function drawRecap(
 ): Promise<void> {
   const { results, standings, W, height } = layout;
 
+  // Discord-default-dark background (see drawRoster) — blends into the channel.
   ctx.fillStyle = BG;
   ctx.fillRect(0, 0, W, height);
 

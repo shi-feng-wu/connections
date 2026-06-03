@@ -60,8 +60,9 @@ export function LoadingScreen({
 }
 
 // Brand lockup matching the PIP thumbnail header (src/pip.tsx): the brick logo · the
-// "Connections" wordmark · a bordered "No. 642" pill, sitting left, with the date riding
-// the right edge in the title serif. During play the date slot cross-fades to transient
+// "Connections" wordmark, with a serif "No. 642 · date" meta line riding the right edge
+// in the title serif (Newsreader) — number and date one consistent muted line, joined by
+// a middot, exactly as the thumbnail. During play that meta line cross-fades to transient
 // guess feedback ("One away…") and back. Lives above the board on mobile and atop the
 // players rail on desktop (rendered twice, one hidden per breakpoint).
 function Header({
@@ -89,17 +90,25 @@ function Header({
       <span className="font-display text-[23px] font-bold leading-none tracking-[-0.025em] text-[#efefe6] min-[820px]:text-[21px]">
         Connections
       </span>
-      <span className="flex-none whitespace-nowrap rounded-full border border-white/15 px-2 py-[3px] font-sans text-[10px] font-bold uppercase leading-none tracking-[0.06em] tabular-nums text-zinc-400">
-        No. {puzzle.id}
-      </span>
-      <span className="relative ml-auto inline-flex items-center justify-end text-right">
+      {/* serif meta line — "No. 642 · date" — number and date one consistent muted
+          serif line joined by a middot, matching the PIP thumbnail. The whole line
+          cross-fades to transient guess feedback ("One away…") during play. */}
+      <span className="relative ml-auto inline-flex items-baseline justify-end whitespace-nowrap text-right">
         <span
           className={
-            "font-display text-[13px] font-normal whitespace-nowrap text-zinc-500 transition-opacity duration-300 min-[820px]:text-[12px] " +
+            "inline-flex items-baseline gap-1.5 transition-opacity duration-300 " +
             (feedbackOn ? "opacity-0" : "opacity-100")
           }
         >
-          {dateLabel}
+          <span className="font-display text-[13px] font-normal leading-none tabular-nums text-zinc-500 min-[820px]:text-[12px]">
+            No. {puzzle.id}
+          </span>
+          <span className="font-display text-[11px] leading-none text-zinc-700 min-[820px]:text-[10px]">
+            ·
+          </span>
+          <span className="font-display text-[13px] font-normal leading-none tabular-nums text-zinc-500 min-[820px]:text-[12px]">
+            {dateLabel}
+          </span>
         </span>
         <span
           aria-live="polite"

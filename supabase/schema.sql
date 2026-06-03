@@ -300,18 +300,19 @@ $$;
 grant execute on function public.day_results(text, date) to anon, authenticated;
 
 -- Room-level header stats for the daily recap, as of a date: the room's current
--- solve streak (consecutive most-recent days at least one player solved) and its
--- season solve rate (% of played days the room solved) over [p_since, p_date]. A
--- "room day" is solved when any player solved that day; the streak spans all history
--- up to p_date (it can cross the season window), while win_pct is windowed by p_since.
--- Mirrors current_streak's islands trick at the room grain. Backs the recap PNG.
+-- solve streak (consecutive most-recent days at least one player solved), its longest
+-- solve streak ever (max_streak), and its season solve rate (% of played days the room
+-- solved) over [p_since, p_date]. A "room day" is solved when any player solved that day;
+-- both streaks span all history up to p_date (they can cross the season window), while
+-- win_pct is windowed by p_since. Mirrors current_streak's islands trick at the room
+-- grain — max_streak is just the largest island instead of the most-recent. Backs the recap.
 drop function if exists public.room_recap_stats(text, date, date);
 create or replace function public.room_recap_stats(
   p_scope text,
   p_since date default null,
   p_date  date default null
 )
-returns table (streak int, win_pct int)
+returns table (streak int, win_pct int, max_streak int)
 language sql
 stable
 as $$
@@ -346,8 +347,13 @@ as $$
                 else 0 end as pct
     from days
     where (p_since is null or d >= p_since)
+  ),
+  -- longest streak ever (to p_date): the biggest island, not just the most-recent one
+  longest as (
+    select coalesce(max(len), 0) as n
+    from (select count(*)::int as len from grouped group by grp) islands
   )
-  select (select n from streak), (select pct from rate);
+  select (select n from streak), (select pct from rate), (select n from longest);
 $$;
 
 grant execute on function public.room_recap_stats(text, date, date) to anon, authenticated;

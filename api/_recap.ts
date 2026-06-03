@@ -94,17 +94,31 @@ function mention(r: DayRow): string {
   return `<@${r.user_id}>`;
 }
 
-// Wordle-style text body posted above the recap PNG: a group-streak headline followed by
+// "N day"/"N days".
+function days(n: number): string {
+  return `${n} day${n === 1 ? '' : 's'}`;
+}
+
+// Wordle-style text body posted above the recap PNG: a headline (current group streak, the
+// all-time longest streak, and a 🏆 when the current run ties the record) followed by
 // yesterday's finishers grouped by result — solvers best-first (fewest mistakes, crown on
 // the top group), non-solvers under "X" — each player @mentioned. Mirrors the Wordle bot's
 // daily recap. Assembled under Discord's 2000-char message limit; overflow groups are
 // dropped rather than truncated mid-mention.
-export function recapText(opts: { streak: number | null; results: DayRow[] }): string {
+export function recapText(opts: { streak: number | null; longest?: number | null; results: DayRow[] }): string {
   const streak = opts.streak ?? 0;
-  const head =
-    streak >= 1
-      ? `Your group is on a ${streak} day streak! ${streakFlames(streak)} Here are yesterday's results:`
-      : "Here are yesterday's results:";
+  const longest = opts.longest ?? 0; // longest >= streak always (the current run is one island)
+
+  // Headline: the current streak (with a 🏆 when it's the room's best ever), then the
+  // record on its own when a past run beat the current one.
+  const headline: string[] = [];
+  if (streak >= 1) {
+    const record = longest >= 1 && streak >= longest;
+    headline.push(`Your group is on a ${streak} day streak! ${streakFlames(streak)}${record ? ' 🏆' : ''}`);
+  }
+  if (longest >= 1 && longest > streak) headline.push(`Longest streak: ${days(longest)}.`);
+  headline.push("Here are yesterday's results:");
+  const head = headline.join(' ');
 
   // Group solvers by mistakes (ascending key = best first); collect non-solvers for "X".
   const byMistakes = new Map<number, DayRow[]>();

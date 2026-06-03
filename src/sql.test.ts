@@ -188,40 +188,43 @@ const recapStats = async (
   scope: string,
   since: string | null,
   date: string | null,
-): Promise<{ streak: number; win_pct: number }> => {
+): Promise<{ streak: number; win_pct: number; max_streak: number }> => {
   const r = (
-    await db.query<{ streak: number; win_pct: number }>(
+    await db.query<{ streak: number; win_pct: number; max_streak: number }>(
       `select * from public.room_recap_stats($1, $2::date, $3::date)`,
       [scope, since, date],
     )
   ).rows[0];
-  return { streak: Number(r.streak), win_pct: Number(r.win_pct) };
+  return { streak: Number(r.streak), win_pct: Number(r.win_pct), max_streak: Number(r.max_streak) };
 };
 
 describe("room_recap_stats", () => {
   it("counts the room streak (any solver = a room solve-day) and all-time win rate", async () => {
     // g3: 06-01 solved, 06-02 a no-solve day, 06-03..05 solved. As of 06-05 the streak
-    // runs back to the 06-02 break (3 days); 4 of 5 played days had a solver (80%).
-    expect(await recapStats("g3", null, "2026-06-05")).toEqual({ streak: 3, win_pct: 80 });
+    // runs back to the 06-02 break (3 days); 4 of 5 played days had a solver (80%). The
+    // longest island is that same 03–05 run (3), beating the lone 06-01 day.
+    expect(await recapStats("g3", null, "2026-06-05")).toEqual({ streak: 3, win_pct: 80, max_streak: 3 });
   });
 
-  it("windows the win rate by p_since but lets the streak cross it", async () => {
-    // since the 3rd: days 03–05 all solved → 100%, streak still 3.
-    expect(await recapStats("g3", "2026-06-03", "2026-06-05")).toEqual({ streak: 3, win_pct: 100 });
+  it("windows the win rate by p_since but lets both streaks cross it", async () => {
+    // since the 3rd: days 03–05 all solved → 100%, current + longest streak still 3
+    // (max_streak ignores p_since, spanning all history up to p_date).
+    expect(await recapStats("g3", "2026-06-03", "2026-06-05")).toEqual({ streak: 3, win_pct: 100, max_streak: 3 });
   });
 
   it("is a 0 streak when the room's most recent played day had no solver", async () => {
-    // as of the 06-02 no-solve day: streak broken (0), 1 of 2 days solved (50%).
-    expect(await recapStats("g3", null, "2026-06-02")).toEqual({ streak: 0, win_pct: 50 });
+    // as of the 06-02 no-solve day: current streak broken (0), 1 of 2 days solved (50%),
+    // longest-ever is the single 06-01 solve (1).
+    expect(await recapStats("g3", null, "2026-06-02")).toEqual({ streak: 0, win_pct: 50, max_streak: 1 });
   });
 
   it("treats a day with any solver as solved (g1: every day has one) and is scope-isolated", async () => {
     // g1 06-04 has a loss (bob) but alice/carol solved, and 06-05 has a loss (dave) but
-    // alice/bob solved — so all five days are room solve-days: streak 5, 100%.
-    expect(await recapStats("g1", null, "2026-06-05")).toEqual({ streak: 5, win_pct: 100 });
+    // alice/bob solved — so all five days are room solve-days: streak 5, longest 5, 100%.
+    expect(await recapStats("g1", null, "2026-06-05")).toEqual({ streak: 5, win_pct: 100, max_streak: 5 });
   });
 
-  it("is a 0 streak / 0 rate for a room with no rows", async () => {
-    expect(await recapStats("g404", null, "2026-06-05")).toEqual({ streak: 0, win_pct: 0 });
+  it("is a 0 streak / 0 rate / 0 longest for a room with no rows", async () => {
+    expect(await recapStats("g404", null, "2026-06-05")).toEqual({ streak: 0, win_pct: 0, max_streak: 0 });
   });
 });

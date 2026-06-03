@@ -111,10 +111,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         db.rpc('room_board', { p_scope: scope, p_since: since, p_limit: SEASON_LIMIT }),
         db.rpc('room_recap_stats', { p_scope: scope, p_since: since, p_date: date }),
       ]);
-      const stat = ((stats ?? []) as { streak: number; win_pct: number }[])[0];
+      const stat = ((stats ?? []) as { streak: number; win_pct: number; max_streak: number }[])[0];
       const dayRows = (results ?? []) as DayRow[];
       // Wordle-style text body (streak headline + @mentioned finishers) above the PNG.
-      const text = recapText({ streak: stat?.streak ?? null, results: dayRows });
+      const text = recapText({ streak: stat?.streak ?? null, longest: stat?.max_streak ?? null, results: dayRows });
       const png = await renderRecap(
         toRecapData({
           puzzleDate: date,

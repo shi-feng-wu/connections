@@ -5,7 +5,7 @@ import type { Puzzle } from '../src/game.js';
 import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import type { CardPlayer } from './_card.js';
-import { cardPayload, interactionFollowupUrl, sendCard, withGrids } from './_livecard.js';
+import { botCardUrl, cardPayload, interactionFollowupUrl, sendCard, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
 import { PLAY_CUSTOM_ID } from './_recap.js';
 
@@ -67,11 +67,16 @@ export function verifyDiscordSig(
 
 type Interaction = { type?: number; data?: { custom_id?: string; name?: string } };
 
-// Whether this interaction is a launch command (slash or Entry Point) — the case that
-// launches AND posts the followup card. The Play button launches too, but it reuses the
-// existing card via /api/join rather than posting a new one.
+// Whether this interaction is a launch command (slash or Entry Point) — launches AND posts
+// the card as an interaction followup.
 function isLaunchCommand(body: Interaction): boolean {
   return body.type === APPLICATION_COMMAND && LAUNCH_COMMANDS.has(body.data?.name ?? '');
+}
+
+// The card/recap "Play now!" button — launches AND posts a card replying to the clicked
+// message (the click interaction hands us that message in body.message).
+function isPlayButton(body: Interaction): boolean {
+  return body.type === MESSAGE_COMPONENT && body.data?.custom_id === PLAY_CUSTOM_ID;
 }
 
 // Pure routing of a verified interaction to its inline response body. Kept separate from
@@ -97,13 +102,16 @@ type LaunchInteraction = Interaction & {
   channel?: { id?: string };
   member?: { user?: DiscordUserLite };
   user?: DiscordUserLite;
+  // For the Play button (a component interaction), the message the button was on.
+  message?: { id?: string };
 };
 
-// Post the room's "who's playing" card as an interaction followup, right after the launch.
-// The followup is interaction-bound (like the Wordle card) and needs no bot; the bot then
-// keeps it live (see /api/join, /api/refresh-card). Runs after the launch ACK is already
-// sent, so a failure here never blocks opening the game.
-async function postFollowupCard(body: LaunchInteraction): Promise<void> {
+// Post the room's "who's playing" card. A /connections command posts it as an interaction
+// followup (interaction-bound, no bot); the "Play now!" button posts it as a bot reply to
+// the clicked card (body.message), so cards thread off each other. The app/bot owns the
+// message, so /api/join + /api/refresh-card keep it live. Runs after the launch ACK is
+// already sent, so a failure here never blocks opening the game.
+async function postCard(body: LaunchInteraction): Promise<void> {
   const appId = body.application_id ?? process.env.VITE_DISCORD_CLIENT_ID ?? '';
   const token = body.token ?? '';
   if (!appId || !token) {
@@ -167,15 +175,24 @@ async function postFollowupCard(body: LaunchInteraction): Promise<void> {
   const renderPlayers = puzzle ? await withGrids(db, puzzle, date, players) : players;
   const png = await renderRoster(renderPlayers, { puzzleNo: puzzle?.id, puzzleDate: date });
 
-  // Post the card as a followup (wait=true returns it so we learn the message id, which the
-  // bot edits afterward and /api/refresh-card / join keep current).
-  const r = await sendCard(interactionFollowupUrl(appId, token), cardPayload(), png, 'POST', 'card.png');
+  // A button click posts the card as a bot reply to the clicked message; a command posts it
+  // as an interaction followup. Either way wait/`?wait=true` returns the new message so we
+  // learn its id (which the bot edits afterward and /api/refresh-card / join keep current).
+  const viaButton = body.type === MESSAGE_COMPONENT;
+  let r: Response;
+  if (viaButton) {
+    const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
+    const replyTo = body.message?.id ? { messageId: body.message.id, channelId } : undefined;
+    r = await sendCard(botCardUrl(channelId), cardPayload(replyTo), png, 'POST', 'card.png', botToken ? { Authorization: `Bot ${botToken}` } : undefined);
+  } else {
+    r = await sendCard(interactionFollowupUrl(appId, token), cardPayload(), png, 'POST', 'card.png');
+  }
   if (!r.ok) {
-    console.error('[card] followup failed', r.status, await r.text().catch(() => ''));
+    console.error('[card] post failed', { via: viaButton ? 'button' : 'command', status: r.status }, await r.text().catch(() => ''));
     return;
   }
   const messageId = ((await r.json()) as { id?: string }).id ?? null;
-  console.log('[card] followup posted', { scope, messageId, players: players.length });
+  console.log('[card] posted', { scope, via: viaButton ? 'button' : 'command', messageId, players: players.length });
   if (!messageId) return;
 
   const nowIso = new Date().toISOString();
@@ -227,11 +244,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   // game.
   res.status(200).json(routeInteraction(body));
 
-  // Then post the card as a followup. waitUntil keeps the function alive past the response
-  // flush (a plain await after res.json() can be frozen on Vercel).
-  if (isLaunchCommand(body)) {
+  // Then post the card — for a /connections command or a Play-button click. waitUntil keeps
+  // the function alive past the response flush (a plain await after res.json() can be frozen
+  // on Vercel).
+  if (isLaunchCommand(body) || isPlayButton(body)) {
     waitUntil(
-      postFollowupCard(body).catch((e) => {
+      postCard(body).catch((e) => {
         console.error('[card] threw', e instanceof Error ? e.message : e);
       }),
     );

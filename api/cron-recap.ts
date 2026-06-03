@@ -1,25 +1,28 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { admin } from './_admin.js';
+import { renderRecap } from './_card.js';
+import { sendCard } from './_livecard.js';
 import { fetchPuzzle, yesterdayET } from './_nyt.js';
-import { buildRecap, type DayRow, type SeasonRow } from './_recap.js';
+import { type DayRow, recapPayload, type SeasonRow, toRecapData } from './_recap.js';
 
 // Daily recap cron. Fires after the midnight-ET Connections reset (see the
 // vercel.json schedule) and posts yesterday's results + season standings, with a
 // Play button, to each room's recap channel. Mirrors the Wordle activity's daily
 // summary.
 //
-// Posting goes through the per-room incoming webhook an admin set up via the
-// webhook.incoming OAuth flow (/api/install -> /api/discord-callback), so there is
-// no bot in the guild: we just POST to the stored webhook URL. A room with no
-// webhook_url (never ran setup) gets nothing.
+// Posting goes through the app's bot user (added when an admin chooses "Add to
+// Server"), which POSTs the recap to the room's last-played channel — the breadcrumb
+// /api/score stores on recap_channels.channel_id. Needs DISCORD_BOT_TOKEN and the
+// bot's Send Messages / Attach Files permission in that channel. A room with no
+// recorded channel (nobody finished there yet) gets nothing.
 //
-// Only rooms that (a) have a recap webhook and (b) had at least one finisher
+// Only rooms that (a) have a recap channel and (b) had at least one finisher
 // yesterday get a post, so dead servers stay quiet. A per-(scope, date) ledger row
 // is claimed before posting, so a retried or doubled cron run can't repost.
 //
-// Recaps are guild-only: incoming webhooks live on guild channels, so c: scopes are
-// skipped. Vercel injects `Authorization: Bearer $CRON_SECRET` on cron calls; we
-// fail closed without it so the route can't be triggered by anyone else.
+// Recaps are guild-only (c: scopes are skipped). Vercel injects `Authorization:
+// Bearer $CRON_SECRET` on cron calls; we fail closed without it so the route can't be
+// triggered by anyone else.
 
 const SEASON_LIMIT = 5;
 
@@ -41,11 +44,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
+  const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
+  if (!botToken) {
+    res.status(503).json({ error: 'bot token unconfigured' });
+    return;
+  }
+
   const date = yesterdayET();
   const since = `${date.slice(0, 8)}01`; // month start of the puzzle's day (avoids a month-boundary skew)
 
-  // Rooms that had a finisher yesterday (only g: scopes — webhooks live on guild
-  // channels, so c: scopes can't have one).
+  // Rooms that had a finisher yesterday (only g: scopes — the recap bot posts in guild
+  // channels, so c: DM/group scopes are skipped).
   const { data: scoredRows } = await db.from('scores').select('scope_id').eq('puzzle_date', date);
   const playedScopes = [
     ...new Set(((scoredRows ?? []) as ScopeRow[]).map((r) => r.scope_id).filter((s): s is string => !!s)),
@@ -56,16 +65,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  // Their recap webhooks (rooms that ran the install flow). A row without a
-  // webhook_url predates webhook setup and has nowhere to post.
+  // The channel each room last played in (the bot posts the recap there). A row with
+  // no channel_id means nobody has finished a game in that room yet.
   const { data: chanRows } = await db
     .from('recap_channels')
-    .select('scope_id, webhook_url')
+    .select('scope_id, channel_id')
     .in('scope_id', playedScopes);
-  const webhookByScope = new Map<string, string>(
-    ((chanRows ?? []) as { scope_id: string; webhook_url: string | null }[])
-      .filter((r) => !!r.webhook_url)
-      .map((r) => [r.scope_id, r.webhook_url as string]),
+  const channelByScope = new Map<string, string>(
+    ((chanRows ?? []) as { scope_id: string; channel_id: string | null }[])
+      .filter((r) => !!r.channel_id)
+      .map((r) => [r.scope_id, r.channel_id as string]),
   );
 
   // Puzzle number for the embed title (best-effort; NYT fetch may fail).
@@ -81,8 +90,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   let failed = 0;
 
   for (const scope of playedScopes) {
-    const webhookUrl = webhookByScope.get(scope);
-    if (!webhookUrl) {
+    const channelId = channelByScope.get(scope);
+    if (!channelId) {
       skipped++;
       continue;
     }
@@ -97,42 +106,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     try {
-      const [{ data: results }, { data: season }] = await Promise.all([
+      const [{ data: results }, { data: season }, { data: stats }] = await Promise.all([
         db.rpc('day_results', { p_scope: scope, p_date: date }),
         db.rpc('room_board', { p_scope: scope, p_since: since, p_limit: SEASON_LIMIT }),
+        db.rpc('room_recap_stats', { p_scope: scope, p_since: since, p_date: date }),
       ]);
-      const message = buildRecap({
-        puzzleDate: date,
-        puzzleNo,
-        results: (results ?? []) as DayRow[],
-        season: (season ?? []) as SeasonRow[],
-      });
+      const stat = ((stats ?? []) as { streak: number; win_pct: number }[])[0];
+      const png = await renderRecap(
+        toRecapData({
+          puzzleDate: date,
+          puzzleNo,
+          results: (results ?? []) as DayRow[],
+          season: (season ?? []) as SeasonRow[],
+          streak: stat?.streak ?? null,
+          winRate: stat?.win_pct ?? null,
+        }),
+      );
 
-      // Execute the incoming webhook. No auth header — the token is in the URL.
-      // with_components=true ensures the Play button renders on the message.
-      const r = await fetch(`${webhookUrl}?with_components=true`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(message),
+      // Post as the bot (multipart with the recap PNG) to the room's channel — the same
+      // multipart path as the live "who's playing" card (api/_livecard.ts). The bot token
+      // authorizes it; app-owned messages render the Play button without with_components.
+      const url = `https://discord.com/api/v10/channels/${channelId}/messages`;
+      const r = await sendCard(url, recapPayload(), png, 'POST', 'recap.png', {
+        Authorization: `Bot ${botToken}`,
       });
       if (r.ok) {
         posted++;
-      } else if (r.status === 404 || r.status === 401) {
-        // Webhook deleted (404) or its token revoked (401): it can never post again.
-        // Forget it so future days skip cleanly; keep the claim so today doesn't
-        // retry. The room must re-run setup to re-enable recaps.
-        failed++;
-        await db
-          .from('recap_channels')
-          .update({ webhook_url: null, webhook_id: null })
-          .eq('scope_id', scope);
       } else if (r.status === 429 || r.status >= 500) {
         // Transient (rate limit / Discord outage): release the slot so the next
         // daily run retries.
         failed++;
         await db.from('recap_posts').delete().match({ scope_id: scope, puzzle_date: date });
       } else {
-        // Other 4xx (e.g. a malformed payload): keep the slot so we don't loop on it.
+        // Permanent for today (e.g. 403 the bot can't post there, 404 channel gone, or a
+        // malformed payload): keep the claim so we don't loop. channel_id stays — it's the
+        // breadcrumb /api/score maintains, and a later game may move it to a usable channel.
         failed++;
       }
     } catch {

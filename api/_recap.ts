@@ -1,80 +1,91 @@
-// Builds the daily recap message the bot posts on the Connections reset: an embed
-// with yesterday's per-room results and the month's season standings, plus a Play
-// button that launches the Activity. Leading underscore keeps Vercel from treating
-// this file as a route. Output is plain Discord REST JSON (POST /channels/:id/messages).
+// Shapes the daily recap the bot posts on the Connections reset and turns the two
+// RPC result sets (yesterday's finishers + the month's season standings) into the
+// render model for the recap PNG. The drawing itself lives in src/card-draw.ts
+// (shared with the browser preview); api/_card.ts wraps it into a Buffer and
+// api/cron-recap.ts posts it — exactly like the "who's playing" card. Leading
+// underscore keeps Vercel from treating this file as a route.
+import type { RecapData } from '../src/card-draw.js';
 
-// One finisher of yesterday's puzzle in this room (from the day_results RPC).
+// One finisher of yesterday's puzzle in this room (from the day_results RPC). The RPC
+// also returns user_id + avatar (used for the row's roster avatar).
 export type DayRow = {
+  user_id: string;
   name: string;
+  avatar: string | null;
   score: number;
   mistakes: number;
   solved: boolean;
   duration_ms: number | null;
 };
 
-// One season-standings row (a subset of room_board's columns).
+// One season-standings row (from the room_board RPC; a subset of its columns).
 export type SeasonRow = {
+  user_id: string;
   name: string;
+  avatar: string | null;
   total: number;
   wins: number;
   plays: number;
 };
 
-// Discord caps: embed description <= 4096, field value <= 1024. Keep well under by
-// bounding row counts; a very active room won't overflow a single message.
-const MAX_RESULTS = 25;
-const MAX_SEASON = 5;
 const PLAY_CUSTOM_ID = 'connections_play';
 
-// ms -> m:ss, or an em dash when unknown (e.g. a loss with no recorded duration).
-function fmtDuration(ms: number | null): string {
-  if (ms == null || ms <= 0) return '—';
-  const total = Math.round(ms / 1000);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
+const MON = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+// "2026-05-30" -> "May" (the standings window label).
+function monthOf(date: string): string | undefined {
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(date);
+  return m ? MON[+m[2] - 1] : undefined;
 }
 
-export type RecapMessage = {
-  embeds: object[];
-  components: object[];
-};
-
-export function buildRecap(opts: {
+// Map the two RPC result sets (plus the room's header stats) into the recap render
+// model consumed by drawRecap. duration_ms -> seconds; user_id -> the avatar hash id.
+export function toRecapData(opts: {
   puzzleDate: string;
   puzzleNo?: number;
   results: DayRow[];
   season: SeasonRow[];
-}): RecapMessage {
-  const heading = opts.puzzleNo ? `#${opts.puzzleNo} · ${opts.puzzleDate}` : opts.puzzleDate;
-
-  const resultLines = opts.results
-    .slice(0, MAX_RESULTS)
-    .map((r, i) => {
-      const mark = r.solved ? '✅' : '❌';
-      const mistakes = `${r.mistakes} mistake${r.mistakes === 1 ? '' : 's'}`;
-      return `**${i + 1}.** ${r.name} — ${mark} ${r.score} pts · ${mistakes} · ${fmtDuration(r.duration_ms)}`;
-    });
-
-  const seasonLines = opts.season
-    .slice(0, MAX_SEASON)
-    .map((r, i) => `**${i + 1}.** ${r.name} — ${r.total} pts (${r.wins}/${r.plays})`);
-
+  streak?: number | null;
+  winRate?: number | null;
+}): RecapData {
   return {
-    embeds: [
-      {
-        title: `Connections — ${heading}`,
-        description: resultLines.length ? resultLines.join('\n') : 'No one finished yesterday.',
-        fields: [{ name: 'Season standings', value: seasonLines.length ? seasonLines.join('\n') : '—' }],
-        color: 0x5865f2,
-      },
-    ],
+    puzzleNo: opts.puzzleNo,
+    puzzleDate: opts.puzzleDate,
+    season: monthOf(opts.puzzleDate),
+    streak: opts.streak ?? null,
+    winRate: opts.winRate ?? null,
+    results: opts.results.map((r) => ({
+      id: r.user_id,
+      name: r.name,
+      avatar: r.avatar,
+      solved: r.solved,
+      score: r.score,
+      mistakes: r.mistakes,
+      sec: r.duration_ms != null ? Math.round(r.duration_ms / 1000) : null,
+    })),
+    standings: opts.season.map((r) => ({
+      id: r.user_id,
+      name: r.name,
+      avatar: r.avatar,
+      total: r.total,
+      wins: r.wins,
+      plays: r.plays,
+    })),
+  };
+}
+
+// The Discord message: the rendered recap PNG plus the Play button. The image carries
+// everything (title, results, standings), so the embed is just a frame for it — the
+// same shape as the live card's cardPayload, with a recap.png attachment.
+export function recapPayload(): object {
+  return {
+    embeds: [{ image: { url: 'attachment://recap.png' }, color: 0x5865f2 }],
     components: [
-      {
-        type: 1, // action row
-        components: [{ type: 2, style: 1, label: 'Play today', custom_id: PLAY_CUSTOM_ID }],
-      },
+      { type: 1, components: [{ type: 2, style: 1, label: 'Play today', custom_id: PLAY_CUSTOM_ID }] },
     ],
+    attachments: [{ id: 0, filename: 'recap.png' }],
   };
 }
 

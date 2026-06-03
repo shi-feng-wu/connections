@@ -213,7 +213,7 @@ export function App({
   // Edit the room's "who's playing today" card so the player's guess grid fills in
   // live (like the Wordle card). Best-effort and fire-and-forget — the card is a
   // nicety and must never delay or block play. Only the daily on a guild has a card;
-  // the server throttles the edits and reposting stays in /api/join.
+  // the server throttles the edits and establishing the card stays in /api/interactions.
   function refreshCard(): void {
     if (!isDailyRef.current || !authTicketRef.current || !guildIdRef.current) return;
     void fetch("/api/refresh-card", {
@@ -420,9 +420,9 @@ export function App({
         /* presence stays on the public fallback channel */
       }
 
-      // Add this player to the channel's "who's playing today" card (append-only;
-      // the server posts/edits an image on the room's recap webhook). Fire-and-forget:
-      // the card is a nicety and must never delay or block play.
+      // Add this player to the channel's "who's playing today" card (append-only; the
+      // server edits the room's live card — the launcher's /connections message — via the
+      // interaction token). Fire-and-forget: the card is a nicety and must never block play.
       void fetch("/api/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -5,10 +5,10 @@ import "./index.css";
 // api/_assets — under `vercel dev` anything served from /api/ is routed to the
 // functions and 404s, which would fail this module's load and white-screen the whole
 // preview. Dev-only copy of api/_assets/*.ttf; preview.tsx isn't in the prod build.
-import InterRegularUrl from "./preview-assets/Inter-Regular.ttf?url";
-import InterSemiBoldUrl from "./preview-assets/Inter-SemiBold.ttf?url";
+import LibreFranklinUrl from "./preview-assets/LibreFranklin.ttf?url";
+import NewsreaderUrl from "./preview-assets/Newsreader.ttf?url";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
-import { cardLayout, type CardPlayer, drawRoster } from "./card-draw";
+import { cardLayout, type CardPlayer, drawRecap, type RecapData, recapLayout, drawRoster } from "./card-draw";
 import { GameView, LoadingScreen } from "./components";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import type { Standings } from "./season";
@@ -151,20 +151,21 @@ const noop = (): void => {};
 
 // The "who's playing today" Discord card, drawn live on a browser <canvas> with the
 // SAME code the server uses for the PNG (src/card-draw.ts) — so this preview is the
-// real thing, not a replica. The card uses Inter (the app UI doesn't), so register the
-// bundled TTFs via FontFace; offline, no network — keeps the screenshot harness happy.
-let interReady: Promise<void> | null = null;
-function ensureInter(): Promise<void> {
-  if (!interReady) {
-    interReady = (async () => {
-      const reg = new FontFace("Inter", `url(${InterRegularUrl})`);
-      const semi = new FontFace("Inter SemiBold", `url(${InterSemiBoldUrl})`);
-      await Promise.all([reg.load(), semi.load()]);
-      document.fonts.add(reg);
-      document.fonts.add(semi);
+// real thing, not a replica. Register the brand fonts (variable TTFs; the "100 900"
+// weight range lets the variable axis respond to font-weight) via FontFace; offline,
+// no network — keeps the screenshot harness happy.
+let fontsReady: Promise<void> | null = null;
+function ensureBrandFonts(): Promise<void> {
+  if (!fontsReady) {
+    fontsReady = (async () => {
+      const lf = new FontFace("Libre Franklin", `url(${LibreFranklinUrl})`, { weight: "100 900" });
+      const nr = new FontFace("Newsreader", `url(${NewsreaderUrl})`, { weight: "200 800" });
+      await Promise.all([lf.load(), nr.load()]);
+      document.fonts.add(lf);
+      document.fonts.add(nr);
     })();
   }
-  return interReady;
+  return fontsReady;
 }
 
 // Browser avatar loader (the server passes @napi-rs/canvas loadImage instead).
@@ -176,39 +177,68 @@ const loadCardImg = (url: string): Promise<CanvasImageSource | null> =>
     img.src = url;
   });
 
-// Sample guess grids (each row = four group-levels 0..3): a win with one miss, a loss,
-// a game in progress, and an untouched board.
-const G: Record<string, number[][]> = {
-  won: [[0, 1, 0, 0], [2, 2, 2, 2], [0, 0, 0, 0], [1, 1, 1, 1], [3, 3, 3, 3]],
-  lost: [[0, 1, 0, 2], [1, 1, 3, 1], [0, 0, 0, 0], [2, 3, 2, 2]],
-  mid: [[0, 0, 0, 0], [3, 1, 2, 3]],
-  fresh: [],
-};
+// Sample roster (matches the design mock): a win with one miss, a perfect win (the
+// room leader → Trophy), a player mid-game, one who hasn't guessed, and a loss. Each
+// grid is one row per guess (four group-levels 0..3); sec = elapsed/finish time.
 const CARD_ROOM: CardPlayer[] = [
-  { id: "p-jun", name: "Jun Park", avatar: pfp("#2f6fed"), grid: G.won },
-  { id: "p-aria", name: "Aria Voss", avatar: pfp("#d9457a"), grid: G.lost },
-  { id: "p-theo", name: "Theo Lindqvist", avatar: null, grid: G.mid },
-  { id: "p-mei", name: "Mei Tanaka", avatar: pfp("#1f9e6a"), grid: G.fresh },
-  { id: "p-noa", name: "Noa Friedman", avatar: null, grid: G.won },
-  { id: "p-omar", name: "Omar Haddad", avatar: pfp("#e0a32e"), grid: G.lost },
+  { id: "p-jun", name: "Jun Park", avatar: pfp("#2f6fed"), sec: 134, grid: [[2, 1, 2, 2], [2, 2, 2, 2], [0, 0, 0, 0], [1, 1, 1, 1], [3, 3, 3, 3]] },
+  { id: "p-aria", name: "Aria Voss", avatar: pfp("#d9457a"), sec: 171, grid: [[3, 3, 3, 3], [0, 1, 0, 0], [0, 0, 0, 0], [1, 1, 1, 1], [2, 2, 2, 2]] },
+  { id: "p-theo", name: "Theo Lindqvist", avatar: null, sec: 95, grid: [[0, 0, 0, 0], [3, 1, 2, 3]] },
+  { id: "p-mei", name: "Mei Tanaka", avatar: pfp("#1f9e6a"), sec: 14, grid: [] },
+  { id: "p-noa", name: "Noa Friedman", avatar: null, sec: 108, grid: [[1, 1, 1, 1], [3, 3, 3, 3], [0, 0, 0, 0], [2, 2, 2, 2]] },
+  { id: "p-omar", name: "Omar Haddad", avatar: pfp("#e0a32e"), sec: 224, grid: [[0, 0, 0, 0], [1, 1, 1, 1], [2, 3, 2, 2], [3, 2, 3, 3], [2, 3, 3, 2], [3, 2, 2, 3]] },
 ];
-const CARD_SOLO: CardPlayer[] = [
-  { id: SELF_ID, name: "Mara Okafor", avatar: pfp("#b06bd6"), grid: G.mid },
+const CARD_BUSY: CardPlayer[] = [
+  ...CARD_ROOM,
+  { id: "p-priya", name: "Priya Nair", avatar: pfp("#7f9cf5"), sec: 156, grid: [[2, 2, 2, 2], [0, 0, 0, 0], [3, 1, 3, 3], [1, 1, 1, 1], [3, 3, 3, 3]] },
+  { id: "p-diego", name: "Diego Cruz", avatar: null, sec: 61, grid: [[3, 3, 3, 3]] },
+  { id: "p-yuki", name: "Yuki Sato", avatar: pfp("#56b6c2"), sec: 142, grid: [[0, 0, 0, 0], [1, 1, 1, 1], [2, 2, 2, 2], [3, 3, 3, 3]] },
+  { id: "p-sam", name: "Sam Cohen", avatar: null, sec: 33, grid: [[2, 0, 2, 2]] },
 ];
+const CARD_SOLO: CardPlayer[] = [CARD_ROOM[2]]; // Theo, mid-game
+
+// The daily recap posted on the Connections reset: yesterday's results beside the
+// month's season standings (mirrors the design mock + scripts/card-preview.mts).
+const CARD_RECAP: RecapData = {
+  puzzleNo: 1169,
+  puzzleDate: "2026-05-30",
+  season: "May",
+  streak: 12,
+  winRate: 84,
+  results: [
+    { id: "p-noa", name: "Noa Friedman", avatar: pfp("#2f6fed"), solved: true, score: 96, mistakes: 0, sec: 102 },
+    { id: "p-theo", name: "Theo Lindqvist", avatar: null, solved: true, score: 91, mistakes: 0, sec: 88 },
+    { id: "p-jun", name: "Jun Park", avatar: pfp("#d9457a"), solved: true, score: 84, mistakes: 1, sec: 141 },
+    { id: "p-priya", name: "Priya Nair", avatar: null, solved: true, score: 77, mistakes: 1, sec: 169 },
+    { id: "p-aria", name: "Aria Voss", avatar: pfp("#1f9e6a"), solved: true, score: 68, mistakes: 2, sec: 203 },
+    { id: "p-yuki", name: "Yuki Sato", avatar: null, solved: true, score: 61, mistakes: 3, sec: 247 },
+    { id: "p-omar", name: "Omar Haddad", avatar: null, solved: false, score: 12, mistakes: 4, sec: null },
+  ],
+  standings: [
+    { id: "p-noa", name: "Noa Friedman", avatar: pfp("#2f6fed"), total: 487, wins: 6, plays: 7 },
+    { id: "p-jun", name: "Jun Park", avatar: pfp("#d9457a"), total: 441, wins: 4, plays: 7 },
+    { id: "p-aria", name: "Aria Voss", avatar: pfp("#1f9e6a"), total: 408, wins: 3, plays: 7 },
+    { id: "p-theo", name: "Theo Lindqvist", avatar: null, total: 372, wins: 3, plays: 6 },
+    { id: "p-priya", name: "Priya Nair", avatar: null, total: 339, wins: 2, plays: 6 },
+  ],
+};
 
 function Card({ label, players }: { label: string; players: CardPlayer[] }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      await ensureInter().catch(() => {}); // fall back to a system font if it won't load
+      await ensureBrandFonts().catch(() => {}); // fall back to a system font if it won't load
       const canvas = ref.current;
       if (cancelled || !canvas) return;
-      const { W, height } = cardLayout(players);
-      canvas.width = W; // true pixel size (CSS scales it down to fit the page)
-      canvas.height = height;
+      const scratch = document.createElement("canvas").getContext("2d");
+      if (!scratch) return;
+      const opts = { puzzleNo: 1170, puzzleDate: "2026-05-31" };
+      const layout = cardLayout(scratch, players, opts);
+      canvas.width = layout.W; // true pixel size (CSS scales it down to fit the page)
+      canvas.height = layout.height;
       const ctx = canvas.getContext("2d");
-      if (ctx) await drawRoster(ctx, players, { puzzleNo: 1170 }, loadCardImg);
+      if (ctx) await drawRoster(ctx, players, opts, layout, { loadImg: loadCardImg, Path2D: window.Path2D });
     })();
     return () => {
       cancelled = true;
@@ -218,6 +248,35 @@ function Card({ label, players }: { label: string; players: CardPlayer[] }) {
     <section className="w-full max-w-[940px] px-4">
       <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">{label}</div>
       <canvas ref={ref} className="rounded-xl shadow-lg" style={{ width: "min(560px, 100%)" }} />
+    </section>
+  );
+}
+
+// The daily recap card, drawn live on a browser <canvas> with the SAME code the
+// server uses for the PNG (src/card-draw.ts:drawRecap) — so this preview is the real
+// thing. Width is fixed (878px), so no scratch-measure pass is needed.
+function Recap({ label, data }: { label: string; data: RecapData }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await ensureBrandFonts().catch(() => {});
+      const canvas = ref.current;
+      if (cancelled || !canvas) return;
+      const layout = recapLayout(data);
+      canvas.width = layout.W; // true pixel size (CSS scales it down to fit the page)
+      canvas.height = layout.height;
+      const ctx = canvas.getContext("2d");
+      if (ctx) await drawRecap(ctx, data, layout, { loadImg: loadCardImg, Path2D: window.Path2D });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [data]);
+  return (
+    <section className="w-full max-w-[940px] px-4">
+      <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">{label}</div>
+      <canvas ref={ref} className="rounded-xl shadow-lg" style={{ width: "min(880px, 100%)" }} />
     </section>
   );
 }
@@ -434,7 +493,9 @@ createRoot(document.getElementById("preview")!).render(
     {showSim && <Simulate />}
     {!onlySim && shown}
     {showCards && <Card label="Discord card · who's playing today" players={CARD_ROOM} />}
+    {showCards && <Card label="Discord card · busy room" players={CARD_BUSY} />}
     {showCards && <Card label="Discord card · single player" players={CARD_SOLO} />}
+    {showCards && <Recap label="Discord recap · daily reset post" data={CARD_RECAP} />}
     {!onlySim && !onlyCard && (
       <section className="w-full max-w-[360px] px-4">
         <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">

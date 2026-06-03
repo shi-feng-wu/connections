@@ -1,5 +1,11 @@
 import { createPublicKey, verify as edVerify } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { Puzzle } from '../src/game.js';
+import { canonicalScope } from '../src/scope.js';
+import { admin } from './_admin.js';
+import type { CardPlayer } from './_card.js';
+import { activeToken, cardEditUrl, cardPayload, sendCard, withGrids } from './_livecard.js';
+import { fetchPuzzle, todayET } from './_nyt.js';
 import { PLAY_CUSTOM_ID } from './_recap.js';
 
 // Discord interactions webhook. Discord POSTs here for: the Entry Point command and
@@ -8,6 +14,12 @@ import { PLAY_CUSTOM_ID } from './_recap.js';
 // open the game. Routing the Entry Point command here (handler APP_HANDLER, set by
 // scripts/register-commands.mjs) is deliberate: it stops Discord from launching the
 // Activity itself and auto-posting its invite card to the channel on every launch.
+//
+// After replying, a launch command also turns the launcher's "<user> used /connections"
+// message into the room's live "who's playing" card by editing that interaction
+// response in place (via the interaction token — no bot, no webhook in the guild). One
+// card per room: a launch while a prior card's token is still alive edits THAT card; the
+// first launch after it expires (~15 min) establishes a fresh one. See postLaunchCard.
 //
 // Every request is Ed25519-signed; an unverified request must get a 401 (Discord
 // rejects the endpoint at setup time otherwise). The signature covers the exact
@@ -75,6 +87,120 @@ export function routeInteraction(body: Interaction): object {
   return { type: CHANNEL_MESSAGE_WITH_SOURCE, data: { content: 'Unsupported interaction.', flags: EPHEMERAL } };
 }
 
+// Whether this interaction is a launch command (slash or Entry Point), the only case
+// that establishes/refreshes the room card. The Play button launches too, but it reuses
+// an existing card through the Activity's /api/join rather than minting a new message.
+function isLaunchCommand(body: Interaction): boolean {
+  return body.type === APPLICATION_COMMAND && LAUNCH_COMMANDS.has(body.data?.name ?? '');
+}
+
+// Fields we read off a launch interaction beyond the routing ones above.
+type DiscordUserLite = { id?: string; username?: string; global_name?: string | null; avatar?: string | null };
+type LaunchInteraction = Interaction & {
+  application_id?: string;
+  token?: string;
+  guild_id?: string;
+  channel_id?: string;
+  channel?: { id?: string };
+  member?: { user?: DiscordUserLite };
+  user?: DiscordUserLite;
+};
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+// Best-effort: fill the launcher's "<user> used /connections" message with the room's
+// live "who's playing" card, editing that interaction response in place via its token.
+// A launch while a prior card's token is still alive edits THAT card (one card per room);
+// the first launch after it expires establishes a fresh one on its own response. Runs
+// after the launch reply is already sent, so any failure here never delays the game.
+async function postLaunchCard(body: LaunchInteraction): Promise<void> {
+  const appId = body.application_id ?? process.env.VITE_DISCORD_CLIENT_ID ?? '';
+  const myToken = body.token ?? '';
+  if (!appId || !myToken) return;
+
+  // The card only makes sense in a guild channel (mirrors /api/join's scope gate).
+  const guildId = typeof body.guild_id === 'string' ? body.guild_id : null;
+  const channelId =
+    typeof body.channel_id === 'string'
+      ? body.channel_id
+      : typeof body.channel?.id === 'string'
+        ? body.channel.id
+        : null;
+  const scope = canonicalScope(guildId, channelId);
+  if (!scope || !scope.startsWith('g:')) return;
+
+  // Identity comes from the (Discord-verified) interaction, so no OAuth round-trip:
+  // invoking a guild command already proves membership.
+  const u = body.member?.user ?? body.user;
+  if (!u?.id) return;
+  const player: CardPlayer = {
+    id: u.id,
+    name: u.global_name ?? u.username ?? 'Player',
+    avatar: u.avatar ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=64` : null,
+  };
+
+  const db = admin();
+  if (!db) return;
+
+  const date = todayET();
+  const { data: card } = await db
+    .from('live_cards')
+    .select('players, interaction_token, token_at')
+    .eq('scope_id', scope)
+    .eq('puzzle_date', date)
+    .maybeSingle();
+
+  // renderRoster/mergePlayer pull @napi-rs/canvas; load them lazily so PING and other
+  // light interactions don't pay the native-addon cold start.
+  const { mergePlayer, renderRoster } = await import('./_card.js');
+  const existing: CardPlayer[] = Array.isArray(card?.players) ? (card.players as CardPlayer[]) : [];
+  const { players } = mergePlayer(existing, player);
+
+  // Edit the room's active card while its establishing launch's token is still alive;
+  // otherwise THIS launch establishes a fresh card on its own response.
+  const now = Date.now();
+  const stored = activeToken(card, now);
+  let useToken = stored ?? myToken;
+  let tokenAt = stored ? (card?.token_at as string) : new Date(now).toISOString();
+
+  let puzzle: Puzzle | null = null;
+  try {
+    puzzle = await fetchPuzzle(date);
+  } catch {
+    /* title falls back to no number; grids render blank */
+  }
+  const renderPlayers = puzzle ? await withGrids(db, puzzle, date, players) : players;
+  const png = await renderRoster(renderPlayers, { puzzleNo: puzzle?.id, puzzleDate: date });
+
+  let r = await sendCard(cardEditUrl(appId, useToken), cardPayload(), png, 'PATCH');
+  // The stored card's message was deleted → restart the card on this launch's own response.
+  if (!r.ok && r.status === 404 && useToken !== myToken) {
+    useToken = myToken;
+    tokenAt = new Date(now).toISOString();
+    r = await sendCard(cardEditUrl(appId, useToken), cardPayload(), png, 'PATCH');
+  }
+  // Establishing on our own response can race Discord creating the message → retry once.
+  if (!r.ok && r.status === 404 && useToken === myToken) {
+    await sleep(600);
+    r = await sendCard(cardEditUrl(appId, useToken), cardPayload(), png, 'PATCH');
+  }
+
+  const nowIso = new Date().toISOString();
+  await db.from('live_cards').upsert(
+    {
+      scope_id: scope,
+      puzzle_date: date,
+      players,
+      interaction_token: useToken,
+      token_at: tokenAt,
+      posted_at: tokenAt, // when the current card was established
+      edited_at: nowIso, // anchors the live-edit throttle in /api/refresh-card
+      updated_at: nowIso,
+    },
+    { onConflict: 'scope_id,puzzle_date' },
+  );
+}
+
 async function rawBody(req: VercelRequest): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
@@ -95,12 +221,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     res.status(401).json({ error: 'invalid request signature' });
     return;
   }
-  let body: Interaction;
+  let body: LaunchInteraction;
   try {
-    body = JSON.parse(raw) as Interaction;
+    body = JSON.parse(raw) as LaunchInteraction;
   } catch {
     res.status(400).json({ error: 'bad body' });
     return;
   }
+
+  // Reply first so opening the game is never delayed (Discord enforces a 3s deadline);
+  // the function stays alive for the awaited card work below, which is pure best-effort.
   res.status(200).json(routeInteraction(body));
+
+  if (isLaunchCommand(body)) {
+    try {
+      await postLaunchCard(body);
+    } catch {
+      /* the card is best-effort — the launch reply already went out */
+    }
+  }
 }

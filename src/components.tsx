@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import logoUrl from "./assets/connections-logo.webp";
 import { Board, type BoardSnapshot } from "./board";
 import { HoverButton } from "./hoverbutton";
 import { LEVELS, type Game, type Puzzle } from "./game";
@@ -58,10 +59,11 @@ export function LoadingScreen({
   );
 }
 
-// "Connections #642 · · · June 2, 2026" lockup. The wordmark + number sit left; the
-// date rides the right edge. During play the date slot cross-fades to transient
-// guess feedback ("One away…") and back. Lives above the board on mobile and atop
-// the players rail on desktop (rendered twice, one hidden per breakpoint).
+// Brand lockup matching the PIP thumbnail header (src/pip.tsx): the brick logo · the
+// "Connections" wordmark · a bordered "No. 642" pill, sitting left, with the date riding
+// the right edge in the title serif. During play the date slot cross-fades to transient
+// guess feedback ("One away…") and back. Lives above the board on mobile and atop the
+// players rail on desktop (rendered twice, one hidden per breakpoint).
 function Header({
   puzzle,
   feedbackText,
@@ -78,15 +80,22 @@ function Header({
     { year: "numeric", month: "long", day: "numeric" },
   );
   return (
-    <header className={"flex items-baseline gap-3 " + className}>
-      <span className="font-display text-[23px] font-bold tracking-[-0.02em] text-[#efefe6] min-[820px]:text-[21px]">
+    <header className={"flex items-center gap-2.5 " + className}>
+      <img
+        src={logoUrl}
+        alt=""
+        className="h-[26px] w-[26px] flex-none rounded-[7px] min-[820px]:h-6 min-[820px]:w-6"
+      />
+      <span className="font-display text-[23px] font-bold leading-none tracking-[-0.025em] text-[#efefe6] min-[820px]:text-[21px]">
         Connections
       </span>
-      <span className="font-sans text-[11px] text-zinc-500">#{puzzle.id}</span>
+      <span className="flex-none whitespace-nowrap rounded-full border border-white/15 px-2 py-[3px] font-sans text-[10px] font-bold uppercase leading-none tracking-[0.06em] tabular-nums text-zinc-400">
+        No. {puzzle.id}
+      </span>
       <span className="relative ml-auto inline-flex items-center justify-end text-right">
         <span
           className={
-            "font-sans text-[11px] whitespace-nowrap text-zinc-500 transition-opacity duration-300 " +
+            "font-display text-[13px] font-normal whitespace-nowrap text-zinc-500 transition-opacity duration-300 min-[820px]:text-[12px] " +
             (feedbackOn ? "opacity-0" : "opacity-100")
           }
         >

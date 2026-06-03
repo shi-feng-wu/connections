@@ -10,6 +10,7 @@ import NewsreaderUrl from "./preview-assets/Newsreader.ttf?url";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
 import { cardLayout, type CardPlayer, drawRecap, type RecapData, recapLayout, drawRoster } from "./card-draw";
 import { GameView, LoadingScreen } from "./components";
+import { PipThumbnail } from "./pip";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import type { Standings } from "./season";
 import { Roster } from "./roster";
@@ -439,6 +440,37 @@ function State({
   );
 }
 
+// The collapsed picture-in-picture thumbnail (src/pip.tsx). Rendered in a fixed box
+// at the minimized window's ~16:10 ratio (≈976×608) — the size Discord gives it — to
+// check the centered board mini at a glance. A couple of sizes confirm it scales.
+function PipState({
+  label,
+  game,
+  revealed,
+  w,
+  h,
+}: {
+  label: string;
+  game: Game | null;
+  revealed?: number[];
+  w: number;
+  h: number;
+}) {
+  return (
+    <section className="px-4">
+      <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
+        {label}
+      </div>
+      <div
+        style={{ width: w, height: h }}
+        className="overflow-hidden rounded-xl ring-1 ring-zinc-800"
+      >
+        <PipThumbnail game={game} revealed={revealed} />
+      </div>
+    </section>
+  );
+}
+
 // wraps LoadingScreen the way State wraps GameView
 function LoadState({
   label,
@@ -471,27 +503,38 @@ const STATES = [
   <State key="l" label="Results · lost" game={lost} revealed={[2, 3]} />,
 ];
 const pick = decodeURIComponent(location.hash.slice(1)).toLowerCase();
-const known = ["progress", "perfect", "won", "lost", "loading", "error", "blocked", "simulate", "feedback", "card"];
+const known = ["progress", "perfect", "won", "lost", "loading", "error", "blocked", "simulate", "feedback", "card", "pip"];
 // #simulate and #feedback both isolate the Simulate playground (#feedback also
 // auto-fires a one-away guess to surface the header feedback pill); #card isolates the
-// Discord "who's playing" card.
+// Discord "who's playing" card; #pip isolates the collapsed PIP thumbnail.
 const onlySim = pick === "simulate" || pick === "feedback";
 const onlyCard = pick === "card";
+const onlyPip = pick === "pip";
 const shown =
-  known.includes(pick) && !onlySim && !onlyCard
+  known.includes(pick) && !onlySim && !onlyCard && !onlyPip
     ? STATES.filter((s) => String(s.props.label).toLowerCase().includes(pick))
-    : onlyCard
+    : onlyCard || onlyPip
       ? []
       : STATES;
 // Simulate playground rides on top by default; #simulate / #feedback isolate it. The
-// cards ride at the bottom by default; #card isolates them.
+// cards + PIP thumbnails ride at the bottom by default; #card / #pip isolate them.
 const showSim = pick === "" || onlySim;
 const showCards = pick === "" || onlyCard;
+const showPips = pick === "" || onlyPip;
 
 createRoot(document.getElementById("preview")!).render(
   <div className="flex flex-col items-center gap-16 py-10">
     {showSim && <Simulate />}
     {!onlySim && shown}
+    {showPips && (
+      <div className="flex flex-col items-center gap-8">
+        <PipState label="PIP thumbnail · in progress (976×608)" game={playing} w={488} h={304} />
+        <PipState label="PIP thumbnail · lost" game={lost} revealed={[2, 3]} w={488} h={304} />
+        <PipState label="PIP thumbnail · won" game={won} w={488} h={304} />
+        <PipState label="PIP thumbnail · loading" game={null} w={488} h={304} />
+        <PipState label="PIP thumbnail · narrow PIP (square)" game={playing} w={320} h={320} />
+      </div>
+    )}
     {showCards && <Card label="Discord card · who's playing today" players={CARD_ROOM} />}
     {showCards && <Card label="Discord card · busy room" players={CARD_BUSY} />}
     {showCards && <Card label="Discord card · single player" players={CARD_SOLO} />}

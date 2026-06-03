@@ -108,9 +108,18 @@ type LaunchInteraction = Interaction & {
   channel?: { id?: string };
   member?: { user?: DiscordUserLite };
   user?: DiscordUserLite;
+  // For component interactions (the Play button), the message the component was on.
+  message?: { id?: string };
   // Present key "0" => the app is installed to this guild (the bot is in it); "1" => user install.
   authorizing_integration_owners?: Record<string, string>;
 };
+
+// The recap/card "Play now!" button. Clicking it launches the game AND posts a fresh card
+// replying to the clicked message — like a /connections, but the reply target comes for
+// free in the interaction (body.message) instead of needing a channel search.
+function isPlayButton(body: Interaction): boolean {
+  return body.type === MESSAGE_COMPONENT && body.data?.custom_id === PLAY_CUSTOM_ID;
+}
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -132,7 +141,13 @@ async function findLaunchMessageId(
   botToken: string,
 ): Promise<string | null> {
   type Meta = { id?: string; user?: { id?: string }; name?: string };
-  type Msg = { id: string; type?: number; interaction_metadata?: Meta; interaction?: Meta };
+  type Msg = {
+    id: string;
+    type?: number;
+    author?: { id?: string; bot?: boolean };
+    interaction_metadata?: Meta;
+    interaction?: Meta;
+  };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const r = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages?limit=10`, {
@@ -163,6 +178,21 @@ async function findLaunchMessageId(
         mine.find((m) => isCommandMsg(m.type)) ??
         mine[0];
       if (match) return match.id;
+      // Messages exist but none is the launch message → dump what's here so we can see
+      // whether the "used /connections" is even a real, retrievable message.
+      console.warn(
+        `[findLaunch] no match among ${msgs.length} msgs (looking for interaction ${interactionId}, user ${userId}): ` +
+          JSON.stringify(
+            msgs.map((m) => ({
+              type: m.type,
+              author: m.author?.id,
+              bot: m.author?.bot,
+              imetaId: m.interaction_metadata?.id,
+              imetaUser: m.interaction_metadata?.user?.id,
+              iName: m.interaction?.name,
+            })),
+          ),
+      );
     } catch (e) {
       console.error('[findLaunch] threw', e instanceof Error ? e.message : e);
       return null;
@@ -178,10 +208,11 @@ async function findLaunchMessageId(
 const ALWAYS_POST_FRESH = true;
 
 // Best-effort: post (or refresh) the room's "who's playing" card as the bot, replying to
-// the launcher's "<user> used /connections" message. One card per room per day: the first
-// launch creates it (as a reply); later launches/joins/guesses edit that same message in
-// place. Skipped where the app isn't installed to the guild (no bot). Runs after the
-// launch reply is already sent, so any failure here never delays the game.
+// whatever triggered it — the "<user> used /connections" message (a command) or the clicked
+// card (the Play button). One card per room per day: the first trigger creates it (as a
+// reply); later ones / joins / guesses edit that same message in place. Skipped where the
+// app isn't installed to the guild (no bot). Runs after the launch reply is already sent,
+// so any failure here never delays the game.
 async function postLaunchCard(body: LaunchInteraction): Promise<void> {
   const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
   if (!botToken) {
@@ -266,12 +297,22 @@ async function postLaunchCard(body: LaunchInteraction): Promise<void> {
       console.error('[postLaunchCard] edit failed', r.status, await r.text().catch(() => ''));
     }
   }
-  // Establish: post a fresh card as a reply to the launcher's /connections message.
+  // Establish: post a fresh card as a reply to whatever triggered it.
   if (!messageId) {
-    const launchMessageId = await findLaunchMessageId(channelId, body.id, u.id, botToken);
-    const replyTo = launchMessageId ? { messageId: launchMessageId, channelId } : undefined;
-    if (!replyTo) console.warn('[postLaunchCard] launch message not found — posting card without a reply');
-    console.log('[postLaunchCard] creating card', { scope, replying: !!replyTo, players: players.length });
+    // Reply target: a Play-button click carries the clicked card directly (body.message);
+    // a /connections command needs the "used /connections" message found in the channel.
+    const replyTargetId =
+      body.type === MESSAGE_COMPONENT
+        ? (body.message?.id ?? null)
+        : await findLaunchMessageId(channelId, body.id, u.id, botToken);
+    const replyTo = replyTargetId ? { messageId: replyTargetId, channelId } : undefined;
+    if (!replyTo) console.warn('[postLaunchCard] reply target not found — posting card without a reply');
+    console.log('[postLaunchCard] creating card', {
+      scope,
+      via: body.type === MESSAGE_COMPONENT ? 'button' : 'command',
+      replying: !!replyTo,
+      players: players.length,
+    });
     let r = await sendCard(botCardUrl(channelId), cardPayload(replyTo), png, 'POST', 'card.png', auth);
     // If the REPLY specifically failed (e.g. the bot lacks Read Message History), still
     // post a plain card so something shows — and log it so the perm can be fixed.
@@ -335,10 +376,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   // Reply first so opening the game is never delayed (Discord enforces a 3s deadline).
   res.status(200).json(routeInteraction(body));
 
-  // After launching, the bot finds the "<user> used /connections" message and replies to
-  // it with the card. waitUntil keeps the function alive past the response flush (a plain
-  // await after res.json() can be frozen on Vercel). Best-effort — the launch already went.
-  if (isLaunchCommand(body)) {
+  // After launching, the bot posts a card replying to what triggered it: the "used
+  // /connections" message (a command) or the clicked card (the Play button). waitUntil
+  // keeps the function alive past the response flush (a plain await after res.json() can
+  // be frozen on Vercel). Best-effort — the launch already went out.
+  if (isLaunchCommand(body) || isPlayButton(body)) {
     waitUntil(
       postLaunchCard(body).catch((e) => {
         console.error('[postLaunchCard] threw', e instanceof Error ? e.message : e);

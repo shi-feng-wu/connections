@@ -9,7 +9,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 const fnBlocks = [
   ...schema.matchAll(
-    /create or replace function public\.(?:current_streak|room_board|room_self|day_results)[\s\S]*?\$\$;/g,
+    /create or replace function public\.(?:current_streak|room_board|room_self|day_results|room_recap_stats)[\s\S]*?\$\$;/g,
   ),
 ].map((m) => m[0]);
 
@@ -36,6 +36,13 @@ const SEED = [
   ["g1", "dave", "Dave", 0, 4, false, "2026-06-05"],
   // other room: must never show up in g1's board
   ["g2", "eve", "Eve", 9999, 0, true, "2026-06-05"],
+  // g3: a room whose 06-02 was a no-solve day (breaks the room streak) — exercises the
+  // room-level recap stats (every g1 day has a solver, so g1 alone can't test a break).
+  ["g3", "frank", "Frank", 500, 1, true, "2026-06-01"],
+  ["g3", "frank", "Frank", 100, 4, false, "2026-06-02"],
+  ["g3", "frank", "Frank", 500, 1, true, "2026-06-03"],
+  ["g3", "frank", "Frank", 500, 1, true, "2026-06-04"],
+  ["g3", "frank", "Frank", 500, 1, true, "2026-06-05"],
 ];
 
 let db: PGlite;
@@ -51,7 +58,7 @@ beforeAll(async () => {
       duration_ms int, puzzle_date date, created_at timestamptz not null default now()
     );
   `);
-  expect(fnBlocks).toHaveLength(4); // current_streak, room_board, room_self, day_results
+  expect(fnBlocks).toHaveLength(5); // current_streak, room_board, room_self, day_results, room_recap_stats
   for (const block of fnBlocks) await db.exec(block);
   for (const [scope, user, name, score, mistakes, solved, date] of SEED) {
     await db.query(
@@ -174,5 +181,47 @@ describe("day_results", () => {
 
   it("is empty for a day nobody played", async () => {
     expect(await dayResults("g1", "2025-01-01")).toEqual([]);
+  });
+});
+
+const recapStats = async (
+  scope: string,
+  since: string | null,
+  date: string | null,
+): Promise<{ streak: number; win_pct: number }> => {
+  const r = (
+    await db.query<{ streak: number; win_pct: number }>(
+      `select * from public.room_recap_stats($1, $2::date, $3::date)`,
+      [scope, since, date],
+    )
+  ).rows[0];
+  return { streak: Number(r.streak), win_pct: Number(r.win_pct) };
+};
+
+describe("room_recap_stats", () => {
+  it("counts the room streak (any solver = a room solve-day) and all-time win rate", async () => {
+    // g3: 06-01 solved, 06-02 a no-solve day, 06-03..05 solved. As of 06-05 the streak
+    // runs back to the 06-02 break (3 days); 4 of 5 played days had a solver (80%).
+    expect(await recapStats("g3", null, "2026-06-05")).toEqual({ streak: 3, win_pct: 80 });
+  });
+
+  it("windows the win rate by p_since but lets the streak cross it", async () => {
+    // since the 3rd: days 03–05 all solved → 100%, streak still 3.
+    expect(await recapStats("g3", "2026-06-03", "2026-06-05")).toEqual({ streak: 3, win_pct: 100 });
+  });
+
+  it("is a 0 streak when the room's most recent played day had no solver", async () => {
+    // as of the 06-02 no-solve day: streak broken (0), 1 of 2 days solved (50%).
+    expect(await recapStats("g3", null, "2026-06-02")).toEqual({ streak: 0, win_pct: 50 });
+  });
+
+  it("treats a day with any solver as solved (g1: every day has one) and is scope-isolated", async () => {
+    // g1 06-04 has a loss (bob) but alice/carol solved, and 06-05 has a loss (dave) but
+    // alice/bob solved — so all five days are room solve-days: streak 5, 100%.
+    expect(await recapStats("g1", null, "2026-06-05")).toEqual({ streak: 5, win_pct: 100 });
+  });
+
+  it("is a 0 streak / 0 rate for a room with no rows", async () => {
+    expect(await recapStats("g404", null, "2026-06-05")).toEqual({ streak: 0, win_pct: 0 });
   });
 });

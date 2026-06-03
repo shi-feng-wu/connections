@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { CARD_REPOST_COOLDOWN_MS, type CardPlayer, mergePlayer, renderRoster, shouldRepost } from "../api/_card";
+import { type CardPlayer, mergePlayer, renderRoster } from "../api/_card";
 
-// api/_card.ts: the roster shown on the "who's playing today" webhook card.
+// api/_card.ts: the roster shown on the "who's playing today" card.
 // mergePlayer is append-only (join adds, leave never removes); renderRoster must
 // emit a real PNG even with no avatars (the network-free placeholder path).
 
@@ -25,28 +25,6 @@ describe("mergePlayer", () => {
     let players: CardPlayer[] = [];
     for (const id of ["3", "1", "2"]) players = mergePlayer(players, { id, name: `u${id}` }).players;
     expect(players.map((p) => p.id)).toEqual(["3", "1", "2"]);
-  });
-});
-
-describe("shouldRepost", () => {
-  const now = 1_700_000_000_000;
-
-  it("posts a fresh card when none exists yet", () => {
-    expect(shouldRepost(null, now)).toBe(true);
-  });
-
-  it("edits in place within the cooldown", () => {
-    expect(shouldRepost(now - (CARD_REPOST_COOLDOWN_MS - 1), now)).toBe(false);
-  });
-
-  it("bumps a fresh card once the cooldown has elapsed", () => {
-    expect(shouldRepost(now - CARD_REPOST_COOLDOWN_MS, now)).toBe(true);
-    expect(shouldRepost(now - 2 * CARD_REPOST_COOLDOWN_MS, now)).toBe(true);
-  });
-
-  it("honours a custom cooldown", () => {
-    expect(shouldRepost(now - 1000, now, 5000)).toBe(false);
-    expect(shouldRepost(now - 6000, now, 5000)).toBe(true);
   });
 });
 

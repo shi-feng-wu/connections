@@ -243,28 +243,24 @@ create policy "room presence: authenticated write"
 -- "readable by all" grant: the anon key sees nothing here).
 
 -- Where to post a room's recap. scope_id mirrors public.scores.scope_id (g:<guild>
--- or c:<channel>). channel_id is its own column because for a g: scope the channel
--- id is NOT recoverable from scope_id (which holds the guild id).
+-- or c:<channel>). channel_id is the post target: the channel the room last played in,
+-- upserted by /api/score (for a g: scope it is NOT recoverable from scope_id, which
+-- holds the guild id). /api/cron-recap posts the recap there as the app's bot user
+-- (added when an admin chooses "Add to Server"), mirroring Wordle's daily summary. A
+-- room with no channel_id (nobody has finished a game there) gets no recap.
 --
--- Two writers, two purposes:
---   • /api/discord-callback writes webhook_url (and channel_id/guild_id) when an
---     admin installs the app via the webhook.incoming OAuth flow — Discord mints a
---     channel-bound incoming webhook and we post the recap straight to it, exactly
---     like Discord's own daily-summary activities, with no bot in the guild.
---   • /api/score still upserts channel_id (the last-played channel) as a fallback
---     breadcrumb; it never touches webhook_url.
--- The cron posts only when webhook_url is set, so a room that never ran the install
--- flow simply gets no recap (there is no bot-token path anymore).
+-- webhook_id/webhook_url are legacy, from the earlier webhook.incoming install flow;
+-- the bot-posting cron no longer reads them. Kept so old rows don't error.
 create table if not exists public.recap_channels (
   scope_id    text        primary key,
   channel_id  text        not null,
   guild_id    text,
-  webhook_id  text,                          -- Discord webhook id (for reference / cleanup)
-  webhook_url text,                          -- full POST target: .../webhooks/<id>/<token>
+  webhook_id  text,                          -- legacy (webhook.incoming install); unused
+  webhook_url text,                          -- legacy (webhook.incoming install); unused
   updated_at  timestamptz not null default now()
 );
 
--- Columns added when the recap moved from bot-token posting to incoming webhooks.
+-- Legacy columns from the incoming-webhook recap; retained so older installs still load.
 alter table public.recap_channels add column if not exists webhook_id  text;
 alter table public.recap_channels add column if not exists webhook_url text;
 
@@ -303,6 +299,59 @@ $$;
 
 grant execute on function public.day_results(text, date) to anon, authenticated;
 
+-- Room-level header stats for the daily recap, as of a date: the room's current
+-- solve streak (consecutive most-recent days at least one player solved) and its
+-- season solve rate (% of played days the room solved) over [p_since, p_date]. A
+-- "room day" is solved when any player solved that day; the streak spans all history
+-- up to p_date (it can cross the season window), while win_pct is windowed by p_since.
+-- Mirrors current_streak's islands trick at the room grain. Backs the recap PNG.
+drop function if exists public.room_recap_stats(text, date, date);
+create or replace function public.room_recap_stats(
+  p_scope text,
+  p_since date default null,
+  p_date  date default null
+)
+returns table (streak int, win_pct int)
+language sql
+stable
+as $$
+  with days as (
+    select s.puzzle_date as d, bool_or(s.solved) as solved
+    from public.scores s
+    where s.scope_id = p_scope
+      and s.puzzle_date is not null
+      and (p_date is null or s.puzzle_date <= p_date)
+    group by s.puzzle_date
+  ),
+  wins as (select d from days where solved),
+  -- islands trick: consecutive solve-days share one (date - rownum) key, so the
+  -- most-recent island's size is the active room streak
+  grouped as (
+    select d, d - (row_number() over (order by d))::int as grp
+    from wins
+  ),
+  last_day as (select max(d) as d from days),
+  streak as (
+    select coalesce(case
+      when (select d from last_day) is null then 0
+      -- the room's most recent played day must itself be a solve, else the streak broke
+      when not exists (select 1 from wins where d = (select d from last_day)) then 0
+      else (select count(*)::int from grouped
+            where grp = (select grp from grouped order by d desc limit 1))
+    end, 0) as n
+  ),
+  rate as (
+    select case when count(*) > 0
+                then round(100.0 * count(*) filter (where solved) / count(*))::int
+                else 0 end as pct
+    from days
+    where (p_since is null or d >= p_since)
+  )
+  select (select n from streak), (select pct from rate);
+$$;
+
+grant execute on function public.room_recap_stats(text, date, date) to anon, authenticated;
+
 -- In-progress / finished daily state, per player per puzzle: the authoritative
 -- record of what a player has actually guessed today. /api/guess appends each
 -- guess (commit-then-reveal, so an outcome can't be seen and then abandoned to
@@ -325,30 +374,39 @@ create table if not exists public.progress (
 
 alter table public.progress enable row level security;
 
--- "Who's playing today" card, one row per room per puzzle. /api/join appends each
--- player who opens the Activity (append-only: nobody is removed when they leave) and
--- renders a roster image posted to the room's recap webhook. message_id is the latest
--- card we edit as the roster grows; after a cooldown a new join posts a FRESH card and
--- leaves the old one, so the channel keeps a timeline of who was playing when (posted_at
--- gates that cooldown). players holds [{id,name,avatar}] for the render. Written only by
--- the service role (RLS, no policy → anon sees nothing), same posture as progress.
+-- "Who's playing today" card, one row per room per puzzle. The card lives on the
+-- launching user's /connections interaction response (the "<user> used /connections"
+-- message), edited in place via the interaction token — so the card is attributed to
+-- whoever launched and needs no bot/webhook in the guild. /api/interactions establishes
+-- it on launch; /api/join (a new player opens the Activity) and /api/refresh-card (a
+-- guess) edit it via the stored token. players holds [{id,name,avatar}] for the render
+-- (append-only: nobody is removed when they leave). Written only by the service role
+-- (RLS, no policy → anon sees nothing), same posture as progress.
 create table if not exists public.live_cards (
   scope_id    text        not null,
   puzzle_date date        not null,
-  message_id  text,                                   -- webhook message to edit; null until first post
+  message_id  text,                                   -- @original message id (informational; edits address @original by token)
   players     jsonb       not null default '[]'::jsonb,
-  posted_at   timestamptz,                            -- when the current message was POSTED (not edited)
+  posted_at   timestamptz,                            -- when the current card was first established
   updated_at  timestamptz not null default now(),
   primary key (scope_id, puzzle_date)
 );
 
--- posted_at drives the re-post cooldown: rapid joins edit the card in place, but a
--- join after the cooldown bumps a fresh message (and deletes the old) so it resurfaces.
+-- posted_at marks when the current card was established (kept for history).
 alter table public.live_cards add column if not exists posted_at timestamptz;
 
--- edited_at is the last time the card image was written to Discord (post or live
+-- edited_at is the last time the card image was written to Discord (establish or live
 -- refresh). /api/refresh-card throttles its per-guess edits against it so a flurry of
--- guesses can't spam the webhook (a just-finished player bypasses the throttle).
+-- guesses can't spam Discord (a just-finished player bypasses the throttle).
 alter table public.live_cards add column if not exists edited_at timestamptz;
+
+-- The card is hosted on a Discord interaction response, edited via its token. A token
+-- can edit its message for ~15 minutes; launches within that window edit the same card,
+-- and the first launch after it expires establishes a fresh one (the channel keeps a
+-- timeline of who launched when). interaction_token is the establishing launch's token;
+-- token_at stamps when it was issued (drives the 15-minute expiry). Both null until the
+-- first launch establishes a card.
+alter table public.live_cards add column if not exists interaction_token text;
+alter table public.live_cards add column if not exists token_at          timestamptz;
 
 alter table public.live_cards enable row level security;

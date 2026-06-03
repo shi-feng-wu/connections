@@ -76,52 +76,52 @@ Two commands, two surfaces — both named `connections`:
   Endpoint URL from §3.**, and
 - registers the `CHAT_INPUT` `/connections` command.
 
-## 5. Installation (bundled: app + recap webhook in one "Add App")
+## 5. Installation (native two-option "Add App" screen + bot recap)
 
-Point the install link at our own OAuth flow so a single "Add App" both installs the
-commands **and** sets up the daily recap webhook — the way Discord's own daily-summary
-activities do it.
+Use Discord's own install screen — the same one Wordle shows — with two choices:
 
-**Installation → Install Link → `Custom URL`:**
+| Option              | Context      | Grants                                  | Effect                                                              |
+| ------------------- | ------------ | --------------------------------------- | ------------------------------------------------------------------ |
+| **Add to My Apps**  | User install | `applications.commands`                 | `/connections` works **everywhere** (any server/DM). No bot, no recap. |
+| **Add to Server**   | Guild install| `applications.commands` + `bot` (View Channel, Send Messages, Embed Links, Attach Files) | Adds the bot so the daily recap can post. |
 
-```
-https://connections-olive.vercel.app/api/install
-```
+`npm run configure-install` sets this up (PATCHes `/applications/@me`): it writes the
+per-context Default Install Settings above **and clears any Custom URL** so the native
+Discord-provided link takes over. Then confirm in **Installation → Install Link =
+`Discord Provided Link`**, with both **Installation Contexts** (User + Guild) checked.
 
-What happens when someone adds the app to a server:
+Why a bot for the recap: Discord-provided install links are limited to the
+`applications.commands` and `bot` scopes — `webhook.incoming` is not allowed in the
+native install, and it needs an authorization-code exchange the one-click install never
+performs. So a third-party app's only way to post unprompted is the bot (Wordle skips
+this only because it's first-party). After "Add to Server":
 
-1. `/api/install` redirects to Discord's consent screen requesting
-   `applications.commands webhook.incoming`, `integration_type=0` (guild install), so
-   the admin sees the **server + channel picker**.
-2. They pick a channel and approve. Discord installs the commands **and** mints an
-   incoming webhook in that channel, then redirects to `/api/discord-callback`, which
-   stores the webhook URL in `public.recap_channels` (keyed by `g:<guild>`).
-3. From then on the cron (`vercel.json`, `0 6 * * *`) POSTs the recap straight to that
-   webhook after the midnight-ET reset. **No bot, no `Send Messages` permission** — the
-   app is never a guild member.
+1. The bot joins the guild with Send Messages / Attach Files.
+2. Whenever someone finishes a game, `/api/score` records the channel on
+   `recap_channels.channel_id` (the room's last-played channel).
+3. The cron (`vercel.json`, `0 6 * * *`) posts the recap there as the bot
+   (`POST /channels/:id/messages` with `DISCORD_BOT_TOKEN`) after the midnight-ET reset.
 
 Notes / caveats:
-- **Per server.** A webhook is bound to one channel in one guild, so each server
-  installs (and picks a channel) once; there is no global install.
-- **The Activity must stay launchable.** Installing via this custom URL still installs
-  `applications.commands`, so the `/connections` command and App-Launcher rocket keep
-  working — verify on the first real install.
-- Re-adding the app just **repoints** the recap to the newly chosen channel.
-- If an admin deletes the webhook, the next cron run gets a `404`/`401`, clears the
-  stored URL, and the room silently stops getting recaps until it's re-added.
-- Requires the `…/api/discord-callback` redirect from §1 to be registered, and
-  `DISCORD_CLIENT_SECRET` + the Supabase service role set server-side.
+- **No install-time channel picker.** The recap goes to the channel the activity was
+  **last played in** (the `recap_channels.channel_id` breadcrumb), mirroring Wordle. A
+  server that "Add to Server"s but never plays gets no recap until someone finishes a
+  game there. (An admin `/set-recap-channel` command could pin a specific channel — not
+  built yet.)
+- The bot needs to actually see + post in that channel; if it can't (a `403`), that
+  day's recap is skipped and retried the next day.
+- Requires `DISCORD_BOT_TOKEN` set **server-side in Vercel** (it was script-only before).
 - Commands only appear where the app is installed; global command edits can take up to
   ~1h to propagate (and the desktop client caches them — fully quit/reopen to refresh).
 
-> Prefer not to bundle? Leave the Install Link as the Discord-provided
-> `applications.commands` link, and have admins visit
-> `https://connections-olive.vercel.app/api/install` separately to enable recaps. Same
-> endpoint, just a second step.
+> Legacy: `/api/install` + `/api/discord-callback` (the old `webhook.incoming` flow) and
+> the `recap_channels.webhook_*` columns are now **unused**. They can be removed; the
+> `…/api/discord-callback` redirect from §1 is no longer needed for recaps.
 
 ## Environment variables
 
-See `.env.example`. Server secrets (`DISCORD_CLIENT_SECRET`, `SESSION_SECRET`,
-`SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `CRON_SECRET`) must be real random
-values in Vercel — **not** the placeholders. `SESSION_SECRET` in particular signs the
-auth ticket and game-session HMACs; generate with `openssl rand -base64 32`.
+See `.env.example`. Server secrets (`DISCORD_CLIENT_SECRET`, `DISCORD_BOT_TOKEN`,
+`SESSION_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `CRON_SECRET`) must
+be real values in Vercel — **not** the placeholders. `DISCORD_BOT_TOKEN` is now needed at
+runtime (the recap cron posts as the bot), not just by the setup scripts. `SESSION_SECRET`
+signs the auth ticket and game-session HMACs; generate with `openssl rand -base64 32`.

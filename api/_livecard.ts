@@ -72,7 +72,7 @@ export function cardPayload(replyTo?: { messageId: string; channelId: string }):
   const base = {
     embeds: [{ image: { url: 'attachment://card.png' }, color: 0x5865f2 }],
     components: [
-      { type: 1, components: [{ type: 2, style: 1, label: 'Play today', custom_id: PLAY_CUSTOM_ID }] },
+      { type: 1, components: [{ type: 2, style: 1, label: 'Play now!', custom_id: PLAY_CUSTOM_ID }] },
     ],
     attachments: [{ id: 0, filename: 'card.png' }],
   };

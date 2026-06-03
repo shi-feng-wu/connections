@@ -3,7 +3,7 @@ import { admin } from './_admin.js';
 import { renderRecap } from './_card.js';
 import { sendCard } from './_livecard.js';
 import { fetchPuzzle, yesterdayET } from './_nyt.js';
-import { type DayRow, recapPayload, type SeasonRow, toRecapData } from './_recap.js';
+import { type DayRow, recapPayload, recapText, type SeasonRow, toRecapData } from './_recap.js';
 
 // Daily recap cron. Fires after the midnight-ET Connections reset (see the
 // vercel.json schedule) and posts yesterday's results + season standings, with a
@@ -112,11 +112,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         db.rpc('room_recap_stats', { p_scope: scope, p_since: since, p_date: date }),
       ]);
       const stat = ((stats ?? []) as { streak: number; win_pct: number }[])[0];
+      const dayRows = (results ?? []) as DayRow[];
+      // Wordle-style text body (streak headline + @mentioned finishers) above the PNG.
+      const text = recapText({ streak: stat?.streak ?? null, results: dayRows });
       const png = await renderRecap(
         toRecapData({
           puzzleDate: date,
           puzzleNo,
-          results: (results ?? []) as DayRow[],
+          results: dayRows,
           season: (season ?? []) as SeasonRow[],
           streak: stat?.streak ?? null,
           winRate: stat?.win_pct ?? null,
@@ -127,7 +130,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       // multipart path as the live "who's playing" card (api/_livecard.ts). The bot token
       // authorizes it; app-owned messages render the Play button without with_components.
       const url = `https://discord.com/api/v10/channels/${channelId}/messages`;
-      const r = await sendCard(url, recapPayload(), png, 'POST', 'recap.png', {
+      const r = await sendCard(url, recapPayload(text), png, 'POST', 'recap.png', {
         Authorization: `Bot ${botToken}`,
       });
       if (r.ok) {

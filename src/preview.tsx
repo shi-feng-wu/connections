@@ -5,8 +5,11 @@ import "./index.css";
 // api/_assets — under `vercel dev` anything served from /api/ is routed to the
 // functions and 404s, which would fail this module's load and white-screen the whole
 // preview. Dev-only copy of api/_assets/*.ttf; preview.tsx isn't in the prod build.
-import LibreFranklinUrl from "./preview-assets/LibreFranklin.ttf?url";
-import NewsreaderUrl from "./preview-assets/Newsreader.ttf?url";
+import LibreFranklin500 from "./preview-assets/LibreFranklin-500.ttf?url";
+import LibreFranklin600 from "./preview-assets/LibreFranklin-600.ttf?url";
+import LibreFranklin700 from "./preview-assets/LibreFranklin-700.ttf?url";
+import LibreFranklin800 from "./preview-assets/LibreFranklin-800.ttf?url";
+import Newsreader700 from "./preview-assets/Newsreader-700.ttf?url";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
 import { cardLayout, type CardPlayer, drawRecap, type RecapData, recapLayout, drawRoster } from "./card-draw";
 import { GameView, LoadingScreen } from "./components";
@@ -152,18 +155,23 @@ const noop = (): void => {};
 
 // The "who's playing today" Discord card, drawn live on a browser <canvas> with the
 // SAME code the server uses for the PNG (src/card-draw.ts) — so this preview is the
-// real thing, not a replica. Register the brand fonts (variable TTFs; the "100 900"
-// weight range lets the variable axis respond to font-weight) via FontFace; offline,
-// no network — keeps the screenshot harness happy.
+// real thing, not a replica. Register the SAME static per-weight font instances the
+// server registers (api/_card.ts) — one FontFace per weight — so the preview matches
+// the PNG exactly. (The canvas backend won't interpolate a variable font's weight, so
+// the server ships static slices; the preview mirrors them.) Offline, no network.
 let fontsReady: Promise<void> | null = null;
 function ensureBrandFonts(): Promise<void> {
   if (!fontsReady) {
     fontsReady = (async () => {
-      const lf = new FontFace("Libre Franklin", `url(${LibreFranklinUrl})`, { weight: "100 900" });
-      const nr = new FontFace("Newsreader", `url(${NewsreaderUrl})`, { weight: "200 800" });
-      await Promise.all([lf.load(), nr.load()]);
-      document.fonts.add(lf);
-      document.fonts.add(nr);
+      const faces = [
+        new FontFace("Libre Franklin", `url(${LibreFranklin500})`, { weight: "500" }),
+        new FontFace("Libre Franklin", `url(${LibreFranklin600})`, { weight: "600" }),
+        new FontFace("Libre Franklin", `url(${LibreFranklin700})`, { weight: "700" }),
+        new FontFace("Libre Franklin", `url(${LibreFranklin800})`, { weight: "800" }),
+        new FontFace("Newsreader", `url(${Newsreader700})`, { weight: "700" }),
+      ];
+      await Promise.all(faces.map((f) => f.load()));
+      faces.forEach((f) => document.fonts.add(f));
     })();
   }
   return fontsReady;

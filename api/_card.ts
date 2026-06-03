@@ -21,15 +21,23 @@ import {
 
 export type { CardPlayer, RecapData };
 
-// Lambda has no usable system fonts, so register the brand families (variable TTFs;
-// weight is selected via the font shorthand). new URL(import.meta.url) is the pattern
-// @vercel/nft traces to bundle the .ttf into the function (belt-and-suspenders:
+// Lambda has no usable system fonts, so register the brand families. These are STATIC
+// per-weight instances sliced from the variable TTFs (fonttools varLib.instancer): the
+// canvas backend matches a face by its embedded OS/2 weight and does NOT interpolate a
+// variable font's wght axis from the `font` shorthand — registering the variable file
+// alone renders every weight at its default (~400), which is why the card looked thin.
+// One face per weight the card actually draws (Libre Franklin 500/600/700/800,
+// Newsreader 700 at opsz 38 for the display wordmark). new URL(import.meta.url) is the
+// pattern @vercel/nft traces to bundle the .ttf into the function (belt-and-suspenders:
 // vercel.json also pins them via includeFiles). Register once per cold start.
 let fontsReady = false;
 function ensureFonts(): void {
   if (fontsReady) return;
-  GlobalFonts.registerFromPath(fileURLToPath(new URL('./_assets/LibreFranklin.ttf', import.meta.url)), 'Libre Franklin');
-  GlobalFonts.registerFromPath(fileURLToPath(new URL('./_assets/Newsreader.ttf', import.meta.url)), 'Newsreader');
+  const reg = (file: string, family: string): void => {
+    GlobalFonts.registerFromPath(fileURLToPath(new URL(`./_assets/${file}`, import.meta.url)), family);
+  };
+  for (const w of [500, 600, 700, 800]) reg(`LibreFranklin-${w}.ttf`, 'Libre Franklin');
+  reg('Newsreader-700.ttf', 'Newsreader');
   fontsReady = true;
 }
 

@@ -3,28 +3,18 @@ import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import { type CardPlayer, renderRoster } from './_card.js';
 import { bearerToken } from './_discord.js';
-import {
-  activeToken,
-  CARD_EDIT_THROTTLE_MS,
-  cardEditUrl,
-  cardPayload,
-  gridFinished,
-  sendCard,
-  withGrids,
-} from './_livecard.js';
+import { botCardUrl, CARD_EDIT_THROTTLE_MS, cardPayload, gridFinished, sendCard, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
 import { isLocalDev, verifyAuth } from './_session.js';
 
 // Re-renders the room's "who's playing today" card with each player's current guess
 // grid and edits the card in place. The client fires this (best-effort) after committing
-// a guess so the colour squares fill in live, like the Wordle card. The card is the
-// launcher's /connections interaction response, edited via the interaction token stored
-// on live_cards (no bot/webhook in the guild). Gated by the same cheap auth ticket as
-// /api/guess (a verified Discord user, no Discord round-trip). It only EDITS an existing
-// card — establishing one stays in /api/interactions — and edits are throttled so a
-// flurry of guesses can't spam Discord; a player who just finished bypasses the throttle
-// so the final grid always lands. Once the establishing launch's token has expired
-// (~15 min) there's nothing to edit until the next launch mints a fresh card.
+// a guess so the colour squares fill in live, like the Wordle card. The card is a bot
+// message in the channel (established by a /connections launch in /api/interactions),
+// edited via the bot token. Gated by the same cheap auth ticket as /api/guess (a verified
+// Discord user, no Discord round-trip). It only EDITS an existing card — establishing one
+// stays in /api/interactions — and edits are throttled so a flurry of guesses can't spam
+// Discord; a player who just finished bypasses the throttle so the final grid lands.
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
@@ -59,16 +49,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const date = todayET();
     const { data: card } = await db
       .from('live_cards')
-      .select('players, interaction_token, token_at, edited_at')
+      .select('players, message_id, channel_id, edited_at')
       .eq('scope_id', scope)
       .eq('puzzle_date', date)
       .maybeSingle();
     const players: CardPlayer[] = Array.isArray(card?.players) ? (card.players as CardPlayer[]) : [];
-    // No editable card right now (none established, or the launch's token has expired) →
-    // nothing to refresh; the next launch will mint a fresh, live card.
-    const appId = process.env.VITE_DISCORD_CLIENT_ID ?? '';
-    const token = activeToken(card, Date.now());
-    if (!token || !appId || !players.length) {
+    const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
+    const messageId = (card?.message_id as string | null | undefined) ?? null;
+    const cardChannel = (card?.channel_id as string | null | undefined) || channelId;
+    // No card to edit yet (no launch established one) → nothing to refresh.
+    if (!messageId || !botToken || !cardChannel || !players.length) {
       res.status(200).json({ ok: false, reason: 'no-card' });
       return;
     }
@@ -93,8 +83,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     const png = await renderRoster(renderPlayers, { puzzleNo: puzzle.id, puzzleDate: date });
-    const r = await sendCard(cardEditUrl(appId, token), cardPayload(), png, 'PATCH');
-    // Not ok (e.g. 404 token expired/deleted) → leave establishing to /api/interactions.
+    const r = await sendCard(botCardUrl(cardChannel, messageId), cardPayload(), png, 'PATCH', 'card.png', {
+      Authorization: `Bot ${botToken}`,
+    });
+    // Not ok (e.g. 404 the card was deleted) → leave establishing to /api/interactions.
     if (!r.ok) {
       res.status(200).json({ ok: false, reason: 'edit-failed', status: r.status });
       return;

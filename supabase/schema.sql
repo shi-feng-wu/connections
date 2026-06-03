@@ -374,23 +374,27 @@ create table if not exists public.progress (
 
 alter table public.progress enable row level security;
 
--- "Who's playing today" card, one row per room per puzzle. The card lives on the
--- launching user's /connections interaction response (the "<user> used /connections"
--- message), edited in place via the interaction token — so the card is attributed to
--- whoever launched and needs no bot/webhook in the guild. /api/interactions establishes
--- it on launch; /api/join (a new player opens the Activity) and /api/refresh-card (a
--- guess) edit it via the stored token. players holds [{id,name,avatar}] for the render
--- (append-only: nobody is removed when they leave). Written only by the service role
--- (RLS, no policy → anon sees nothing), same posture as progress.
+-- "Who's playing today" card, one row per room per puzzle. The card is a BOT message in
+-- the channel, posted as a reply to a /connections launch (so it's attributed to the
+-- launcher) and edited in place all day (bot messages don't expire). message_id +
+-- channel_id locate it. /api/interactions establishes it on the first launch; /api/join
+-- (a new player opens the Activity) and /api/refresh-card (a guess) edit it via the bot
+-- token. players holds [{id,name,avatar}] for the render (append-only: nobody is removed
+-- when they leave). The card only exists where the bot is (a guild install); user-install
+-- launches get none. Written only by the service role (RLS, no policy → anon sees nothing).
 create table if not exists public.live_cards (
   scope_id    text        not null,
   puzzle_date date        not null,
-  message_id  text,                                   -- @original message id (informational; edits address @original by token)
+  message_id  text,                                   -- the bot card message (edited in place); null until a launch posts it
+  channel_id  text,                                   -- channel the card lives in (for the bot edit + the reply target)
   players     jsonb       not null default '[]'::jsonb,
   posted_at   timestamptz,                            -- when the current card was first established
   updated_at  timestamptz not null default now(),
   primary key (scope_id, puzzle_date)
 );
+
+-- channel_id added when the card moved to a bot message (it needs the channel to edit).
+alter table public.live_cards add column if not exists channel_id text;
 
 -- posted_at marks when the current card was established (kept for history).
 alter table public.live_cards add column if not exists posted_at timestamptz;
@@ -400,12 +404,8 @@ alter table public.live_cards add column if not exists posted_at timestamptz;
 -- guesses can't spam Discord (a just-finished player bypasses the throttle).
 alter table public.live_cards add column if not exists edited_at timestamptz;
 
--- The card is hosted on a Discord interaction response, edited via its token. A token
--- can edit its message for ~15 minutes; launches within that window edit the same card,
--- and the first launch after it expires establishes a fresh one (the channel keeps a
--- timeline of who launched when). interaction_token is the establishing launch's token;
--- token_at stamps when it was issued (drives the 15-minute expiry). Both null until the
--- first launch establishes a card.
+-- Legacy: from the earlier interaction-token card (a LAUNCH_ACTIVITY message turned out
+-- not to be editable). Unused now that the card is a bot message; retained so old rows load.
 alter table public.live_cards add column if not exists interaction_token text;
 alter table public.live_cards add column if not exists token_at          timestamptz;
 

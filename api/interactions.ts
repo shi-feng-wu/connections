@@ -5,22 +5,22 @@ import type { Puzzle } from '../src/game.js';
 import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import type { CardPlayer } from './_card.js';
-import { activeToken, cardEditUrl, cardPayload, sendCard, withGrids } from './_livecard.js';
+import { botCardUrl, cardPayload, sendCard, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
 import { PLAY_CUSTOM_ID } from './_recap.js';
 
 // Discord interactions webhook. Discord POSTs here for: the Entry Point command and
 // the typed /connections command (both launch the Activity), the Play button on the
-// daily recap, and a PING when the endpoint URL is saved. We reply LAUNCH_ACTIVITY to
-// open the game. Routing the Entry Point command here (handler APP_HANDLER, set by
-// scripts/register-commands.mjs) is deliberate: it stops Discord from launching the
-// Activity itself and auto-posting its invite card to the channel on every launch.
+// daily recap, and a PING when the endpoint URL is saved.
 //
-// After replying, a launch command also turns the launcher's "<user> used /connections"
-// message into the room's live "who's playing" card by editing that interaction
-// response in place (via the interaction token — no bot, no webhook in the guild). One
-// card per room: a launch while a prior card's token is still alive edits THAT card; the
-// first launch after it expires (~15 min) establishes a fresh one. See postLaunchCard.
+// A launch command opens the Activity AND, where the app is installed to the server
+// (so the bot is present), the bot posts the "who's playing" card as a REPLY to the
+// launcher's "<user> used /connections" message. A LAUNCH_ACTIVITY response has no
+// editable message of its own (Discord returns 10008), so we launch via the callback
+// endpoint with `with_response` to learn the launch message's id, then the bot replies
+// to it (`POST /channels/:id/messages` with message_reference) — and edits that one
+// message in place all day (bot messages don't expire). User-installed launches (no
+// bot in the guild) get no card, by design. See postLaunchCard.
 //
 // Every request is Ed25519-signed; an unverified request must get a 401 (Discord
 // rejects the endpoint at setup time otherwise). The signature covers the exact
@@ -39,11 +39,10 @@ const EPHEMERAL = 64; // message flag
 
 // Command names that should open the Activity. Both the type-4 Entry Point command
 // (App Launcher, handler APP_HANDLER) and the type-1 chat-input command arrive as
-// APPLICATION_COMMAND interactions named `connections`, and both launch the game by
-// replying with LAUNCH_ACTIVITY. (The chat-input command also exists because the
-// Entry Point one doesn't reliably show in the typed "/" menu.) `play` is kept as an
-// alias in case `connections` collides with the Entry Point command name at
-// registration time.
+// APPLICATION_COMMAND interactions named `connections`, and both launch the game.
+// (The chat-input command also exists because the Entry Point one doesn't reliably
+// show in the typed "/" menu.) `play` is kept as an alias in case `connections`
+// collides with the Entry Point command name at registration time.
 const LAUNCH_COMMANDS = new Set(['connections', 'play']);
 
 // 32-byte raw Ed25519 public key -> a KeyObject, via the fixed SPKI DER prefix.
@@ -74,7 +73,9 @@ export function verifyDiscordSig(
 type Interaction = { type?: number; data?: { custom_id?: string; name?: string } };
 
 // Pure routing of a verified interaction to its response body. Kept separate from
-// the HTTP layer so it can be unit-tested without a request.
+// the HTTP layer so it can be unit-tested without a request. Launch commands are
+// handled out-of-band (see the handler), so this only covers PING, the recap's Play
+// button, and the unsupported fallback.
 export function routeInteraction(body: Interaction): object {
   if (body.type === PING) return { type: PONG };
   // A typed slash command (e.g. /connections) launches the Activity.
@@ -89,8 +90,8 @@ export function routeInteraction(body: Interaction): object {
 }
 
 // Whether this interaction is a launch command (slash or Entry Point), the only case
-// that establishes/refreshes the room card. The Play button launches too, but it reuses
-// an existing card through the Activity's /api/join rather than minting a new message.
+// that posts/edits the room card. The Play button launches too, but it reuses an
+// existing card through the Activity's /api/join rather than minting a new message.
 function isLaunchCommand(body: Interaction): boolean {
   return body.type === APPLICATION_COMMAND && LAUNCH_COMMANDS.has(body.data?.name ?? '');
 }
@@ -98,6 +99,7 @@ function isLaunchCommand(body: Interaction): boolean {
 // Fields we read off a launch interaction beyond the routing ones above.
 type DiscordUserLite = { id?: string; username?: string; global_name?: string | null; avatar?: string | null };
 type LaunchInteraction = Interaction & {
+  id?: string;
   application_id?: string;
   token?: string;
   guild_id?: string;
@@ -105,24 +107,59 @@ type LaunchInteraction = Interaction & {
   channel?: { id?: string };
   member?: { user?: DiscordUserLite };
   user?: DiscordUserLite;
+  // Present key "0" => the app is installed to this guild (the bot is in it); "1" => user install.
+  authorizing_integration_owners?: Record<string, string>;
 };
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+// Launch the Activity via the callback endpoint (instead of an inline response) so we can
+// read `response_message_id` — the id of the "<user> used /connections" message — which
+// the bot then replies to. Returns ok=false if the launch call itself failed (the caller
+// falls back to an inline launch so the game still opens).
+async function launchActivity(
+  body: LaunchInteraction,
+): Promise<{ ok: boolean; messageId: string | null }> {
+  if (!body.id || !body.token) return { ok: false, messageId: null };
+  try {
+    const r = await fetch(
+      `https://discord.com/api/v10/interactions/${body.id}/${body.token}/callback?with_response=true`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: LAUNCH_ACTIVITY }) },
+    );
+    if (!r.ok) {
+      console.error('[launch] callback failed', r.status, await r.text().catch(() => ''));
+      return { ok: false, messageId: null };
+    }
+    const cb = (await r.json()) as {
+      interaction?: { response_message_id?: string };
+      resource?: { message?: { id?: string } };
+    };
+    const messageId = cb.interaction?.response_message_id ?? cb.resource?.message?.id ?? null;
+    console.log('[launch] launched; response_message_id', messageId);
+    return { ok: true, messageId };
+  } catch (e) {
+    console.error('[launch] callback threw', e instanceof Error ? e.message : e);
+    return { ok: false, messageId: null };
+  }
+}
 
-// Best-effort: fill the launcher's "<user> used /connections" message with the room's
-// live "who's playing" card, editing that interaction response in place via its token.
-// A launch while a prior card's token is still alive edits THAT card (one card per room);
-// the first launch after it expires establishes a fresh one on its own response. Runs
-// after the launch reply is already sent, so any failure here never delays the game.
-async function postLaunchCard(body: LaunchInteraction): Promise<void> {
-  const appId = body.application_id ?? process.env.VITE_DISCORD_CLIENT_ID ?? '';
-  const myToken = body.token ?? '';
-  if (!appId || !myToken) {
-    console.warn('[postLaunchCard] skip: no appId/token', { hasAppId: !!appId, hasToken: !!myToken });
+// Best-effort: post (or refresh) the room's "who's playing" card as the bot, replying to
+// the launcher's "<user> used /connections" message. One card per room per day: the first
+// launch creates it (as a reply); later launches/joins/guesses edit that same message in
+// place. Skipped where the app isn't installed to the guild (no bot). Runs after the
+// launch reply is already sent, so any failure here never delays the game.
+async function postLaunchCard(body: LaunchInteraction, launchMessageId: string | null): Promise<void> {
+  const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
+  if (!botToken) {
+    console.warn('[postLaunchCard] skip: no DISCORD_BOT_TOKEN');
+    return;
+  }
+  // The card only exists where the bot is — a guild install (owners key "0"). A
+  // user-installed launch with no server bot gets no card, by design.
+  const owners = body.authorizing_integration_owners;
+  if (!owners || !('0' in owners)) {
+    console.log('[postLaunchCard] skip: not guild-installed (no bot)');
     return;
   }
 
-  // The card only makes sense in a guild channel (mirrors /api/join's scope gate).
   const guildId = typeof body.guild_id === 'string' ? body.guild_id : null;
   const channelId =
     typeof body.channel_id === 'string'
@@ -131,8 +168,8 @@ async function postLaunchCard(body: LaunchInteraction): Promise<void> {
         ? body.channel.id
         : null;
   const scope = canonicalScope(guildId, channelId);
-  if (!scope || !scope.startsWith('g:')) {
-    console.warn('[postLaunchCard] skip: not a guild scope', { guildId, channelId, scope });
+  if (!scope || !scope.startsWith('g:') || !channelId) {
+    console.warn('[postLaunchCard] skip: no guild scope/channel', { guildId, channelId, scope });
     return;
   }
 
@@ -158,7 +195,7 @@ async function postLaunchCard(body: LaunchInteraction): Promise<void> {
   const date = todayET();
   const { data: card, error: selErr } = await db
     .from('live_cards')
-    .select('players, interaction_token, token_at')
+    .select('players, message_id, channel_id')
     .eq('scope_id', scope)
     .eq('puzzle_date', date)
     .maybeSingle();
@@ -170,13 +207,6 @@ async function postLaunchCard(body: LaunchInteraction): Promise<void> {
   const existing: CardPlayer[] = Array.isArray(card?.players) ? (card.players as CardPlayer[]) : [];
   const { players } = mergePlayer(existing, player);
 
-  // Edit the room's active card while its establishing launch's token is still alive;
-  // otherwise THIS launch establishes a fresh card on its own response.
-  const now = Date.now();
-  const stored = activeToken(card, now);
-  let useToken = stored ?? myToken;
-  let tokenAt = stored ? (card?.token_at as string) : new Date(now).toISOString();
-
   let puzzle: Puzzle | null = null;
   try {
     puzzle = await fetchPuzzle(date);
@@ -186,22 +216,39 @@ async function postLaunchCard(body: LaunchInteraction): Promise<void> {
   const renderPlayers = puzzle ? await withGrids(db, puzzle, date, players) : players;
   const png = await renderRoster(renderPlayers, { puzzleNo: puzzle?.id, puzzleDate: date });
 
-  console.log('[postLaunchCard] editing @original', { scope, establishing: useToken === myToken, players: players.length });
-  let r = await sendCard(cardEditUrl(appId, useToken), cardPayload(), png, 'PATCH');
-  // The stored card's message was deleted → restart the card on this launch's own response.
-  if (!r.ok && r.status === 404 && useToken !== myToken) {
-    useToken = myToken;
-    tokenAt = new Date(now).toISOString();
-    r = await sendCard(cardEditUrl(appId, useToken), cardPayload(), png, 'PATCH');
+  const auth = { Authorization: `Bot ${botToken}` };
+  const cardChannel = (card?.channel_id as string | null | undefined) || channelId;
+  let messageId = (card?.message_id as string | null | undefined) ?? null;
+
+  // Edit the room's existing card in place; if it was deleted (404), make a fresh one.
+  if (messageId) {
+    const r = await sendCard(botCardUrl(cardChannel, messageId), cardPayload(), png, 'PATCH', 'card.png', auth);
+    if (r.status === 404) {
+      messageId = null;
+    } else if (!r.ok) {
+      console.error('[postLaunchCard] edit failed', r.status, await r.text().catch(() => ''));
+    }
   }
-  // Establishing on our own response can race Discord creating the message → retry once.
-  if (!r.ok && r.status === 404 && useToken === myToken) {
-    await sleep(600);
-    r = await sendCard(cardEditUrl(appId, useToken), cardPayload(), png, 'PATCH');
+  // Establish: post a fresh card as a reply to the launcher's /connections message.
+  if (!messageId) {
+    const replyTo = launchMessageId ? { messageId: launchMessageId, channelId } : undefined;
+    if (!replyTo) console.warn('[postLaunchCard] no launch message id — posting card without a reply');
+    console.log('[postLaunchCard] creating card', { scope, replying: !!replyTo, players: players.length });
+    let r = await sendCard(botCardUrl(channelId), cardPayload(replyTo), png, 'POST', 'card.png', auth);
+    // If the REPLY specifically failed (e.g. the bot lacks Read Message History), still
+    // post a plain card so something shows — and log it so the perm can be fixed.
+    if (!r.ok && replyTo) {
+      console.error('[postLaunchCard] reply failed, retrying without reply', r.status, await r.text().catch(() => ''));
+      r = await sendCard(botCardUrl(channelId), cardPayload(), png, 'POST', 'card.png', auth);
+    }
+    if (r.ok) {
+      messageId = ((await r.json()) as { id?: string }).id ?? null;
+    } else {
+      console.error('[postLaunchCard] create failed', r.status, await r.text().catch(() => ''));
+      return;
+    }
   }
-  if (!r.ok) {
-    console.error('[postLaunchCard] @original edit failed', r.status, await r.text().catch(() => ''));
-  }
+  if (!messageId) return;
 
   const nowIso = new Date().toISOString();
   const { error: upErr } = await db.from('live_cards').upsert(
@@ -209,9 +256,8 @@ async function postLaunchCard(body: LaunchInteraction): Promise<void> {
       scope_id: scope,
       puzzle_date: date,
       players,
-      interaction_token: useToken,
-      token_at: tokenAt,
-      posted_at: tokenAt, // when the current card was established
+      message_id: messageId,
+      channel_id: channelId,
       edited_at: nowIso, // anchors the live-edit throttle in /api/refresh-card
       updated_at: nowIso,
     },
@@ -248,17 +294,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  // Reply first so opening the game is never delayed (Discord enforces a 3s deadline).
-  res.status(200).json(routeInteraction(body));
-
-  // Render + fill the launcher's message AFTER replying. waitUntil keeps the function
-  // alive for this work — on Vercel a plain `await` after res.json() can be frozen the
-  // moment the response flushes, so the card would silently never post. Best-effort.
+  // Launch commands go out-of-band: we call the callback endpoint ourselves (to learn the
+  // launch message's id for the bot reply), ACK Discord's request with 202, and post the
+  // card in the background. Everything else (PING, the Play button) replies inline.
   if (isLaunchCommand(body)) {
+    const launch = await launchActivity(body);
+    if (!launch.ok) {
+      // The out-of-band launch failed → guarantee the game still opens via an inline
+      // response, and skip the card this time.
+      res.status(200).json({ type: LAUNCH_ACTIVITY });
+      return;
+    }
+    res.status(202).end();
     waitUntil(
-      postLaunchCard(body).catch((e) => {
+      postLaunchCard(body, launch.messageId).catch((e) => {
         console.error('[postLaunchCard] threw', e instanceof Error ? e.message : e);
       }),
     );
+    return;
   }
+
+  res.status(200).json(routeInteraction(body));
 }

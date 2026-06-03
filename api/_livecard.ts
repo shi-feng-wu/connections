@@ -65,14 +65,21 @@ export function gridFinished(grid: number[][] | undefined): boolean {
 
 // The Discord message: the rendered PNG plus the "Play" button. The image is the
 // hero (it carries the title and player count, like the Wordle card), so the embed is
-// just a frame for it — no title/description to duplicate what's already drawn.
-export function cardPayload(): object {
-  return {
+// just a frame for it — no title/description to duplicate what's already drawn. Pass
+// `replyTo` on the initial post so the card replies to the launcher's "<user> used
+// /connections" message (fail_if_not_exists:false → a normal message if it's gone).
+export function cardPayload(replyTo?: { messageId: string; channelId: string }): object {
+  const base = {
     embeds: [{ image: { url: 'attachment://card.png' }, color: 0x5865f2 }],
     components: [
       { type: 1, components: [{ type: 2, style: 1, label: 'Play today', custom_id: PLAY_CUSTOM_ID }] },
     ],
     attachments: [{ id: 0, filename: 'card.png' }],
+  };
+  if (!replyTo) return base;
+  return {
+    ...base,
+    message_reference: { message_id: replyTo.messageId, channel_id: replyTo.channelId, fail_if_not_exists: false },
   };
 }
 
@@ -96,27 +103,12 @@ export async function sendCard(
   return fetch(url, { method, body: form, headers });
 }
 
-// The card lives on a Discord interaction response, editable via the interaction token.
-// Discord keeps a token valid for 15 minutes; we stop a touch under that so an edit
-// started near the edge still lands. A launch inside the window edits the same card; the
-// first launch after it expires establishes a fresh one (see /api/interactions).
-export const INTERACTION_TOKEN_TTL_MS = 14.5 * 60 * 1000;
-
-// The token that can still edit the room's active card, or null once the establishing
-// launch's window has elapsed (caller then establishes a new card on its own response).
-export function activeToken(
-  card: { interaction_token?: string | null; token_at?: string | null } | null | undefined,
-  nowMs: number,
-): string | null {
-  const token = card?.interaction_token;
-  const at = card?.token_at ? Date.parse(card.token_at) : NaN;
-  if (!token || Number.isNaN(at) || nowMs - at >= INTERACTION_TOKEN_TTL_MS) return null;
-  return token;
-}
-
-// PATCH target for an interaction's original response (the "<user> used /connections"
-// message). application_id is public; the token in the path is what authorizes the edit,
-// so no bot token is involved. with_components keeps the Play button on the message.
-export function cardEditUrl(appId: string, token: string): string {
-  return `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/@original?with_components=true`;
+// POST/PATCH target for the bot-owned card in a channel. The bot creates the card as a
+// reply to the launch message (message_reference in the payload) and edits it in place
+// after — bot messages don't expire, so one card stays live all day. Authorized by the
+// bot token in the Authorization header (see sendCard's `headers` arg), so the card only
+// exists where the bot is (a guild install); user-install launches get no card.
+export function botCardUrl(channelId: string, messageId?: string): string {
+  const base = `https://discord.com/api/v10/channels/${channelId}/messages`;
+  return messageId ? `${base}/${messageId}` : base;
 }

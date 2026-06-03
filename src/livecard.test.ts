@@ -1,29 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { activeToken, INTERACTION_TOKEN_TTL_MS } from "../api/_livecard";
+import { botCardUrl, cardPayload } from "../api/_livecard";
 
-// api/_livecard.ts: the room card is hosted on a Discord interaction response and
-// edited via its token. activeToken decides whether that token can still edit the
-// message — launches inside the window edit the same card; once it has lapsed the next
-// launch must establish a fresh one.
-describe("activeToken", () => {
-  const now = 1_700_000_000_000;
-  const at = (msAgo: number) => new Date(now - msAgo).toISOString();
-
-  it("returns the token while inside the 15-minute window", () => {
-    const card = { interaction_token: "tok", token_at: at(INTERACTION_TOKEN_TTL_MS - 1000) };
-    expect(activeToken(card, now)).toBe("tok");
+// api/_livecard.ts: the room card is a bot message. On create it replies to the
+// launcher's "<user> used /connections" message (message_reference); edits address the
+// stored message id. These helpers shape the Discord REST request.
+describe("cardPayload", () => {
+  it("is a plain message with no message_reference when not replying", () => {
+    const p = cardPayload() as { message_reference?: unknown };
+    expect(p.message_reference).toBeUndefined();
   });
 
-  it("returns null once the window has elapsed", () => {
-    const card = { interaction_token: "tok", token_at: at(INTERACTION_TOKEN_TTL_MS) };
-    expect(activeToken(card, now)).toBeNull();
+  it("replies to the launch message when given a reference", () => {
+    const p = cardPayload({ messageId: "111", channelId: "222" }) as {
+      message_reference?: { message_id: string; channel_id: string; fail_if_not_exists: boolean };
+    };
+    expect(p.message_reference).toEqual({ message_id: "111", channel_id: "222", fail_if_not_exists: false });
+  });
+});
+
+describe("botCardUrl", () => {
+  it("targets the channel for a create (POST)", () => {
+    expect(botCardUrl("222")).toBe("https://discord.com/api/v10/channels/222/messages");
   });
 
-  it("returns null with no token, no timestamp, or a bad row", () => {
-    expect(activeToken({ interaction_token: null, token_at: at(0) }, now)).toBeNull();
-    expect(activeToken({ interaction_token: "tok", token_at: null }, now)).toBeNull();
-    expect(activeToken({ interaction_token: "tok", token_at: "not-a-date" }, now)).toBeNull();
-    expect(activeToken(null, now)).toBeNull();
-    expect(activeToken(undefined, now)).toBeNull();
+  it("targets the message for an edit (PATCH)", () => {
+    expect(botCardUrl("222", "111")).toBe("https://discord.com/api/v10/channels/222/messages/111");
   });
 });

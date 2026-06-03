@@ -103,13 +103,13 @@ export async function sendCard(
   return fetch(url, { method, body: form, headers });
 }
 
-// POST target for an interaction FOLLOWUP message. After /api/interactions answers the
-// launch command with LAUNCH_ACTIVITY (which auto-opens the game), it posts the card as a
-// followup on the interaction token — so the card is interaction-bound (like the Wordle
-// card) without needing the bot. wait=true returns the created message so we learn its id;
-// after that the app owns it, so the bot edits it in place via botCardUrl (no token limit).
-export function interactionFollowupUrl(appId: string, token: string): string {
-  return `https://discord.com/api/v10/webhooks/${appId}/${token}?wait=true&with_components=true`;
+// Edit target for an interaction's original response (the deferred "<user> used
+// /connections" message). /api/interactions fills it with the card via the interaction
+// token — no bot needed — so the card lands natively under "used /connections", like the
+// Wordle card. After that, the message is authored by the app, so the bot edits it in
+// place via botCardUrl (no 15-minute token limit).
+export function interactionCardUrl(appId: string, token: string): string {
+  return `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/@original?with_components=true`;
 }
 
 // PATCH target for the card in a channel, by message id, using the bot token (the bot can

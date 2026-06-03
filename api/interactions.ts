@@ -116,13 +116,17 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 // A LAUNCH_ACTIVITY response doesn't hand back the launch message's id (its callback's
 // response_message_id is null), so to reply we locate the "<user> used /connections"
-// message by scanning the channel's recent messages for this user's most recent launch
-// command. Newest-first, so the first match is this launch. Needs the bot's Read Message
-// History permission (the same one a reply needs); a brief retry covers the message not
-// being indexed the instant after launch. Returns null if it can't be found.
+// message by scanning the channel's recent messages. That message has type 20
+// (CHAT_INPUT_COMMAND) and `interaction_metadata.user` = the launcher; the command name
+// only lives on the deprecated `interaction` field, so we match on the message type +
+// user and use the name as a bonus. Newest-first, so the first match is this launch.
+// Needs the bot's Read Message History permission (also required to reply); a brief retry
+// covers the message not being indexed the instant after launch. Null if not found.
+const CHAT_INPUT_COMMAND_MSG = 20;
+const CONTEXT_MENU_COMMAND_MSG = 23;
 async function findLaunchMessageId(channelId: string, userId: string, botToken: string): Promise<string | null> {
   type Meta = { user?: { id?: string }; name?: string };
-  type Msg = { id: string; interaction_metadata?: Meta; interaction?: Meta };
+  type Msg = { id: string; type?: number; interaction_metadata?: Meta; interaction?: Meta };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const r = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages?limit=10`, {
@@ -133,15 +137,23 @@ async function findLaunchMessageId(channelId: string, userId: string, botToken: 
         return null;
       }
       const msgs = (await r.json()) as Msg[];
-      // Interaction messages this user triggered, newest first (Discord returns newest first).
-      const mine = msgs.filter((m) => (m.interaction_metadata ?? m.interaction)?.user?.id === userId);
-      // Prefer an explicit /connections command; else their most recent interaction message
-      // (they just launched, so that's almost certainly the "used /connections" one).
-      const named = mine.find((m) => {
-        const name = m.interaction?.name ?? m.interaction_metadata?.name;
-        return name !== undefined && LAUNCH_COMMANDS.has(name);
-      });
-      const match = named ?? mine[0];
+      // GET messages returns [] (not a 403) when the bot lacks Read Message History — the
+      // same permission a reply needs — so an empty list is the likely "no reply" cause.
+      if (!Array.isArray(msgs) || msgs.length === 0) {
+        console.warn('[findLaunch] no messages returned — bot likely missing Read Message History');
+        await sleep(500);
+        continue;
+      }
+      // Messages this user triggered as an interaction, newest first (Discord's order).
+      const mine = msgs.filter((m) => (m.interaction_metadata?.user?.id ?? m.interaction?.user?.id) === userId);
+      const isCommandMsg = (t?: number) => t === CHAT_INPUT_COMMAND_MSG || t === CONTEXT_MENU_COMMAND_MSG;
+      const match =
+        // Prefer an explicit /connections command (deprecated `interaction.name`)…
+        mine.find((m) => m.interaction?.name !== undefined && LAUNCH_COMMANDS.has(m.interaction.name)) ??
+        // …else a command message by this user…
+        mine.find((m) => isCommandMsg(m.type)) ??
+        // …else their most recent interaction message (they just launched).
+        mine[0];
       if (match) return match.id;
     } catch (e) {
       console.error('[findLaunch] threw', e instanceof Error ? e.message : e);

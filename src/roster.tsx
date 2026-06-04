@@ -68,8 +68,12 @@ export function colorFor(id: string): string {
 const elapsedMs = (p: PlayerState, now: number): number =>
   Math.max(0, (p.finishedAt ?? now) - (p.startedAt || now));
 const fmtElapsed = (p: PlayerState, now: number): string => {
-  const s = Math.round(elapsedMs(p, now) / 1000);
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const total = Math.round(elapsedMs(p, now) / 1000);
+  const s = total % 60;
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 };
 
 // Furthest ahead first: most groups solved, then fastest, then fewest mistakes.
@@ -223,8 +227,10 @@ const TIME = "text-[12px] tabular-nums tracking-[0.01em] min-[820px]:text-[13px]
 
 function Status({ p, now }: { p: PlayerState; now: number }) {
   const time = fmtElapsed(p, now);
+  // Fixed width (not min-w) sized for the widest case — status icon + H:MM:SS —
+  // so the time column never changes size as the elapsed time grows past 1h.
   const box =
-    "flex min-w-12 flex-none items-center justify-end gap-1.5 min-[820px]:min-w-14";
+    "flex w-[66px] flex-none items-center justify-end gap-1.5 min-[820px]:w-[74px]";
   if (p.done === "lost")
     return (
       <div className={box}>

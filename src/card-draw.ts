@@ -175,7 +175,12 @@ function nowPlayingStats(players: CardPlayer[]): BrandStat[] {
 }
 function fmtTime(sec?: number | null): string {
   if (sec == null) return "—";
-  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+  const total = Math.floor(sec);
+  const s = total % 60;
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 }
 
 type Derived = {
@@ -503,8 +508,11 @@ export async function drawRoster(
 
     const timeStr = fmtTime(p.sec);
     ctx.font = `${timeWeight} ${TIME_SIZE}px "Libre Franklin"`;
-    const timeW = ctx.measureText(timeStr).width;
-    const statusLeft = px + panelW - TILE_PAD - (ICON + STATUS_GAP + timeW);
+    // Reserve a fixed slot sized for the widest time (H:MM:SS) so the status
+    // icon and its gap never shift as the time grows; the time is drawn flush to
+    // the tile's right edge within this slot.
+    const slotW = ctx.measureText("0:00:00").width;
+    const statusLeft = px + panelW - TILE_PAD - (ICON + STATUS_GAP + slotW);
     if (kind === "live") {
       const dx = statusLeft + ICON / 2;
       ctx.fillStyle = "rgba(52,211,153,0.22)"; // emerald-400 @ 22% — the live dot's halo
@@ -531,9 +539,9 @@ export async function drawRoster(
     }
     ctx.fillStyle = timeColor;
     ctx.font = `${timeWeight} ${TIME_SIZE}px "Libre Franklin"`;
-    ctx.textAlign = "left";
+    ctx.textAlign = "right";
     ctx.textBaseline = "middle";
-    ctx.fillText(timeStr, statusLeft + ICON + STATUS_GAP, rowY + 1);
+    ctx.fillText(timeStr, px + panelW - TILE_PAD, rowY + 1);
   });
 }
 

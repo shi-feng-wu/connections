@@ -1,4 +1,4 @@
-import { Eraser, Shuffle as ShuffleIcon, Trophy } from "lucide-react";
+import { Eraser, Navigation, Shuffle as ShuffleIcon } from "lucide-react";
 import {
   useLayoutEffect,
   useReducer,
@@ -119,8 +119,8 @@ export function Board({
   onCommit,
   onFinish,
   onFeedback,
-  onShowSeason,
-  hasSeason,
+  onJumpToSelf,
+  canJump,
   initialRevealed = [],
 }: {
   game: Game;
@@ -133,10 +133,10 @@ export function Board({
   // transient guess feedback ("One away…", "Already guessed"), surfaced as text
   // in the header date slot.
   onFeedback: (msg: string) => void;
-  // open the season leaderboard modal (end-screen trophy). No-op possible.
-  onShowSeason: () => void;
-  // whether the room has any scored rows yet — gates the trophy.
-  hasSeason: boolean;
+  // jump the roster list to your row and pulse it (end-screen locate arrow).
+  onJumpToSelf: () => void;
+  // whether you have a row in the roster — gates the locate arrow.
+  canJump: boolean;
   // seeds revealed-on-loss bars when rehydrating a finished game (preview harness).
   initialRevealed?: number[];
 }) {
@@ -629,8 +629,8 @@ export function Board({
 
   // End-screen footer — replaces the controls with the score summary at the same
   // footprint: mistakes dots pinned left (same spot as in play), the solve time and
-  // groups centered, and the score (right-aligned, serif) with an optional trophy
-  // that opens the season leaderboard.
+  // groups centered, and the score (right-aligned, serif) with an optional locate
+  // arrow that scrolls the roster to your row and pulses it.
   function renderBelowEnd() {
     const won = game.status === "won";
     const perfect = won && game.mistakesLeft === MAX_MISTAKES;
@@ -672,15 +672,21 @@ export function Board({
               +{game.score.toLocaleString()}
             </span>
           </div>
-          {hasSeason && (
+          {canJump && (
             <HoverButton
               className={BTN_ICON_PRIMARY}
               hover="opacity-85"
-              onClick={onShowSeason}
-              aria-label="Season standings"
-              title="Season standings"
+              onClick={onJumpToSelf}
+              aria-label="Jump to your row"
+              title="Jump to your row"
             >
-              <Trophy size={18} strokeWidth={2.25} aria-hidden />
+              <Navigation
+                size={16}
+                strokeWidth={2}
+                fill="currentColor"
+                className="-translate-x-px"
+                aria-hidden
+              />
             </HoverButton>
           )}
         </div>

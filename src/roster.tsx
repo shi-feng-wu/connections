@@ -3,6 +3,9 @@ import { Check, X } from "lucide-react";
 import { LEVELS, MAX_MISTAKES } from "./game";
 import type { PlayerState } from "./realtime";
 import { HoverButton } from "./hoverbutton";
+import { Leaderboard, type Standings } from "./season";
+
+const EMPTY_STANDINGS: Standings = { board: [], self: null };
 
 // Live room tracker, redesigned as a Live / Leaderboard tab heading over one ranked
 // list (rank, avatar, mini-board, name, mistake dots, time + ✓/✗), with a bottom
@@ -237,6 +240,8 @@ function RosterRow({
   now,
   flash,
   picking,
+  rowRef,
+  pingRef,
 }: {
   p: PlayerState;
   rank: number;
@@ -244,15 +249,27 @@ function RosterRow({
   now: number;
   flash: boolean;
   picking: boolean;
+  // attached only to your row, so the locate arrow can scroll + pulse it.
+  rowRef?: React.Ref<HTMLDivElement>;
+  pingRef?: React.Ref<HTMLSpanElement>;
 }) {
   const you = p.userId === selfId;
   return (
     <div
+      ref={rowRef}
       className={
-        "flex flex-none items-center gap-2 rounded-[9px] px-2.5 py-1.5 min-[820px]:gap-2.75 min-[820px]:px-3 min-[820px]:py-2.25 " +
+        "relative flex flex-none items-center gap-2 rounded-[9px] px-2.5 py-1.5 min-[820px]:gap-2.75 min-[820px]:px-3 min-[820px]:py-2.25 " +
         (you ? "bg-zinc-100/10" : "bg-zinc-900/60")
       }
     >
+      {/* radar-ping ring for the locate pulse; idle at opacity 0, animated on jump */}
+      {you && (
+        <span
+          ref={pingRef}
+          aria-hidden
+          className="pointer-events-none absolute inset-0 rounded-[9px] opacity-0"
+        />
+      )}
       <Rank rank={rank} />
       <Avatar p={p} selfId={selfId} picking={picking} />
       <MiniBoard p={p} flash={flash} />
@@ -271,7 +288,7 @@ function RosterRow({
   );
 }
 
-export type RosterView = "live" | "board";
+export type RosterView = "live" | "board" | "season";
 
 const TAB =
   "relative inline-flex cursor-pointer items-center gap-1.5 bg-transparent px-0 pt-0.5 pb-1.75 font-sans text-[11px] font-bold uppercase tracking-[0.07em] transition-opacity duration-150 ease-out";
@@ -279,13 +296,16 @@ const TAB_ON =
   " text-zinc-100 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-zinc-300 after:content-['']";
 const TAB_OFF = " text-zinc-600";
 
-// Subtle tab heading that flips the list between the live room and today's standings.
+// Subtle tab heading that flips the list between the live room, today's standings,
+// and (when there are scored rows) the cumulative season / all-time table.
 function Tabs({
   view,
   setView,
+  showSeason,
 }: {
   view: RosterView;
   setView: (v: RosterView) => void;
+  showSeason: boolean;
 }) {
   return (
     <div className="flex flex-none items-center gap-4 px-0.5 pb-0.5">
@@ -304,6 +324,15 @@ function Tabs({
       >
         Leaderboard
       </HoverButton>
+      {showSeason && (
+        <HoverButton
+          hover="opacity-60"
+          onClick={() => setView("season")}
+          className={TAB + (view === "season" ? TAB_ON : TAB_OFF)}
+        >
+          Season
+        </HoverButton>
+      )}
     </div>
   );
 }
@@ -317,23 +346,37 @@ const ordinal = (n: number): string => ORD[n] ?? `${n}th`;
 export function Roster({
   players,
   selfId,
+  selfName,
+  selfAvatar,
   view: viewProp,
   onViewChange,
   showStanding = false,
+  season,
+  allTime,
+  jumpSignal,
 }: {
   players: PlayerState[];
   selfId: string;
+  selfName?: string;
+  selfAvatar?: string;
   // controlled by GameView (so finishing can flip to the leaderboard); uncontrolled
   // (own state) when omitted, e.g. the standalone preview panel.
   view?: RosterView;
   onViewChange?: (v: RosterView) => void;
   // pinned "Your standing" row — desktop rail only (hidden on mobile).
   showStanding?: boolean;
+  // cumulative standings behind the "Season" tab; tab is hidden when both absent.
+  season?: Standings;
+  allTime?: Standings;
+  // bump (from the end-screen locate arrow) to scroll your row in + pulse it.
+  jumpSignal?: number;
 }) {
   const [viewState, setViewState] = useState<RosterView>("live");
   const view = viewProp ?? viewState;
   const setView = onViewChange ?? setViewState;
   const live = view === "live";
+  const seasonAvailable = season != null || allTime != null;
+  const showSeason = view === "season" && seasonAvailable;
 
   const now = useNow(players.some((p) => p.done === null));
   const flashing = useFlash(players);
@@ -341,29 +384,90 @@ export function Roster({
   const selfIdx = sorted.findIndex((p) => p.userId === selfId);
   const self = selfIdx >= 0 ? sorted[selfIdx] : null;
 
+  // The locate arrow bumps jumpSignal; scroll your row to center and run a one-shot
+  // pulse (cream focus glow on the row + a radar ping ring). WAAPI restarts cleanly
+  // on every bump. Skip the initial mount so it only fires on a real click.
+  const selfRowRef = useRef<HTMLDivElement>(null);
+  const pingRef = useRef<HTMLSpanElement>(null);
+  const armed = useRef(false);
+  useEffect(() => {
+    if (!armed.current) {
+      armed.current = true;
+      return;
+    }
+    const row = selfRowRef.current;
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    row.animate(
+      [
+        { backgroundColor: "rgba(244,244,245,0.10)", boxShadow: "0 0 0 0 rgba(244,244,245,0)" },
+        {
+          backgroundColor: "rgba(244,244,245,0.28)",
+          boxShadow:
+            "0 0 0 1.5px rgba(244,244,245,0.6), 0 10px 34px -10px rgba(244,244,245,0.32)",
+          offset: 0.12,
+        },
+        {
+          backgroundColor: "rgba(244,244,245,0.15)",
+          boxShadow:
+            "0 0 0 1px rgba(244,244,245,0.22), 0 6px 20px -12px rgba(244,244,245,0.16)",
+          offset: 0.5,
+        },
+        { backgroundColor: "rgba(244,244,245,0.10)", boxShadow: "0 0 0 0 rgba(244,244,245,0)" },
+      ],
+      { duration: 1700, easing: "cubic-bezier(0.22,0.61,0.36,1)" },
+    );
+    pingRef.current?.animate(
+      [
+        { boxShadow: "0 0 0 0 rgba(244,244,245,0.5)", opacity: 1 },
+        { boxShadow: "0 0 0 8px rgba(244,244,245,0)", opacity: 0 },
+      ],
+      { duration: 900, easing: "ease-out" },
+    );
+  }, [jumpSignal]);
+
   return (
     <>
-      <Tabs view={view} setView={setView} />
-      <div className="list-fade flex max-h-[42vh] min-h-0 flex-col gap-1.25 overflow-y-auto scrollbar-thin min-[820px]:max-h-none min-[820px]:flex-1 min-[820px]:gap-1.5">
-        {sorted.length ? (
-          sorted.map((p, i) => (
-            <RosterRow
-              key={p.userId}
-              p={p}
-              rank={i + 1}
-              selfId={selfId}
-              now={now}
-              flash={flashing.has(p.userId)}
-              picking={live && p.picking}
-            />
-          ))
-        ) : (
-          <div className="px-2 py-6 text-center text-[13px] text-zinc-600">
-            No one here yet.
-          </div>
-        )}
-      </div>
-      {showStanding && self && (
+      <Tabs view={view} setView={setView} showSeason={seasonAvailable} />
+      {showSeason ? (
+        <div className="flex max-h-[46vh] min-h-0 flex-col min-[820px]:max-h-none min-[820px]:flex-1">
+          <Leaderboard
+            season={season ?? EMPTY_STANDINGS}
+            allTime={allTime ?? EMPTY_STANDINGS}
+            selfId={selfId}
+            name={selfName ?? "You"}
+            avatar={selfAvatar}
+            bare
+            fill
+          />
+        </div>
+      ) : (
+        <div className="list-fade flex max-h-[42vh] min-h-0 flex-col gap-1.25 overflow-y-auto scrollbar-thin min-[820px]:max-h-none min-[820px]:flex-1 min-[820px]:gap-1.5">
+          {sorted.length ? (
+            sorted.map((p, i) => {
+              const you = p.userId === selfId;
+              return (
+                <RosterRow
+                  key={p.userId}
+                  p={p}
+                  rank={i + 1}
+                  selfId={selfId}
+                  now={now}
+                  flash={flashing.has(p.userId)}
+                  picking={live && p.picking}
+                  rowRef={you ? selfRowRef : undefined}
+                  pingRef={you ? pingRef : undefined}
+                />
+              );
+            })
+          ) : (
+            <div className="px-2 py-6 text-center text-[13px] text-zinc-600">
+              No one here yet.
+            </div>
+          )}
+        </div>
+      )}
+      {showStanding && self && !showSeason && (
         <div className="hidden flex-none border-t border-dashed border-white/12 pt-2.5 min-[820px]:block">
           <div className="px-1 pb-1.5 text-[10px] uppercase tracking-[0.07em] text-zinc-600">
             Your standing · {ordinal(selfIdx + 1)} of {sorted.length}

@@ -1,5 +1,5 @@
 import { Flame, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { HoverButton } from "./hoverbutton";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import { colorFor, initials } from "./roster";
@@ -317,10 +317,19 @@ export function Leaderboard({
             (fill ? " flex min-h-0 flex-col" : "")) + (fill ? " h-full" : "")
       }
     >
-      <div className="flex flex-wrap items-center justify-between gap-2 px-1.5 pt-0.5 pb-3">
-        <span className="text-xs uppercase tracking-[0.05em] text-zinc-500">
-          Leaderboard
-        </span>
+      <div
+        className={
+          "flex flex-wrap items-center gap-2 px-1.5 pt-0.5 pb-3 " +
+          // embedded under the roster's "Season" tab the caption is redundant, so
+          // drop it and let the season/all-time toggle sit on its own.
+          (bare ? "justify-end" : "justify-between")
+        }
+      >
+        {!bare && (
+          <span className="text-xs uppercase tracking-[0.05em] text-zinc-500">
+            Leaderboard
+          </span>
+        )}
         <div className="flex items-center gap-2">
           <div className="inline-flex gap-0.5 rounded-full border border-[#26262a] bg-zinc-900 p-0.75">
             {tabs.map(([k, label]) => (
@@ -373,57 +382,6 @@ export function Leaderboard({
         query={searchable ? query : ""}
         fill={fill}
       />
-    </div>
-  );
-}
-
-// Same leaderboard in a dismissable modal, opened any time from the top-right
-// toggle. Mirrors the roster "see all" overlay (Esc / backdrop click to close).
-export function LeaderboardModal({
-  season,
-  allTime,
-  selfId,
-  name,
-  avatar,
-  onClose,
-}: {
-  season: Standings;
-  allTime: Standings;
-  selfId: string;
-  name: string;
-  avatar?: string;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-100 flex animate-overlay-fade items-start justify-center overflow-y-auto bg-[#030304]/72 p-4 pt-14 sm:items-center sm:pt-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div
-        className="flex max-h-[85vh] w-[min(560px,94vw)] animate-sheet-rise flex-col overflow-hidden rounded-2xl border border-[#26262a] bg-zinc-950 p-3.5 shadow-[0_40px_120px_-30px_#000]"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Room leaderboard"
-      >
-        <Leaderboard
-          season={season}
-          allTime={allTime}
-          selfId={selfId}
-          name={name}
-          avatar={avatar}
-          bare
-          searchable
-          onClose={onClose}
-        />
-      </div>
     </div>
   );
 }

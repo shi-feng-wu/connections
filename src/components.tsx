@@ -5,7 +5,7 @@ import { HoverButton } from "./hoverbutton";
 import { LEVELS, type Game, type Puzzle } from "./game";
 import type { PlayerState } from "./realtime";
 import { Roster, type RosterView } from "./roster";
-import { LeaderboardModal, type Standings } from "./season";
+import { type Standings } from "./season";
 
 // Loading / error / blocked screen, centered on the page. The in-progress state is
 // deliberately minimal: just the four category squares pulsing in sequence. Once the
@@ -128,8 +128,9 @@ function Header({
 // players section (Live / Leaderboard tabs + list). Desktop (≥820px): a 50/50 split
 // — board + footer on the left, and a right rail (header, tabs, list, pinned "Your
 // standing") that absolute-fills the column so it matches the board's height and
-// scrolls its list rather than driving the layout taller. The season leaderboard
-// (cumulative stats) opens in a modal from the end-screen trophy.
+// scrolls its list rather than driving the layout taller. The cumulative season /
+// all-time standings live behind the rail's "Season" tab; the end-screen locate
+// arrow jumps the list to your row.
 export function GameView({
   game,
   gameKey,
@@ -163,13 +164,19 @@ export function GameView({
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
-  // which list the rail/section shows: the live room or today's standings. Starts on
-  // the leaderboard for an already-finished (rehydrated) game.
+  // which list the rail/section shows: the live room, today's standings, or the
+  // cumulative season/all-time table. Starts on the leaderboard for an already-
+  // finished (rehydrated) game.
   const [view, setView] = useState<RosterView>(
     game.status === "playing" ? "live" : "board",
   );
-  // season leaderboard modal (opened by the end-screen trophy).
-  const [seasonOpen, setSeasonOpen] = useState(false);
+  // bumping this asks the Roster to scroll to your row and pulse it (end-screen
+  // locate arrow). Jumping from the season table first drops back to today's list.
+  const [jumpNonce, setJumpNonce] = useState(0);
+  const jumpToSelf = (): void => {
+    setView((v) => (v === "season" ? "board" : v));
+    setJumpNonce((n) => n + 1);
+  };
 
   function showFeedback(msg: string): void {
     setFeedbackText(msg);
@@ -184,6 +191,7 @@ export function GameView({
   }, [game]);
 
   const hasSeason = season.board.length > 0 || allTime.board.length > 0;
+  const canJump = players.some((p) => p.userId === selfId);
 
   const header = (className: string) => (
     <Header
@@ -209,8 +217,8 @@ export function GameView({
             setView("board");
             onFinish();
           }}
-          onShowSeason={() => setSeasonOpen(true)}
-          hasSeason={hasSeason}
+          onJumpToSelf={jumpToSelf}
+          canJump={canJump}
           initialRevealed={initialRevealed}
         />
       </div>
@@ -222,23 +230,17 @@ export function GameView({
           <Roster
             players={players}
             selfId={selfId}
+            selfName={selfName}
+            selfAvatar={selfAvatar}
             view={view}
             onViewChange={setView}
+            season={hasSeason ? season : undefined}
+            allTime={hasSeason ? allTime : undefined}
+            jumpSignal={jumpNonce}
             showStanding
           />
         </div>
       </div>
-
-      {seasonOpen && (
-        <LeaderboardModal
-          season={season}
-          allTime={allTime}
-          selfId={selfId}
-          name={selfName}
-          avatar={selfAvatar}
-          onClose={() => setSeasonOpen(false)}
-        />
-      )}
     </div>
   );
 }

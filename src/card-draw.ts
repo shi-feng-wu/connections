@@ -37,6 +37,7 @@ export type CardOpts = { puzzleNo?: number; puzzleDate?: string };
 // so the light text stays legible regardless of the viewer's Discord theme.)
 const BG = "#09090b"; // zinc-950
 const CARD_BORDER_W = 2; // border drawn last, on top of the bg/content
+const CARD_R = 18; // rounded card corners (corners outside it stay transparent)
 const PANEL = "rgba(24,24,27,0.6)"; // zinc-900/60 — composited over BG
 const PANEL_BORDER = "#232327";
 const TITLE = "#efefe6"; // warm off-white wordmark
@@ -269,8 +270,21 @@ function drawIcon(
   ctx.restore();
 }
 
+// The card's rounded background — a rounded-rect fill of BG; the corners outside the
+// radius stay transparent so the card reads as a rounded panel on the channel.
+function fillCardBg(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  height: number,
+): void {
+  ctx.fillStyle = BG;
+  roundRect(ctx, 0, 0, W, height, CARD_R);
+  ctx.fill();
+}
+
 // The card's outer border (zinc-800), drawn last so neither the bg nor content covers
-// it. Inset by half the line width so the full stroke sits inside the canvas.
+// it. Inset by half the line width so the full stroke sits inside the canvas, and its
+// radius matches the bg so the rounded corners line up.
 function strokeCardBorder(
   ctx: CanvasRenderingContext2D,
   W: number,
@@ -279,7 +293,8 @@ function strokeCardBorder(
   const w = CARD_BORDER_W;
   ctx.strokeStyle = ZINC_800;
   ctx.lineWidth = w;
-  ctx.strokeRect(w / 2, w / 2, W - w, height - w);
+  roundRect(ctx, w / 2, w / 2, W - w, height - w, CARD_R - w / 2);
+  ctx.stroke();
 }
 
 function fitText(
@@ -379,9 +394,8 @@ export async function drawRoster(
 ): Promise<void> {
   const { shown, cols, panelW, W, height, leader } = layout;
 
-  // Discord-default-dark background, so the card blends into the channel.
-  ctx.fillStyle = BG;
-  ctx.fillRect(0, 0, W, height);
+  // Rounded near-black card background (border stroked last, below).
+  fillCardBg(ctx, W, height);
 
   // ---- header (shared with the recap): "Now playing" eyebrow + brand mark over the
   // wordmark and a "Puzzle # · date" subline, with the Playing / Solved counts anchored
@@ -903,9 +917,8 @@ export async function drawRecap(
 ): Promise<void> {
   const { results, standings, W, height } = layout;
 
-  // Discord-default-dark background (see drawRoster) — blends into the channel.
-  ctx.fillStyle = BG;
-  ctx.fillRect(0, 0, W, height);
+  // Rounded near-black card background (see drawRoster); border stroked last.
+  fillCardBg(ctx, W, height);
 
   // ---- header (shared with the "who's playing" card): eyebrow + wordmark + subline,
   // with win streak (emerald) · win rate anchored right, then the full-width rule ----

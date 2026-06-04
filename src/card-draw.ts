@@ -95,7 +95,9 @@ const PAD_BOTTOM = 32;
 // with the Playing / Solved counts anchored right and a full-width rule beneath). The
 // header metrics live with the recap (RC_* constants); tiles start below its rule.
 const HEADER_GAP = 48; // min gap between the header's left block and its right stats
-const GRID_TOP = 146; // below the brand-header rule (RC_RULE_Y 126 + breathing room)
+// GRID_TOP (the first tile's top edge) is derived from the header rule (RC_RULE_Y) and so
+// lives with the RC_* header metrics below — keeping it a literal here let it silently
+// drift to a 2px gap when the header's top padding grew.
 
 // Square tiles, four across, up to three rows (so at most 12 — MAX_CARDS).
 const MAX_COLS = 4;
@@ -506,13 +508,10 @@ export async function drawRoster(
       ctx.fill();
     }
 
-    const timeStr = fmtTime(p.sec);
-    ctx.font = `${timeWeight} ${TIME_SIZE}px "Libre Franklin"`;
-    // Reserve a fixed slot sized for the widest time (H:MM:SS) so the status
-    // icon and its gap never shift as the time grows; the time is drawn flush to
-    // the tile's right edge within this slot.
-    const slotW = ctx.measureText("0:00:00").width;
-    const statusLeft = px + panelW - TILE_PAD - (ICON + STATUS_GAP + slotW);
+    // The status icon sits just right of the mistake dots — anchored to the dots,
+    // not the time (which is drawn flush to the tile's right edge), so it never
+    // shifts as the time grows.
+    const statusLeft = barX + DOT + 3 * (DOT + DOT_GAP) + STATUS_GAP * 2;
     if (kind === "live") {
       const dx = statusLeft + ICON / 2;
       ctx.fillStyle = "rgba(52,211,153,0.22)"; // emerald-400 @ 22% — the live dot's halo
@@ -537,6 +536,7 @@ export async function drawRoster(
         iconColor,
       );
     }
+    const timeStr = fmtTime(p.sec);
     ctx.fillStyle = timeColor;
     ctx.font = `${timeWeight} ${TIME_SIZE}px "Libre Franklin"`;
     ctx.textAlign = "right";
@@ -600,11 +600,11 @@ const RC_MARK = 9; // brand-mark square
 const RC_MARK_GAP = 3;
 const RC_MARK_TO_TEXT = 10;
 const RC_EYE_SIZE = 11;
-const RC_EYE_BASE = RC_PAD_TOP + RC_MARK; // 37
+const RC_EYE_BASE = RC_PAD_TOP + RC_MARK; // 55
 const RC_TITLE_SIZE = 38;
-const RC_TITLE_BASE = RC_PAD_TOP + 52; // 80
+const RC_TITLE_BASE = RC_PAD_TOP + 52; // 98
 const RC_SUB_SIZE = 12.5;
-const RC_SUB_BASE = RC_TITLE_BASE + 28; // 108
+const RC_SUB_BASE = RC_TITLE_BASE + 28; // 126
 
 // right-anchored stat cluster (win streak · win rate)
 const RC_STAT_NUM = 30;
@@ -616,7 +616,10 @@ const RC_STAT_GAP = 22;
 const RC_STAT_DIV_TOP = 70;
 const RC_STAT_DIV_H = 36;
 
-const RC_RULE_Y = RC_SUB_BASE + 18; // 126 — the full-width divider under the header
+const RC_RULE_Y = RC_SUB_BASE + 18; // 144 — the full-width divider under the header
+// The "who's playing" tiles start 20px below that rule. Derived from RC_RULE_Y (not a
+// literal) so the breathing room tracks the header automatically — see the note by HEADER_GAP.
+const GRID_TOP = RC_RULE_Y + 20; // 164
 const RC_CAP_SIZE = 11;
 const RC_CAP_BASE = RC_RULE_Y + 31; // section caption baseline
 const RC_LIST_TOP = RC_CAP_BASE + 12; // first row's top edge

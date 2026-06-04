@@ -23,6 +23,7 @@
     "@discord/embedded-app-sdk": "^2.5.0",
     "@napi-rs/canvas": "^1.0.0",
     "@supabase/supabase-js": "^2.106.2",
+    "@vercel/analytics": "^2.0.1",
     "@vercel/functions": "^3.6.2",
     "lucide-react": "^1.17.0",
     "react": "^19.2.6",

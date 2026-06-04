@@ -34,8 +34,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const guildId = typeof body.guildId === 'string' ? body.guildId : null;
     const channelId = typeof body.channelId === 'string' ? body.channelId : null;
     const scope = canonicalScope(guildId, channelId);
-    // The card only lives on a guild channel (same gate as /api/join).
-    if (!scope || !scope.startsWith('g:')) {
+    // The card only lives on a guild channel (same gate as /api/join); per-channel now, so
+    // a channel id is required to locate the right card.
+    if (!scope || !scope.startsWith('g:') || !channelId) {
       res.status(200).json({ ok: false, reason: 'no-guild' });
       return;
     }
@@ -52,6 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       .select('players, message_id, channel_id, edited_at')
       .eq('scope_id', scope)
       .eq('puzzle_date', date)
+      .eq('channel_id', channelId)
       .maybeSingle();
     const players: CardPlayer[] = Array.isArray(card?.players) ? (card.players as CardPlayer[]) : [];
     const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
@@ -96,7 +98,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       .from('live_cards')
       .update({ edited_at: new Date().toISOString() })
       .eq('scope_id', scope)
-      .eq('puzzle_date', date);
+      .eq('puzzle_date', date)
+      .eq('channel_id', channelId);
     res.status(200).json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : 'error' });

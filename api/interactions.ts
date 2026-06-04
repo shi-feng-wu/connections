@@ -158,6 +158,7 @@ async function postCard(body: LaunchInteraction): Promise<void> {
     .select('players, message_id, channel_id, posted_at')
     .eq('scope_id', scope)
     .eq('puzzle_date', date)
+    .eq('channel_id', channelId)
     .maybeSingle();
   if (selErr) console.error('[card] live_cards select error (schema migrated?)', selErr.message);
 
@@ -245,7 +246,9 @@ async function postCard(body: LaunchInteraction): Promise<void> {
       edited_at: nowIso, // anchors the live-edit throttle in /api/refresh-card
       updated_at: nowIso,
     },
-    { onConflict: 'scope_id,puzzle_date' },
+    // Per-channel card: one row per (scope, day, channel). channelForRow == channelId here
+    // (the read is channel-scoped), so it's the PK's channel member.
+    { onConflict: 'scope_id,puzzle_date,channel_id' },
   );
   if (upErr) console.error('[card] live_cards upsert error (schema migrated?)', upErr.message);
 }

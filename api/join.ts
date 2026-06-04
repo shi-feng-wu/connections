@@ -38,7 +38,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const guildId = typeof body.guildId === 'string' ? body.guildId : null;
     const channelId = typeof body.channelId === 'string' ? body.channelId : null;
     const scope = canonicalScope(guildId, channelId);
-    if (!scope || !scope.startsWith('g:') || !guildId) {
+    // Per-channel card: no channel, no card (the card lives in the channel you're in).
+    if (!scope || !scope.startsWith('g:') || !guildId || !channelId) {
       res.status(200).json({ ok: false, reason: 'no-guild' });
       return;
     }
@@ -71,6 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       .select('players, message_id, channel_id, edited_at')
       .eq('scope_id', scope)
       .eq('puzzle_date', date)
+      .eq('channel_id', channelId)
       .maybeSingle();
     const existing: CardPlayer[] = Array.isArray(card?.players) ? (card.players as CardPlayer[]) : [];
 
@@ -108,17 +110,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     const now = new Date().toISOString();
-    // message_id/channel_id are omitted so the launch-established values survive
-    // (an upsert only overwrites the columns it lists).
+    // message_id is omitted so the launch-established value survives (an upsert only
+    // overwrites the columns it lists). channel_id is required now that it's part of the
+    // per-channel PK; it's the channel this player is in, which is the card's channel.
     await db.from('live_cards').upsert(
       {
         scope_id: scope,
         puzzle_date: date,
+        channel_id: channelId,
         players,
         ...(edited ? { edited_at: now } : {}),
         updated_at: now,
       },
-      { onConflict: 'scope_id,puzzle_date' },
+      { onConflict: 'scope_id,puzzle_date,channel_id' },
     );
     res.status(200).json({ ok: true, edited, players: players.length });
   } catch (e) {

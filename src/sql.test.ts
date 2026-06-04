@@ -52,7 +52,7 @@ beforeAll(async () => {
   await db.exec(`
     create table public.scores (
       id bigint generated always as identity primary key,
-      scope_id text, user_id text not null, name text not null, avatar text,
+      scope_id text, channel_id text, user_id text not null, name text not null, avatar text,
       score int not null default 0, mistakes int not null default 0,
       solved boolean not null default false, groups_solved smallint not null default 0,
       duration_ms int, puzzle_date date, created_at timestamptz not null default now()
@@ -226,5 +226,61 @@ describe("room_recap_stats", () => {
 
   it("is a 0 streak / 0 rate / 0 longest for a room with no rows", async () => {
     expect(await recapStats("g404", null, "2026-06-05")).toEqual({ streak: 0, win_pct: 0, max_streak: 0 });
+  });
+});
+
+// The p_channel param (null = whole server, a channel id = that channel only). Same scope
+// "gc", two channels: chA (anna) and chB (bret). Server view sees both; channel views isolate.
+describe("p_channel scoping", () => {
+  beforeAll(async () => {
+    const rows: [string, string, string, string, number, boolean, string][] = [
+      // scope, channel, user, name, score, solved, date
+      ["gc", "chA", "anna", "Anna", 500, true, "2026-06-01"],
+      ["gc", "chA", "anna", "Anna", 500, true, "2026-06-02"],
+      ["gc", "chB", "bret", "Bret", 800, true, "2026-06-01"],
+    ];
+    for (const [scope, channel, user, name, score, solved, date] of rows) {
+      await db.query(
+        `insert into public.scores (scope_id, channel_id, user_id, name, score, solved, puzzle_date)
+         values ($1,$2,$3,$4,$5,$6,$7)`,
+        [scope, channel, user, name, score, solved, date],
+      );
+    }
+  });
+
+  const boardCh = async (channel: string | null) =>
+    (
+      await db.query<{ user_id: string }>(`select user_id from public.room_board('gc', null, 50, $1)`, [channel])
+    ).rows.map((r) => r.user_id);
+
+  it("server view (p_channel null) sees every channel, ranked", async () => {
+    // anna totals 1000 (500+500) across two chA days; bret 800 in chB → anna ranks first.
+    expect(await boardCh(null)).toEqual(["anna", "bret"]);
+  });
+
+  it("channel view isolates to one channel", async () => {
+    expect(await boardCh("chA")).toEqual(["anna"]);
+    expect(await boardCh("chB")).toEqual(["bret"]);
+  });
+
+  it("current_streak is channel-scoped", async () => {
+    const s = async (channel: string | null) =>
+      Number((await db.query<{ s: number }>(`select public.current_streak('gc','anna',$1) as s`, [channel])).rows[0].s);
+    expect(await s(null)).toBe(2); // both anna days (chA)
+    expect(await s("chA")).toBe(2);
+    expect(await s("chB")).toBe(0); // anna never played chB
+  });
+
+  it("day_results and room_self honor the channel", async () => {
+    const day = await db.query<{ user_id: string }>(
+      `select user_id from public.day_results('gc','2026-06-01'::date,$1)`,
+      ["chB"],
+    );
+    expect(day.rows.map((r) => r.user_id)).toEqual(["bret"]);
+    const selfRaw = (
+      await db.query<{ r: unknown }>(`select public.room_self('gc', null, 'anna', $1) as r`, ["chA"])
+    ).rows[0].r;
+    const self = typeof selfRaw === "string" ? JSON.parse(selfRaw) : selfRaw;
+    expect(self).toMatchObject({ rank: 1, total_players: 1, total: 1000, plays: 2 });
   });
 });

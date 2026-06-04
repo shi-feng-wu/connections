@@ -512,13 +512,15 @@ const STATES = [
   <State key="l" label="Results · lost" game={lost} revealed={[2, 3]} />,
 ];
 const pick = decodeURIComponent(location.hash.slice(1)).toLowerCase();
-const known = ["progress", "perfect", "won", "lost", "loading", "error", "blocked", "simulate", "feedback", "card", "pip"];
+const known = ["progress", "perfect", "won", "lost", "loading", "error", "blocked", "simulate", "feedback", "card", "pip", "scope"];
 // #simulate and #feedback both isolate the Simulate playground (#feedback also
 // auto-fires a one-away guess to surface the header feedback pill); #card isolates the
 // Discord "who's playing" card; #pip isolates the collapsed PIP thumbnail.
 const onlySim = pick === "simulate" || pick === "feedback";
 const onlyCard = pick === "card";
 const onlyPip = pick === "pip";
+// #scope isolates the roster panel that carries the Channel/Server toggle.
+const onlyScope = pick === "scope";
 const shown =
   known.includes(pick) && !onlySim && !onlyCard && !onlyPip
     ? STATES.filter((s) => String(s.props.label).toLowerCase().includes(pick))
@@ -548,7 +550,7 @@ createRoot(document.getElementById("preview")!).render(
     {showCards && <Card label="Discord card · busy room" players={CARD_BUSY} />}
     {showCards && <Card label="Discord card · single player" players={CARD_SOLO} />}
     {showCards && <Recap label="Discord recap · daily reset post" data={CARD_RECAP} />}
-    {!onlySim && !onlyCard && (
+    {!onlySim && !onlyCard && !onlyScope && (
       <section className="w-full max-w-[360px] px-4">
         <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
           Roster panel · standalone (Live tab)
@@ -556,7 +558,7 @@ createRoot(document.getElementById("preview")!).render(
         <Roster players={ROSTER} selfId={SELF_ID} />
       </section>
     )}
-    {!onlySim && !onlyCard && (
+    {!onlySim && !onlyCard && !onlyScope && (
       <section className="w-full max-w-[360px] px-4">
         <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
           Roster panel · no scores yet (Season tab → placeholder)
@@ -587,6 +589,8 @@ createRoot(document.getElementById("preview")!).render(
           allTime={ALLTIME}
           view="season"
           onViewChange={noop}
+          scope="channel"
+          onScopeChange={noop}
         />
       </section>
     )}

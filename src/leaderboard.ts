@@ -56,33 +56,39 @@ export type SelfStanding = {
 };
 
 // Leaderboard rows for a room over a window, richest-first. `currentSeasonStart()`
-// for the season tab, `null` for all-time.
+// for the season tab, `null` for all-time. `channelId` narrows to one channel (the
+// "this channel" view); null/omitted = the whole server (all history).
 export async function roomBoard(
   scopeId: string,
   since: string | null,
   limit = 50,
+  channelId: string | null = null,
 ): Promise<BoardRow[]> {
   if (!supabase) return [];
   const { data, error } = await supabase.rpc('room_board', {
     p_scope: scopeId,
     p_since: since,
     p_limit: limit,
+    ...(channelId ? { p_channel: channelId } : {}),
   });
   if (error) return [];
   return (data ?? []) as BoardRow[];
 }
 
 // One player's standing in a room over a window (rank, total players, stats).
+// `channelId` narrows to one channel; null/omitted = the whole server.
 export async function roomSelf(
   scopeId: string,
   since: string | null,
   userId: string,
+  channelId: string | null = null,
 ): Promise<SelfStanding | null> {
   if (!supabase) return null;
   const { data, error } = await supabase.rpc('room_self', {
     p_scope: scopeId,
     p_since: since,
     p_user: userId,
+    ...(channelId ? { p_channel: channelId } : {}),
   });
   if (error || !data) return null;
   return data as SelfStanding;

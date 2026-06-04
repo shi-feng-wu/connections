@@ -159,17 +159,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   const date = todayET();
-  // Identity sources: who joined the room's card, and who finished (scores). Either alone
+  // View: channel (default) narrows to the channel the player is in; server aggregates the
+  // whole guild. scope_id stays the guild either way — channel view adds a channel_id filter.
+  const wantChannel = req.body?.scopeMode !== 'server';
+
+  // Identity sources: who joined the room's card(s), and who finished (scores). Either alone
   // can be the whole roster (e.g. everyone played without a clean join), so union them.
-  const [{ data: card }, { data: scoreData }] = await Promise.all([
-    db.from('live_cards').select('players').eq('scope_id', scope).eq('puzzle_date', date).maybeSingle(),
-    db
-      .from('scores')
-      .select('user_id, name, avatar, solved, mistakes, groups_solved, duration_ms')
-      .eq('scope_id', scope)
-      .eq('puzzle_date', date),
-  ]);
-  const joined: CardPlayer[] = Array.isArray(card?.players) ? (card.players as CardPlayer[]) : [];
+  let cardQ = db.from('live_cards').select('players').eq('scope_id', scope).eq('puzzle_date', date);
+  let scoreQ = db
+    .from('scores')
+    .select('user_id, name, avatar, solved, mistakes, groups_solved, duration_ms')
+    .eq('scope_id', scope)
+    .eq('puzzle_date', date);
+  if (wantChannel && channelId) {
+    cardQ = cardQ.eq('channel_id', channelId);
+    scoreQ = scoreQ.eq('channel_id', channelId);
+  }
+  const [{ data: cardRows }, { data: scoreData }] = await Promise.all([cardQ, scoreQ]);
+
+  // Server view: a guild scope has one card row per channel — flatten all their players.
+  // Channel view: at most one row. assembleRoster dedupes by id either way.
+  const joined: CardPlayer[] = ((cardRows as { players: unknown }[] | null) ?? []).flatMap((c) =>
+    Array.isArray(c.players) ? (c.players as CardPlayer[]) : [],
+  );
   const scoreRows = (scoreData as ScoreRow[] | null) ?? [];
 
   const allIds = [...new Set([...joined.map((p) => p.id), ...scoreRows.map((s) => s.user_id)])];

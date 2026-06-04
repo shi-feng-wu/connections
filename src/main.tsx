@@ -1,5 +1,6 @@
 import { patchUrlMappings } from '@discord/embedded-app-sdk';
 import { createRoot } from 'react-dom/client';
+import { Analytics } from '@vercel/analytics/react';
 import './index.css';
 import { App } from './App';
 
@@ -19,5 +20,10 @@ if (isEmbedded && supabaseUrl) {
 }
 
 createRoot(document.getElementById('app')!).render(
-  <App isEmbedded={isEmbedded} initialRoom={params.get('room') ?? 'local'} />,
+  <>
+    <App isEmbedded={isEmbedded} initialRoom={params.get('room') ?? 'local'} />
+    {/* First-party Web Analytics; renders null and beacons /_vercel/insights/* on
+        the same origin, so it rides Discord's proxy without a URL mapping. */}
+    <Analytics />
+  </>,
 );

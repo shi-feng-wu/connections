@@ -4,7 +4,7 @@ import { Board, type BoardSnapshot } from "./board";
 import { HoverButton } from "./hoverbutton";
 import { LEVELS, type Game, type Puzzle } from "./game";
 import type { PlayerState } from "./realtime";
-import { Roster, type RosterView } from "./roster";
+import { Roster, type RosterScope, type RosterView } from "./roster";
 import { type Standings } from "./season";
 
 // Loading / error / blocked screen, centered on the page. The in-progress state is
@@ -143,6 +143,8 @@ export function GameView({
   selfAvatar,
   season,
   allTime,
+  scope,
+  onScopeChange,
   onPresence,
   onCommit,
   onFinish,
@@ -156,6 +158,9 @@ export function GameView({
   selfAvatar?: string;
   season: Standings;
   allTime: Standings;
+  // shared Channel/Server toggle (guild launches only); omitted → no toggle.
+  scope?: RosterScope;
+  onScopeChange?: (s: RosterScope) => void;
   onPresence: (snap: BoardSnapshot) => void;
   onCommit?: (guess: string[]) => Promise<boolean>;
   onFinish: () => void;
@@ -238,6 +243,8 @@ export function GameView({
             selfAvatar={selfAvatar}
             view={view}
             onViewChange={setView}
+            scope={scope}
+            onScopeChange={onScopeChange}
             season={season}
             allTime={allTime}
             jumpSignal={jumpNonce}

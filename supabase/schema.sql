@@ -47,8 +47,15 @@ alter table public.scores add column if not exists scope_id text;
 alter table public.scores add column if not exists groups_solved smallint not null default 0;
 update public.scores set groups_solved = 4 where solved and groups_solved = 0;
 
+-- Per-channel dimension. scope_id stays g:<guild> (the server view + all history); channel_id
+-- narrows a leaderboard/roster/recap to one channel. Written by /api/score from the launch's
+-- channelId. Old rows are NULL → they only ever match the server view, never a channel view
+-- (per-channel views are forward-looking; the channel of a historical game isn't recoverable).
+alter table public.scores add column if not exists channel_id text;
+
 create index if not exists scores_puzzle_idx on public.scores (puzzle_id, score desc);
 create index if not exists scores_season_idx on public.scores (scope_id, puzzle_date);
+create index if not exists scores_channel_season_idx on public.scores (scope_id, channel_id, puzzle_date);
 
 -- Cumulative per-player totals for one room since a date, highest first.
 -- Latest name/avatar (by puzzle date) represents each player.
@@ -87,8 +94,10 @@ grant execute on function public.season_standings(text, date, int) to anon, auth
 drop function if exists public.room_week_board(text, date, int);
 drop function if exists public.room_week_self(text, date, date, text);
 
--- Current solve streak for one player in one room (a loss/gap breaks it).
-create or replace function public.current_streak(p_scope text, p_user text)
+-- Current solve streak for one player in one room (a loss/gap breaks it). p_channel
+-- narrows to one channel (null = the whole scope / server view).
+drop function if exists public.current_streak(text, text);
+create or replace function public.current_streak(p_scope text, p_user text, p_channel text default null)
 returns int
 language sql
 stable
@@ -97,6 +106,7 @@ as $$
     select distinct puzzle_date as d
     from public.scores
     where scope_id = p_scope and user_id = p_user
+      and (p_channel is null or channel_id = p_channel)
       and solved and puzzle_date is not null
   ),
   -- islands trick: consecutive dates share one (date - rownum) key, so the
@@ -109,6 +119,7 @@ as $$
     select max(puzzle_date) as d
     from public.scores
     where scope_id = p_scope and user_id = p_user and puzzle_date is not null
+      and (p_channel is null or channel_id = p_channel)
   )
   select coalesce(case
     when (select d from last_played) is null then 0
@@ -121,7 +132,7 @@ as $$
   end, 0);
 $$;
 
-grant execute on function public.current_streak(text, text) to anon, authenticated;
+grant execute on function public.current_streak(text, text, text) to anon, authenticated;
 
 -- Leaderboard rows for a window: one per player, richest-first, with every
 -- column the end screen shows. p_since NULL = all-time.
@@ -129,7 +140,8 @@ drop function if exists public.room_board(text, date, int);
 create or replace function public.room_board(
   p_scope text,
   p_since date default null,
-  p_limit int default 50
+  p_limit int default 50,
+  p_channel text default null
 )
 returns table (
   user_id text, name text, avatar text,
@@ -148,19 +160,21 @@ as $$
            count(*) filter (where s.solved)::int      as wins,
            round(avg(s.mistakes)::numeric, 1)::float8 as avg_mistakes
     from public.scores s
-    where s.scope_id = p_scope and (p_since is null or s.puzzle_date >= p_since)
+    where s.scope_id = p_scope
+      and (p_channel is null or s.channel_id = p_channel)
+      and (p_since is null or s.puzzle_date >= p_since)
     group by s.user_id
   )
   select a.user_id, a.name, a.avatar, a.total, a.plays, a.wins,
          case when a.plays > 0 then round(100.0 * a.wins / a.plays)::int else 0 end as win_pct,
          a.avg_mistakes,
-         public.current_streak(p_scope, a.user_id) as streak
+         public.current_streak(p_scope, a.user_id, p_channel) as streak
   from agg a
   order by a.total desc, a.plays asc
   limit p_limit;
 $$;
 
-grant execute on function public.room_board(text, date, int) to anon, authenticated;
+grant execute on function public.room_board(text, date, int, text) to anon, authenticated;
 
 -- One player's standing for a window as JSON: rank, total players, their stats.
 -- Backs the end screen's pinned "your standing" row. p_since NULL = all-time.
@@ -168,7 +182,8 @@ drop function if exists public.room_self(text, date, text);
 create or replace function public.room_self(
   p_scope text,
   p_since date,
-  p_user  text
+  p_user  text,
+  p_channel text default null
 )
 returns json
 language sql
@@ -181,7 +196,9 @@ as $$
            count(*) filter (where solved)::int      as wins,
            round(avg(mistakes)::numeric, 1)::float8 as avg_mistakes
     from public.scores
-    where scope_id = p_scope and (p_since is null or puzzle_date >= p_since)
+    where scope_id = p_scope
+      and (p_channel is null or channel_id = p_channel)
+      and (p_since is null or puzzle_date >= p_since)
     group by user_id
   ),
   ranked as (
@@ -198,11 +215,11 @@ as $$
     'win_pct',       coalesce((select case when plays > 0 then round(100.0 * wins / plays)::int else 0 end
                         from ranked where user_id = p_user), 0),
     'avg_mistakes',  coalesce((select avg_mistakes from ranked where user_id = p_user), 0),
-    'streak',        public.current_streak(p_scope, p_user)
+    'streak',        public.current_streak(p_scope, p_user, p_channel)
   );
 $$;
 
-grant execute on function public.room_self(text, date, text) to anon, authenticated;
+grant execute on function public.room_self(text, date, text, text) to anon, authenticated;
 
 -- RLS: the anon key may read the board but never write it. Scores are written
 -- only by /api/score via the service role (bypasses RLS), after it verifies
@@ -274,6 +291,25 @@ create table if not exists public.recap_posts (
   primary key (scope_id, puzzle_date)
 );
 
+-- Per-channel recaps: channel_id joins the idempotency key so each channel that played
+-- gets its own recap per day. Old rows backfill to '' (an empty string can't collide with
+-- a real channel snowflake; those past days are never re-posted). Guarded so re-running
+-- the schema is a no-op once the PK is already the 3-column shape.
+alter table public.recap_posts add column if not exists channel_id text not null default '';
+do $$
+declare pk_cols text;
+begin
+  select string_agg(a.attname, ',' order by array_position(c.conkey, a.attnum))
+    into pk_cols
+  from pg_constraint c
+  join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any(c.conkey)
+  where c.conrelid = 'public.recap_posts'::regclass and c.contype = 'p';
+  if pk_cols is distinct from 'scope_id,puzzle_date,channel_id' then
+    alter table public.recap_posts drop constraint if exists recap_posts_pkey;
+    alter table public.recap_posts add constraint recap_posts_pkey primary key (scope_id, puzzle_date, channel_id);
+  end if;
+end $$;
+
 alter table public.recap_channels enable row level security;
 alter table public.recap_posts    enable row level security;
 
@@ -281,7 +317,7 @@ alter table public.recap_posts    enable row level security;
 -- (solved before unsolved, then score, fewer mistakes, faster). Backs the daily
 -- recap's "yesterday's results" block. Mirrors season_standings' shape/style.
 drop function if exists public.day_results(text, date);
-create or replace function public.day_results(p_scope text, p_date date)
+create or replace function public.day_results(p_scope text, p_date date, p_channel text default null)
 returns table (
   user_id text, name text, avatar text,
   score int, mistakes int, solved boolean,
@@ -294,10 +330,11 @@ as $$
          s.solved, s.groups_solved, s.duration_ms
   from public.scores s
   where s.scope_id = p_scope and s.puzzle_date = p_date
+    and (p_channel is null or s.channel_id = p_channel)
   order by s.solved desc, s.score desc, s.mistakes asc, s.duration_ms asc nulls last;
 $$;
 
-grant execute on function public.day_results(text, date) to anon, authenticated;
+grant execute on function public.day_results(text, date, text) to anon, authenticated;
 
 -- Room-level header stats for the daily recap, as of a date: the room's current
 -- solve streak (consecutive most-recent days at least one player solved), its longest
@@ -310,7 +347,8 @@ drop function if exists public.room_recap_stats(text, date, date);
 create or replace function public.room_recap_stats(
   p_scope text,
   p_since date default null,
-  p_date  date default null
+  p_date  date default null,
+  p_channel text default null
 )
 returns table (streak int, win_pct int, max_streak int)
 language sql
@@ -320,6 +358,7 @@ as $$
     select s.puzzle_date as d, bool_or(s.solved) as solved
     from public.scores s
     where s.scope_id = p_scope
+      and (p_channel is null or s.channel_id = p_channel)
       and s.puzzle_date is not null
       and (p_date is null or s.puzzle_date <= p_date)
     group by s.puzzle_date
@@ -356,7 +395,7 @@ as $$
   select (select n from streak), (select pct from rate), (select n from longest);
 $$;
 
-grant execute on function public.room_recap_stats(text, date, date) to anon, authenticated;
+grant execute on function public.room_recap_stats(text, date, date, text) to anon, authenticated;
 
 -- In-progress / finished daily state, per player per puzzle: the authoritative
 -- record of what a player has actually guessed today. /api/guess appends each
@@ -414,5 +453,26 @@ alter table public.live_cards add column if not exists edited_at timestamptz;
 -- not to be editable). Unused now that the card is a bot message; retained so old rows load.
 alter table public.live_cards add column if not exists interaction_token text;
 alter table public.live_cards add column if not exists token_at          timestamptz;
+
+-- Per-channel cards: channel_id joins the key so each channel gets its own "who's playing"
+-- card per day (matching the Wordle Activity), instead of one card per guild living in the
+-- first channel to launch. A row with a null channel_id is at most today's pre-migration
+-- card (ephemeral UI, rebuilt on the next launch), so it's safe to drop before channel_id
+-- becomes a PK member. Guarded so re-running the schema is a no-op once the PK is widened.
+delete from public.live_cards where channel_id is null;
+do $$
+declare pk_cols text;
+begin
+  select string_agg(a.attname, ',' order by array_position(c.conkey, a.attnum))
+    into pk_cols
+  from pg_constraint c
+  join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any(c.conkey)
+  where c.conrelid = 'public.live_cards'::regclass and c.contype = 'p';
+  if pk_cols is distinct from 'scope_id,puzzle_date,channel_id' then
+    alter table public.live_cards alter column channel_id set not null;
+    alter table public.live_cards drop constraint if exists live_cards_pkey;
+    alter table public.live_cards add constraint live_cards_pkey primary key (scope_id, puzzle_date, channel_id);
+  end if;
+end $$;
 
 alter table public.live_cards enable row level security;

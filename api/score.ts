@@ -125,6 +125,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         puzzle_id: puzzle.id,
         puzzle_date: puzzle.date,
         scope_id: scopeId,
+        // Records which channel this finish happened in, so the leaderboard/roster can be
+        // narrowed to one channel (server view ignores it). null for a c: DM/group scope.
+        channel_id: channelId,
         user_id: user.id,
         name: user.name,
         avatar: user.avatar ?? null,

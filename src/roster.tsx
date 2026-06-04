@@ -223,14 +223,17 @@ function Mistakes({ p }: { p: PlayerState }) {
   );
 }
 
-const TIME = "text-[12px] tabular-nums tracking-[0.01em] min-[820px]:text-[13px]";
+// ml-auto pins the time to the box's right edge, leaving the status icon at the
+// left — anchored next to the mistake dots rather than floating with the time.
+const TIME =
+  "ml-auto text-[12px] tabular-nums tracking-[0.01em] min-[820px]:text-[13px]";
 
 function Status({ p, now }: { p: PlayerState; now: number }) {
   const time = fmtElapsed(p, now);
   // Fixed width (not min-w) sized for the widest case — status icon + H:MM:SS —
   // so the time column never changes size as the elapsed time grows past 1h.
   const box =
-    "flex w-[66px] flex-none items-center justify-end gap-1.5 min-[820px]:w-[74px]";
+    "flex w-[66px] flex-none items-center gap-1.5 min-[820px]:w-[74px]";
   if (p.done === "lost")
     return (
       <div className={box}>
@@ -321,6 +324,9 @@ function RosterRow({
 }
 
 export type RosterView = "live" | "season" | "all";
+// Which room the roster + leaderboard show: the channel you're playing in, or the whole
+// server. Shared across all three tabs (a launch in a guild only — DMs have no distinction).
+export type RosterScope = "channel" | "server";
 
 const TAB =
   "relative inline-flex cursor-pointer items-center gap-1.5 bg-transparent px-0 pt-0.5 pb-1.75 font-sans text-[11px] font-bold uppercase tracking-[0.07em] transition-opacity duration-150 ease-out";
@@ -335,38 +341,63 @@ function Tabs({
   view,
   setView,
   showSeason,
+  scope,
+  onScopeChange,
 }: {
   view: RosterView;
   setView: (v: RosterView) => void;
   showSeason: boolean;
+  // Channel/Server toggle; rendered only when provided (a guild launch). Controls all tabs.
+  scope?: RosterScope;
+  onScopeChange?: (s: RosterScope) => void;
 }) {
   return (
-    <div className="flex flex-none items-center gap-4 px-0.5 pb-0.5">
-      <HoverButton
-        hover="opacity-60"
-        onClick={() => setView("live")}
-        className={TAB + (view === "live" ? TAB_ON : TAB_OFF)}
-      >
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-        Live
-      </HoverButton>
-      {showSeason && (
-        <>
+    <div className="flex flex-none items-center justify-between gap-4 px-0.5 pb-0.5">
+      <div className="flex items-center gap-4">
+        <HoverButton
+          hover="opacity-60"
+          onClick={() => setView("live")}
+          className={TAB + (view === "live" ? TAB_ON : TAB_OFF)}
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+          Live
+        </HoverButton>
+        {showSeason && (
+          <>
+            <HoverButton
+              hover="opacity-60"
+              onClick={() => setView("season")}
+              className={TAB + (view === "season" ? TAB_ON : TAB_OFF)}
+            >
+              Season
+            </HoverButton>
+            <HoverButton
+              hover="opacity-60"
+              onClick={() => setView("all")}
+              className={TAB + (view === "all" ? TAB_ON : TAB_OFF)}
+            >
+              All-time
+            </HoverButton>
+          </>
+        )}
+      </div>
+      {scope && onScopeChange && (
+        <div className="flex items-center gap-3">
           <HoverButton
             hover="opacity-60"
-            onClick={() => setView("season")}
-            className={TAB + (view === "season" ? TAB_ON : TAB_OFF)}
+            onClick={() => onScopeChange("channel")}
+            className={TAB + (scope === "channel" ? TAB_ON : TAB_OFF)}
           >
-            Season
+            Channel
           </HoverButton>
           <HoverButton
             hover="opacity-60"
-            onClick={() => setView("all")}
-            className={TAB + (view === "all" ? TAB_ON : TAB_OFF)}
+            onClick={() => onScopeChange("server")}
+            className={TAB + (scope === "server" ? TAB_ON : TAB_OFF)}
           >
-            All-time
+            Server
           </HoverButton>
-        </>
+        </div>
       )}
     </div>
   );
@@ -382,6 +413,8 @@ export function Roster({
   selfAvatar,
   view: viewProp,
   onViewChange,
+  scope,
+  onScopeChange,
   season,
   allTime,
   jumpSignal,
@@ -393,6 +426,9 @@ export function Roster({
   // controlled by GameView; uncontrolled (own state) when omitted (preview panel).
   view?: RosterView;
   onViewChange?: (v: RosterView) => void;
+  // shared Channel/Server toggle (guild launches only); omitted → no toggle shown.
+  scope?: RosterScope;
+  onScopeChange?: (s: RosterScope) => void;
   // cumulative standings behind the Season / All-time tabs; tabs hidden when absent.
   season?: Standings;
   allTime?: Standings;
@@ -461,7 +497,13 @@ export function Roster({
 
   return (
     <>
-      <Tabs view={view} setView={setView} showSeason={seasonAvailable} />
+      <Tabs
+        view={view}
+        setView={setView}
+        showSeason={seasonAvailable}
+        scope={scope}
+        onScopeChange={onScopeChange}
+      />
       {/* key={view} remounts the active panel on each tab change so animate-tab-in
           re-fires (incl. Season↔All-time, which reuse one element) — the new list
           fades up on the site's score-hero glide. */}

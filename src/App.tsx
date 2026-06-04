@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { BoardSnapshot } from "./board";
 import { GameView, LoadingScreen } from "./components";
 import { PipThumbnail } from "./pip";
+import type { RosterScope } from "./roster";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
 import {
   currentSeasonStart,
@@ -21,6 +22,25 @@ import { canonicalScope } from "./scope";
 import type { Standings } from "./season";
 
 const EMPTY_STANDINGS: Standings = { board: [], self: null };
+
+// Persist the Channel/Server toggle across launches. localStorage is per-origin (the
+// activity's discordsays.com proxy), so the choice survives reopening the Activity. Wrapped
+// because storage can throw in a partitioned/blocked iframe — there we just don't persist.
+const SCOPE_KEY = "connections:scopeMode";
+function readScopeMode(): RosterScope {
+  try {
+    return localStorage.getItem(SCOPE_KEY) === "server" ? "server" : "channel";
+  } catch {
+    return "channel";
+  }
+}
+function writeScopeMode(mode: RosterScope): void {
+  try {
+    localStorage.setItem(SCOPE_KEY, mode);
+  } catch {
+    /* storage blocked — fine, just won't persist this session */
+  }
+}
 
 const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
 
@@ -119,6 +139,11 @@ export function App({
   // End-screen room leaderboard, two windows; fetched after a finish posts and on load.
   const [season, setSeason] = useState<Standings>(EMPTY_STANDINGS);
   const [allTime, setAllTime] = useState<Standings>(EMPTY_STANDINGS);
+  // Shared Channel/Server toggle for the roster + leaderboard. Defaults to the channel the
+  // player launched in (matches the per-channel card/recap); switching widens to the guild.
+  // The ref mirrors it so the 30s poll's captured closures read the current mode, not a stale one.
+  const [scopeMode, setScopeMode] = useState<RosterScope>(readScopeMode);
+  const scopeModeRef = useRef<RosterScope>(scopeMode);
   const [gameKey, setGameKey] = useState("0");
   const [phase, setPhase] = useState<"loading" | "ready" | "error" | "blocked">(
     "loading",
@@ -209,11 +234,13 @@ export function App({
     if (!scopeId) return;
     const me = meRef.current.id;
     const monthStart = currentSeasonStart();
+    // Channel view narrows to this channel; server view (or no channel) spans the guild.
+    const chan = scopeModeRef.current === "channel" ? channelIdRef.current : null;
     const [sBoard, sSelf, aBoard, aSelf] = await Promise.all([
-      roomBoard(scopeId, monthStart),
-      roomSelf(scopeId, monthStart, me),
-      roomBoard(scopeId, null),
-      roomSelf(scopeId, null, me),
+      roomBoard(scopeId, monthStart, 50, chan),
+      roomSelf(scopeId, monthStart, me, chan),
+      roomBoard(scopeId, null, 50, chan),
+      roomSelf(scopeId, null, me, chan),
     ]);
     setSeason({ board: sBoard, self: sSelf });
     setAllTime({ board: aBoard, self: aSelf });
@@ -228,7 +255,11 @@ export function App({
       const r = await fetch("/api/roster", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ guildId: guildIdRef.current, channelId: channelIdRef.current }),
+        body: JSON.stringify({
+          guildId: guildIdRef.current,
+          channelId: channelIdRef.current,
+          scopeMode: scopeModeRef.current,
+        }),
       });
       if (!r.ok) return;
       const d = (await r.json()) as { players?: PlayerState[] };
@@ -585,6 +616,17 @@ export function App({
     })();
   }, []);
 
+  // Toggling Channel/Server re-scopes both the roster and the leaderboard: sync the ref the
+  // poll's closures read, then refetch both at the new scope. Self-gating fetches no-op until
+  // the room refs are set, so the initial mount is harmless.
+  useEffect(() => {
+    scopeModeRef.current = scopeMode;
+    writeScopeMode(scopeMode);
+    if (!isEmbedded) return;
+    void fetchServerRoster();
+    void refreshLeaderboard();
+  }, [scopeMode]);
+
   // Keep the persistent room roster fresh while playing: new joiners, and the progress of
   // players who are offline (not in live presence). Guild daily only — fetchServerRoster
   // self-gates; cleared on unmount. Live players already update via presence.
@@ -684,6 +726,9 @@ export function App({
       selfAvatar={meRef.current.avatar}
       season={season}
       allTime={allTime}
+      // Channel/Server toggle only in a guild — a DM/group (c: scope) has no distinction.
+      scope={guildIdRef.current ? scopeMode : undefined}
+      onScopeChange={guildIdRef.current ? setScopeMode : undefined}
       onPresence={onPresence}
       onCommit={commitGuess}
       onFinish={onFinish}

@@ -182,6 +182,16 @@ body {
   --tile-h: clamp(52px, calc((100dvh - 140px) / 4), 80px);
 }
 
+/* Desktop two-column layout (≥820px): the board column is much wider, so let tiles
+   grow taller too (100px cap) — otherwise wide-but-80px-tall tiles go letterbox, and
+   the game stays small in the middle of a large screen. Still clamps down on short
+   desktop windows (Discord's wide-but-short case), so it only grows where it fits. */
+@media (min-width: 820px) {
+  :root {
+    --tile-h: clamp(52px, calc((100dvh - 140px) / 4), 100px);
+  }
+}
+
 /* Discord activity iframe can be narrow; never scroll sideways. */
 body {
   overflow-x: hidden;

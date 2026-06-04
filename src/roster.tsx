@@ -130,8 +130,10 @@ function useFlash(players: PlayerState[]): Set<string> {
 }
 
 // Colored initial circle. `online` adds a steady emerald presence ring (live view only)
-// when the player is currently in the Activity; the self avatar keeps a light ring. Photo
-// layers over the initial placeholder.
+// when the player is currently in the Activity; your own row gets a white ring that
+// overrides it (you're always online, so the two never stack). Both rings are
+// box-shadows of identical extent, so a ring never changes the avatar's footprint or
+// nudges neighbouring rows/columns. Photo layers over the initial placeholder.
 function Avatar({
   p,
   selfId,
@@ -144,14 +146,18 @@ function Avatar({
   const you = p.userId === selfId;
   const [broken, setBroken] = useState<string | null>(null);
   const showPhoto = p.avatar && broken !== p.avatar;
+  // White (you) takes precedence over green (online); same dark-separator + 2px-colour
+  // box-shadow so every state occupies the exact same box.
+  const ring = you
+    ? " shadow-[0_0_0_2px_#09090b,0_0_0_4px_#f4f4f5]"
+    : online
+      ? " shadow-[0_0_0_2px_#09090b,0_0_0_4px_#34d399]"
+      : "";
   return (
     <div
       className={
-        "relative grid h-6.5 w-6.5 flex-none place-items-center rounded-full text-[11px] font-extrabold text-[#0c0c0c] select-none min-[820px]:h-8 min-[820px]:w-8 min-[820px]:text-[13px] " +
-        (you ? "shadow-[0_0_0_2px_#09090b,0_0_0_4px_#f4f4f5] " : "") +
-        (online
-          ? "before:absolute before:-inset-1 before:rounded-full before:shadow-[0_0_0_2px_#34d399] before:content-['']"
-          : "")
+        "relative grid h-6.5 w-6.5 flex-none place-items-center rounded-full text-[11px] font-extrabold text-[#0c0c0c] select-none min-[820px]:h-8 min-[820px]:w-8 min-[820px]:text-[13px]" +
+        ring
       }
       style={{ background: colorFor(p.userId) }}
     >
@@ -239,17 +245,19 @@ function Status({ p, now }: { p: PlayerState; now: number }) {
   );
 }
 
+// mr-1 widens just the rank→avatar gap on mobile (the row's flex gap is otherwise
+// uniform); desktop keeps the snugger gap-2.75 it already had.
 function Rank({ rank }: { rank: number }) {
   if (rank === 1)
     return (
-      <div className="w-4 flex-none text-center text-[13px] tabular-nums min-[820px]:w-4.5">
+      <div className="mr-1 w-4 flex-none text-center text-[13px] tabular-nums min-[820px]:mr-0 min-[820px]:w-4.5">
         <span className="inline-grid h-5 w-5 place-items-center rounded-md bg-zinc-100 text-[12px] font-extrabold text-zinc-900">
           1
         </span>
       </div>
     );
   return (
-    <div className="w-4 flex-none text-center text-[13px] tabular-nums text-zinc-500 min-[820px]:w-4.5">
+    <div className="mr-1 w-4 flex-none text-center text-[13px] tabular-nums text-zinc-500 min-[820px]:mr-0 min-[820px]:w-4.5">
       {rank}
     </div>
   );
@@ -444,7 +452,7 @@ export function Roster({
       <Tabs view={view} setView={setView} showSeason={seasonAvailable} />
       {standings ? (
         standingsData.board.length ? (
-          <div className="flex max-h-[46vh] min-h-0 flex-col min-[820px]:max-h-none min-[820px]:flex-1">
+          <div className="flex min-h-0 flex-1 flex-col">
             <LedgerBody
               data={standingsData}
               selfId={selfId}
@@ -459,7 +467,7 @@ export function Roster({
           <StandingsEmpty window={view === "all" ? "all" : "season"} />
         )
       ) : (
-        <div className="list-fade flex max-h-[42vh] min-h-0 flex-col gap-1.25 overflow-y-auto scrollbar-thin min-[820px]:max-h-none min-[820px]:flex-1 min-[820px]:gap-1.5">
+        <div className="list-fade flex min-h-0 flex-1 flex-col gap-1.25 overflow-y-auto scrollbar-thin min-[820px]:gap-1.5">
           {sorted.length ? (
             sorted.map((p, i) => {
               const you = p.userId === selfId;

@@ -196,7 +196,12 @@ export function GameView({
   );
 
   return (
-    <div className="flex w-full animate-fade-in flex-col gap-3 min-[820px]:mx-auto min-[820px]:max-w-[860px] min-[820px]:flex-row min-[820px]:items-stretch min-[820px]:gap-6">
+    // Mobile: fill the viewport (#app content box = 100dvh − its pt-8/pb-6 = 3.5rem)
+    // so the column anchors to the top instead of #app's [&>*]:my-auto centering it —
+    // which, with a short roster, stranded a big gap above the board. The players
+    // column then flex-grows into that space (see below). Desktop resets to content
+    // height so the board stays vertically centered in the wide window.
+    <div className="flex min-h-[calc(100dvh-3.5rem)] w-full animate-fade-in flex-col gap-3 min-[820px]:mx-auto min-[820px]:min-h-0 min-[820px]:max-w-[1080px] min-[820px]:flex-row min-[820px]:items-stretch min-[820px]:gap-6">
       {/* main column — board + footer (header above it on mobile only) */}
       <div className="flex w-full min-w-0 flex-col gap-3 min-[820px]:flex-1">
         {header("min-[820px]:hidden")}
@@ -216,9 +221,10 @@ export function GameView({
         />
       </div>
 
-      {/* players column — desktop rail absolute-fills to match the board's height */}
-      <div className="relative flex w-full min-w-0 flex-col min-[820px]:flex-1">
-        <div className="flex min-h-0 flex-col gap-2.5 min-[820px]:absolute min-[820px]:inset-0">
+      {/* players column — mobile flex-grows into the freed vertical space (list fills +
+          scrolls internally); desktop rail absolute-fills to match the board's height */}
+      <div className="relative flex w-full min-w-0 flex-1 flex-col min-h-0">
+        <div className="flex min-h-0 flex-1 flex-col gap-2.5 min-[820px]:absolute min-[820px]:inset-0">
           {header("hidden min-[820px]:flex")}
           <Roster
             players={players}

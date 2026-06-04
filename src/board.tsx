@@ -1,5 +1,6 @@
 import { Eraser, Navigation, Shuffle as ShuffleIcon } from "lucide-react";
 import {
+  useEffect,
   useLayoutEffect,
   useReducer,
   useRef,
@@ -130,8 +131,8 @@ export function Board({
   // the game is purely in-memory. See commit-then-reveal in submit().
   onCommit?: (guess: string[]) => Promise<boolean>;
   onFinish: () => void;
-  // transient guess feedback ("One away…", "Already guessed"), surfaced as text
-  // in the header date slot.
+  // transient submission feedback for the header date slot — now only the rare
+  // "Connection issue — try again" (guess results show on the Submit pill instead).
   onFeedback: (msg: string) => void;
   // jump the roster list to your row and pulse it (end-screen locate arrow).
   onJumpToSelf: () => void;
@@ -151,15 +152,59 @@ export function Board({
   const busy = useRef<boolean>(false);
   // word under the mouse, for the hover dim (mouse-only — see TILE_HOVER).
   const [hover, setHover] = useState<string | null>(null);
+  // Transient label on the Submit pill ("One away…", "Already guessed"). This guess
+  // feedback used to live in the header meta line (top-right, 12px — easy to miss);
+  // the Submit button is where you're already looking, so it owns the message now and
+  // carries aria-live for the announcement. Reverts after 1.6s.
+  const [hint, setHint] = useState<string | null>(null);
+  const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const [, bump] = useReducer((n: number) => n + 1, 0);
   const rerender = () => bump();
   const rerenderSync = () => flushSync(() => bump());
+  function flashHint(msg: string): void {
+    setHint(msg);
+    clearTimeout(hintTimer.current);
+    hintTimer.current = setTimeout(() => setHint(null), 1600);
+  }
+  useEffect(() => () => clearTimeout(hintTimer.current), []);
 
   const boardRef = useRef<HTMLDivElement>(null);
   const solvedRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const tailRef = useRef<HTMLDivElement>(null);
+
+  // Morph the Submit pill's width when its label swaps (Submit <-> a hint) instead of
+  // letting it snap: measure the rendered width before and after the swap — the same
+  // FLIP-by-measurement the board tiles use — then tween between them while the new
+  // word rises in just behind the reshape. The pill is clipped + nowrap (see its
+  // className) so the longer text can't reflow to a second line mid-morph.
+  const submitW = useRef<number | null>(null);
+  const submitWAnim = useRef<Animation | null>(null);
+  useLayoutEffect(() => {
+    const label = tailRef.current?.querySelector<HTMLElement>("[data-submit-label]");
+    const btn = label?.parentElement ?? null;
+    if (!btn || !label) {
+      submitW.current = null; // end-screen footer has no Submit — reset for next game
+      return;
+    }
+    submitWAnim.current?.cancel(); // drop to natural width before measuring
+    const next = btn.getBoundingClientRect().width;
+    const prev = submitW.current;
+    submitW.current = next;
+    if (prev == null || Math.abs(prev - next) < 0.5) return; // first paint / unchanged
+    submitWAnim.current = btn.animate(
+      [{ width: `${prev}px` }, { width: `${next}px` }],
+      { duration: 340, easing: GLIDE },
+    );
+    label.animate(
+      [
+        { opacity: 0, transform: "translateY(5px)" },
+        { opacity: 1, transform: "translateY(0)" },
+      ],
+      { duration: 260, easing: GLIDE, delay: 50, fill: "backwards" },
+    );
+  }, [hint]);
 
   function broadcast(): void {
     const real = solvedLevels.current.filter(
@@ -281,7 +326,7 @@ export function Board({
                 ],
                 { duration: 300, easing: SPRING },
               ).finished.then(() => res());
-            }, i * 85);
+            }, i * 110);
           }),
       ),
     );
@@ -295,7 +340,8 @@ export function Board({
     reorderGather(words);
     rerenderSync();
     await playFlip(prev, 520);
-    await wait(80);
+    // hold the gathered correct row so the win registers before it morphs away
+    await wait(300);
     // 3) fade the top row, then morph the category bar in its place
     const tiles = words.map(tileByWord).filter(Boolean) as HTMLElement[];
     await Promise.all(
@@ -307,8 +353,8 @@ export function Board({
               { opacity: 0, transform: "scale(.9)" },
             ],
             {
-              duration: 190,
-              easing: "ease-in",
+              duration: 280,
+              easing: "ease-out",
               fill: "forwards",
             },
           ).finished,
@@ -341,7 +387,7 @@ export function Board({
   ): Promise<void> {
     const tiles = words.map(tileByWord).filter(Boolean) as HTMLElement[];
     // only the near-miss gets called out; a plain wrong guess just shakes.
-    if (oneAway) onFeedback("One away…");
+    if (oneAway) flashHint("One away…");
     await Promise.all(
       tiles.map(
         (t) =>
@@ -390,7 +436,7 @@ export function Board({
           tiles.map(
             (t) =>
               t.animate([{ opacity: 1 }, { opacity: 0 }], {
-                duration: 150,
+                duration: 220,
                 easing: "ease-in",
                 fill: "forwards",
               }).finished,
@@ -415,7 +461,7 @@ export function Board({
           },
         );
         await playFlip(prev2, 320);
-        await wait(90);
+        await wait(180);
       }
     }
     // await the webfont; the Newsreader score would reflow mid-swap otherwise.
@@ -471,7 +517,7 @@ export function Board({
     const result = game.submit();
 
     if (result.type === "duplicate") {
-      onFeedback("Already guessed");
+      flashHint("Already guessed");
       busy.current = false;
       return;
     }
@@ -613,14 +659,17 @@ export function Board({
             <span className="sr-only">Deselect all</span>
           </HoverButton>
           <HoverButton
-            className={BTN_PRIMARY}
+            className={BTN_PRIMARY + " overflow-hidden whitespace-nowrap"}
             hover="opacity-85"
             onClick={() => void submit()}
-            disabled={selected.current.size !== 4}
-            aria-label="Submit"
-            title="Submit"
+            disabled={selected.current.size !== 4 && !hint}
+            aria-label={hint ?? "Submit"}
+            aria-live="polite"
+            title={hint ?? "Submit"}
           >
-            Submit
+            <span data-submit-label className="inline-block">
+              {hint ?? "Submit"}
+            </span>
           </HoverButton>
         </div>
       </div>

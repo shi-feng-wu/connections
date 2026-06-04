@@ -129,7 +129,9 @@ function LedgerRow({
           {e.rank}
         </div>
       )}
-      <div className="flex min-w-0 items-center gap-2.5">
+      {/* pl-1 on mobile widens just the rank→avatar gap (matching the live roster);
+          the legend's "Player" label gets the same pad so they stay aligned. */}
+      <div className="flex min-w-0 items-center gap-2.5 pl-1 min-[820px]:pl-0">
         <LeaderAvatar id={e.id} name={e.name} avatar={e.avatar} you={you} />
         <span
           className={
@@ -324,7 +326,7 @@ export function LedgerBody({
         }
       >
         <span />
-        <span className="text-left">Player</span>
+        <span className="pl-1 text-left min-[820px]:pl-0">Player</span>
         <span className="text-right text-zinc-500">Score</span>
         <span className="text-right">Streak</span>
         <span className="text-right">Plyd</span>

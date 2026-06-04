@@ -30,7 +30,10 @@ export type PresenceInput = {
   mistakesLeft: number;
   status: Game["status"];
   puzzleNo?: number;
-  startedAt: number; // ms epoch
+  // When this player opened the Activity this session (ms epoch). The elapsed timer
+  // counts from here — NOT the game's pinned started_at (first-ever open, used for
+  // scoring), so the card reads "joined N min ago", not time-since-the-daily-reset.
+  joinedAt: number;
   durationMs: number | null;
 };
 
@@ -43,8 +46,9 @@ export function presenceSignature(p: PresenceInput): string {
 
 // Build the partial-activity payload. type 0 = "Playing", so the header reads
 // "Playing Connections" (the app's name). The elapsed timer runs only while
-// playing; once finished the result line carries the time instead.
-function buildActivity(p: PresenceInput) {
+// playing; once finished it's cleared (timestamps undefined) and the result line
+// carries the time instead. Exported for unit tests.
+export function buildActivity(p: PresenceInput) {
   const details = p.puzzleNo ? `Puzzle #${p.puzzleNo}` : "Daily puzzle";
 
   let state: string;
@@ -61,10 +65,10 @@ function buildActivity(p: PresenceInput) {
     type: 0,
     details,
     state,
-    // Live "for MM:SS" only mid-game; drop it when done so the timer freezes.
-    ...(p.status === "playing"
-      ? { timestamps: { start: Math.floor(p.startedAt / 1000) } }
-      : {}),
+    // Live "for MM:SS" only mid-game, counting from when this player joined this
+    // session; undefined when done so the timer freezes.
+    timestamps:
+      p.status === "playing" ? { start: Math.floor(p.joinedAt / 1000) } : undefined,
     assets: {
       large_image: ICON_URL,
       large_text: "NYT Connections",

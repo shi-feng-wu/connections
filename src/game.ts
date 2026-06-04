@@ -35,11 +35,14 @@ export const MAX_MISTAKES = 4;
 // score purely by groups reached: a loss always spends MAX_MISTAKES, so a
 // mistake penalty would double-count. groupsSolved tops out at 2 on a loss —
 // once 3 are solved the last four words are forced, so you can't miss again.
+// Tuned so a perfect win (4 groups, no mistakes, instant) tops out at 500:
+//   20·4² + 120 + 60 = 500. The four point values scale together; speedTargetSec
+// is a time threshold (seconds), not points, so it's unscaled.
 export const SCORING = {
-  completionPerGroupSq: 100, // loss credit = this × groupsSolved² (max 2² = 400)
-  solveBonus: 600, // flat reward for completing every group
-  mistakePenalty: 150, // subtracted per mistake on a win
-  speedMax: 300, // largest speed bonus on a win (only at an instant solve)
+  completionPerGroupSq: 20, // loss credit = this × groupsSolved² (max 2² = 80)
+  solveBonus: 120, // flat reward for completing every group
+  mistakePenalty: 30, // subtracted per mistake on a win
+  speedMax: 60, // largest speed bonus on a win (only at an instant solve)
   speedTargetSec: 600, // speed bonus decays linearly from full to zero over 10 min
 };
 

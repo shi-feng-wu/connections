@@ -96,6 +96,10 @@ export function App({
   // calls — see pushPresence.
   const sdkRef = useRef<DiscordSDK | null>(null);
   const lastPresenceSig = useRef<string>("");
+  // When this player opened the Activity (this launch). Anchors the Rich Presence
+  // elapsed timer so it counts from joining, not the game's pinned started_at
+  // (first-ever open, used for scoring) — which on a reopen is hours stale.
+  const joinedAtRef = useRef<number>(Date.now());
 
   const [players, setPlayers] = useState<PlayerState[]>([]);
   const [self, setSelf] = useState<PlayerState | null>(null);
@@ -167,7 +171,7 @@ export function App({
       mistakesLeft: g.mistakesLeft,
       status: g.status,
       puzzleNo: g.puzzle.id,
-      startedAt: g.startedAt,
+      joinedAt: joinedAtRef.current,
       durationMs: g.durationMs,
     };
     const sig = presenceSignature(input);

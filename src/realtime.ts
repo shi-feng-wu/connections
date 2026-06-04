@@ -38,24 +38,50 @@ export function joinRoom(
   opts: { private?: boolean } = {},
 ): void {
   if (!supabase || channel) return;
+  const wantPrivate = opts.private ?? false;
 
-  channel = supabase.channel(`room:${roomId}`, {
-    // Private channels enforce realtime.messages RLS: only verified users can
-    // join/broadcast presence in production.
-    config: { private: opts.private ?? false, presence: { key: self.userId } },
-  });
+  // Build + subscribe the presence channel. Factored so a private channel the
+  // server rejects can retry once as public (see CHANNEL_ERROR below).
+  const connect = (asPrivate: boolean): void => {
+    const ch = supabase!.channel(`room:${roomId}`, {
+      // Private channels enforce realtime.messages RLS: only verified users (a
+      // server-minted JWT) can join/broadcast presence in production.
+      config: { private: asPrivate, presence: { key: self.userId } },
+    });
+    channel = ch;
 
-  channel
-    .on('presence', { event: 'sync' }, () => {
-      const state = channel!.presenceState<PlayerState>();
+    ch.on('presence', { event: 'sync' }, () => {
+      const state = ch.presenceState<PlayerState>();
       // Each key holds an array of presences; take the latest per player.
       // Presence<PlayerState> is assignable to PlayerState.
       const players: PlayerState[] = Object.values(state).map((entries) => entries[0]).filter(Boolean);
       onSync(players);
-    })
-    .subscribe((status) => {
-      if (status === 'SUBSCRIBED') void channel!.track(self);
+    }).subscribe((status, err) => {
+      if (status === 'SUBSCRIBED') {
+        void ch.track(self);
+        return;
+      }
+      if (status === 'CHANNEL_ERROR') {
+        // A private join only errors here when Realtime auth is misconfigured: the
+        // JWT didn't validate (the server's SUPABASE_JWT_SECRET doesn't match the
+        // project's JWT secret), or the realtime.messages RLS policies were never
+        // applied to the project. Without a retry the roster silently shows only the
+        // local player — which reads as "I can't see anyone else." Fall back once to
+        // a public channel so live progress still works. LESS secure: presence is no
+        // longer gated to verified users, so fix the root cause to restore private.
+        console.warn('[realtime] presence CHANNEL_ERROR', { private: asPrivate, room: roomId }, err?.message ?? '');
+        if (asPrivate && wantPrivate) {
+          void ch.unsubscribe();
+          channel = null;
+          connect(false);
+        }
+      } else if (status === 'TIMED_OUT') {
+        console.warn('[realtime] presence TIMED_OUT', { room: roomId });
+      }
     });
+  };
+
+  connect(wantPrivate);
 }
 
 export async function updatePresence(self: PlayerState): Promise<void> {

@@ -36,7 +36,6 @@ export type CardOpts = { puzzleNo?: number; puzzleDate?: string };
 // the card reads as a distinct framed panel in the channel. (Opaque, not transparent,
 // so the light text stays legible regardless of the viewer's Discord theme.)
 const BG = "#09090b"; // zinc-950
-const CARD_BORDER_W = 2; // border drawn last, on top of the bg/content
 const CARD_R = 18; // rounded card corners (corners outside it stay transparent)
 const PANEL = "rgba(24,24,27,0.6)"; // zinc-900/60 — composited over BG
 const PANEL_BORDER = "#232327";
@@ -280,21 +279,6 @@ function fillCardBg(
   ctx.fillStyle = BG;
   roundRect(ctx, 0, 0, W, height, CARD_R);
   ctx.fill();
-}
-
-// The card's outer border (zinc-800), drawn last so neither the bg nor content covers
-// it. Inset by half the line width so the full stroke sits inside the canvas, and its
-// radius matches the bg so the rounded corners line up.
-function strokeCardBorder(
-  ctx: CanvasRenderingContext2D,
-  W: number,
-  height: number,
-): void {
-  const w = CARD_BORDER_W;
-  ctx.strokeStyle = ZINC_800;
-  ctx.lineWidth = w;
-  roundRect(ctx, w / 2, w / 2, W - w, height - w, CARD_R - w / 2);
-  ctx.stroke();
 }
 
 function fitText(
@@ -551,8 +535,6 @@ export async function drawRoster(
     ctx.textBaseline = "middle";
     ctx.fillText(timeStr, statusLeft + ICON + STATUS_GAP, rowY + 1);
   });
-
-  strokeCardBorder(ctx, W, height);
 }
 
 // =====================================================================
@@ -1061,6 +1043,4 @@ export async function drawRecap(
     // total points
     drawPts(ctx, r.total, sPtsRight, base);
   });
-
-  strokeCardBorder(ctx, W, height);
 }

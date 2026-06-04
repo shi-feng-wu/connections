@@ -223,7 +223,7 @@ function leaderId(players: CardPlayer[]): string | null {
 
 // ---- lucide icon paths (exact `d` strings, as used in the app) ----
 const ICON_CHECK = { d: "M20 6 9 17l-5-5", sw: 2.8 };
-const ICON_X = { d: "M18 6 6 18 M6 6 12 12", sw: 2.6 };
+const ICON_X = { d: "M18 6 6 18 M6 6 18 18", sw: 2.6 };
 const ICON_TROPHY = {
   d: "M6 9H4.5a2.5 2.5 0 0 1 0-5H6 M18 9h1.5a2.5 2.5 0 0 0 0-5H18 M4 22h16 M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22 M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22 M18 2H6v7a6 6 0 0 0 12 0V2Z",
   sw: 2.25,

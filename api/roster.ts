@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { Game } from '../src/game.js';
+import { Game, MAX_MISTAKES, type Puzzle } from '../src/game.js';
 import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import type { CardPlayer } from './_card.js';
@@ -9,18 +9,132 @@ import { isLocalDev, verifyAuth } from './_session.js';
 
 // Persistent "who's played this room today" roster for the live panel. Presence (the
 // Supabase channel) only reports who's connected right now, so a player who joined and
-// left before you opened the Activity is invisible to it. This returns every player
-// recorded on the room's live_cards entry — append-only via /api/join + launches — who
-// has started the puzzle, with state replayed server-side from their committed guesses
+// left before you opened the Activity is invisible to it. This returns every player we
+// can identify who has played today — replayed server-side from their committed guesses
 // (the same record /api/score trusts). The client merges this under live presence: these
 // seed the roster, presence overlays the live ones and supplies the green "online" ring.
 //
-// Guild rooms only: live_cards.players is written only for g: scopes (/api/join short-
-// circuits other contexts), so a DM/group returns an empty list and the client falls back
-// to presence alone. Read-gated by the signed auth ticket (same as /api/start); the data
-// is the public "who's playing" card content, so no per-guild membership check is needed.
+// The player SET is the union of two identity sources, because that's everywhere a
+// player's name/avatar is recorded:
+//   • live_cards.players — append-only via /api/join (on open, before play) + launches.
+//   • scores             — written on every finish by /api/score, scoped the same way.
+// Sourcing from live_cards alone dropped anyone whose /api/join never landed (a network
+// blip, a membership check, or the finished-gate that permanently blocks re-adds): they
+// played, even finished, yet never appeared. Unioning scores recovers every finisher.
+//
+// Guild rooms only in practice: the client only calls this with a guildId, and
+// live_cards.players is written only for g: scopes. Read-gated by the signed auth ticket
+// (same as /api/start); the data is the public "who's playing" card content.
 
+type ScoreRow = {
+  user_id: string;
+  name: string;
+  avatar: string | null;
+  solved: boolean;
+  mistakes: number;
+  groups_solved: number;
+  duration_ms: number | null;
+};
 type ProgressRow = { user_id: string; guesses: unknown; started_at: string | null; updated_at: string | null };
+
+// The roster row the client consumes — structurally a PlayerState (src/realtime.ts),
+// declared locally so this serverless route never imports client-only code.
+type RosterPlayer = {
+  userId: string;
+  name: string;
+  avatar?: string;
+  mistakesLeft: number;
+  solvedCount: number;
+  solvedLevels: number[];
+  picking: false;
+  done: 'won' | 'lost' | null;
+  startedAt: number;
+  finishedAt: number | null;
+};
+
+// A finished roster row built from a scores row, for a player whose progress row is
+// missing/unparseable (or who finished without one). A scores row exists only for a
+// finished game, so this is always done.
+function synthFromScore(p: CardPlayer, s: ScoreRow, now: number): RosterPlayer {
+  const dur = typeof s.duration_ms === 'number' && s.duration_ms > 0 ? s.duration_ms : 0;
+  const count = Math.max(0, Math.min(4, s.groups_solved ?? 0));
+  return {
+    userId: p.id,
+    name: p.name,
+    avatar: p.avatar ?? undefined,
+    mistakesLeft: Math.max(0, MAX_MISTAKES - (s.mistakes ?? 0)),
+    solvedCount: count,
+    // scores stores only the count, not which levels; approximate with the easiest
+    // `count`. Exact for a winner (all four); a partial loss may paint the wrong
+    // category colours on the mini-board (cosmetic, rare fallback only).
+    solvedLevels: Array.from({ length: count }, (_, i) => i),
+    picking: false,
+    done: s.solved ? 'won' : 'lost',
+    // Frozen timer: roster.tsx elapsed = (finishedAt ?? now) - (startedAt || now) = dur.
+    // startedAt must be non-zero (the `|| now` guard), so anchor both at `now`.
+    startedAt: now,
+    finishedAt: now + dur,
+  };
+}
+
+// Pure roster assembly, separated from DB I/O so it's unit-testable. The identity set is
+// joined ∪ finishers; each player's live state is replayed from their progress row, with
+// a scores-derived fallback for finishers whose progress is gone. A player who joined but
+// never started (no progress, no score) is dropped — they're in the room but haven't
+// played. Without the puzzle we can't replay, so we return only the self-contained
+// finishers (frozen) rather than emptying the roster on a transient puzzle-fetch blip.
+export function assembleRoster(
+  joined: CardPlayer[],
+  scoreRows: ScoreRow[],
+  progressRows: ProgressRow[],
+  puzzle: Puzzle | null,
+  now: number,
+): RosterPlayer[] {
+  const ids = new Map<string, CardPlayer>();
+  for (const p of joined) ids.set(p.id, p); // live_cards wins on collision (join-time identity)
+  for (const s of scoreRows) if (!ids.has(s.user_id)) ids.set(s.user_id, { id: s.user_id, name: s.name, avatar: s.avatar });
+
+  const scoreById = new Map<string, ScoreRow>();
+  for (const s of scoreRows) scoreById.set(s.user_id, s);
+  const progById = new Map<string, ProgressRow>();
+  for (const r of progressRows) progById.set(r.user_id, r);
+
+  if (!puzzle) {
+    return [...ids.values()].flatMap((p) => {
+      const s = scoreById.get(p.id);
+      return s ? [synthFromScore(p, s, now)] : [];
+    });
+  }
+
+  return [...ids.values()].flatMap((p) => {
+    const row = progById.get(p.id);
+    const startedAt = row?.started_at ? Date.parse(row.started_at) : NaN;
+    if (!Number.isNaN(startedAt)) {
+      const guesses = row && Array.isArray(row.guesses) ? (row.guesses as string[][]) : [];
+      const game = Game.fromGuesses(puzzle, guesses, startedAt);
+      const done = game.status === 'playing' ? null : game.status;
+      const finishedAt = done && row?.updated_at ? Date.parse(row.updated_at) : NaN;
+      const solvedLevels = game.deducedLevels;
+      return [
+        {
+          userId: p.id,
+          name: p.name,
+          avatar: p.avatar ?? undefined,
+          mistakesLeft: game.mistakesLeft,
+          solvedCount: solvedLevels.length,
+          solvedLevels,
+          picking: false as const,
+          done,
+          startedAt,
+          finishedAt: Number.isNaN(finishedAt) ? null : finishedAt,
+        },
+      ];
+    }
+    // No usable progress: show them if they finished (scores), else drop (joined, not played).
+    const s = scoreById.get(p.id);
+    return s ? [synthFromScore(p, s, now)] : [];
+  });
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
@@ -45,58 +159,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   const date = todayET();
-  const { data: card } = await db
-    .from('live_cards')
-    .select('players')
-    .eq('scope_id', scope)
-    .eq('puzzle_date', date)
-    .maybeSingle();
+  // Identity sources: who joined the room's card, and who finished (scores). Either alone
+  // can be the whole roster (e.g. everyone played without a clean join), so union them.
+  const [{ data: card }, { data: scoreData }] = await Promise.all([
+    db.from('live_cards').select('players').eq('scope_id', scope).eq('puzzle_date', date).maybeSingle(),
+    db
+      .from('scores')
+      .select('user_id, name, avatar, solved, mistakes, groups_solved, duration_ms')
+      .eq('scope_id', scope)
+      .eq('puzzle_date', date),
+  ]);
   const joined: CardPlayer[] = Array.isArray(card?.players) ? (card.players as CardPlayer[]) : [];
-  if (!joined.length) {
+  const scoreRows = (scoreData as ScoreRow[] | null) ?? [];
+
+  const allIds = [...new Set([...joined.map((p) => p.id), ...scoreRows.map((s) => s.user_id)])];
+  if (!allIds.length) {
     res.status(200).json({ players: [] });
     return;
   }
 
   const puzzle = await fetchPuzzle(date).catch(() => null);
-  if (!puzzle) {
-    res.status(200).json({ players: [] });
-    return;
-  }
 
-  // One query for the whole roster's committed progress; replay each to derive state.
-  const { data } = await db
+  // One query for the whole identity set's committed progress; replay each to derive state.
+  const { data: progData } = await db
     .from('progress')
     .select('user_id, guesses, started_at, updated_at')
-    .in('user_id', joined.map((p) => p.id))
+    .in('user_id', allIds)
     .eq('puzzle_date', date);
-  const byId = new Map<string, ProgressRow>();
-  for (const row of (data as ProgressRow[] | null) ?? []) byId.set(row.user_id, row);
+  const progressRows = (progData as ProgressRow[] | null) ?? [];
 
-  // Only players who actually started their timer (have a progress row) are shown.
-  const players = joined.flatMap((p) => {
-    const row = byId.get(p.id);
-    const startedAt = row?.started_at ? Date.parse(row.started_at) : NaN;
-    if (Number.isNaN(startedAt)) return [];
-    const guesses = row && Array.isArray(row.guesses) ? (row.guesses as string[][]) : [];
-    const game = Game.fromGuesses(puzzle, guesses, startedAt);
-    const done = game.status === 'playing' ? null : game.status;
-    const finishedAt = done && row?.updated_at ? Date.parse(row.updated_at) : NaN;
-    const solvedLevels = game.deducedLevels;
-    return [
-      {
-        userId: p.id,
-        name: p.name,
-        avatar: p.avatar ?? undefined,
-        mistakesLeft: game.mistakesLeft,
-        solvedCount: solvedLevels.length,
-        solvedLevels,
-        picking: false,
-        done,
-        startedAt,
-        finishedAt: Number.isNaN(finishedAt) ? null : finishedAt,
-      },
-    ];
-  });
-
+  const players = assembleRoster(joined, scoreRows, progressRows, puzzle, Date.now());
   res.status(200).json({ players });
 }

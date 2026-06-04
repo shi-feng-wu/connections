@@ -62,9 +62,10 @@ export function LoadingScreen({
 // Brand lockup matching the PIP thumbnail header (src/pip.tsx): the brick logo · the
 // "Connections" wordmark, with a serif "No. 642 · date" meta line riding the right edge
 // in the title serif (Newsreader) — number and date one consistent muted line, joined by
-// a middot, exactly as the thumbnail. During play that meta line cross-fades to transient
-// guess feedback ("One away…") and back. Lives above the board on mobile and atop the
-// players rail on desktop (rendered twice, one hidden per breakpoint).
+// a middot, exactly as the thumbnail. During play that meta line cross-fades to the rare
+// "couldn’t save that guess" note and back (guess results show on the Submit pill). Sits
+// atop the players rail on desktop only; hidden on mobile, where Discord shows its own
+// activity header above the board.
 function Header({
   puzzle,
   feedbackText,
@@ -202,9 +203,11 @@ export function GameView({
     // column then flex-grows into that space (see below). Desktop resets to content
     // height so the board stays vertically centered in the wide window.
     <div className="flex min-h-[calc(100dvh-3.5rem)] w-full animate-fade-in flex-col gap-3 min-[820px]:mx-auto min-[820px]:min-h-0 min-[820px]:max-w-[1080px] min-[820px]:flex-row min-[820px]:items-stretch min-[820px]:gap-6">
-      {/* main column — board + footer (header above it on mobile only) */}
-      <div className="flex w-full min-w-0 flex-col gap-3 min-[820px]:flex-1">
-        {header("min-[820px]:hidden")}
+      {/* main column — board + footer. No header on mobile: Discord shows its own
+          activity header there, so we hide ours and keep a little top padding (on top
+          of #app's pt-8) to clear it. The header sits atop the players rail on desktop
+          instead (below). */}
+      <div className="flex w-full min-w-0 flex-col gap-3 pt-2 min-[820px]:flex-1 min-[820px]:pt-0">
         <Board
           key={gameKey}
           game={game}

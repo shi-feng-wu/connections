@@ -1,6 +1,5 @@
-import { Flame, Infinity as InfinityIcon, RotateCcw, X } from "lucide-react";
+import { Flame, X } from "lucide-react";
 import { useState, type Ref } from "react";
-import { LEVELS } from "./game";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import { colorFor, initials } from "./roster";
 
@@ -176,41 +175,12 @@ const toEntry = (r: BoardRow, rank: number): LedgerEntry => ({
 export type Standings = { board: BoardRow[]; self: SelfStanding | null };
 
 // Empty state shown under the Season / All-time tabs before any game has been scored,
-// so the tabs are never dead ends. The emblem is the app's own solved-bar motif rebuilt
-// as a four-rank bar chart — the category colors pulsing in sequence, the same cue the
-// loading screen uses — so it reads as "the board, waiting to fill" rather than a
-// generic empty box. Spoiler-safe: no puzzle content, and no fake standings rows.
+// so the tabs are never dead ends. Just a headline + a line of copy — spoiler-safe (no
+// puzzle content) and with no fake standings rows.
 export function StandingsEmpty({ window }: { window: "season" | "all" }) {
   const allTime = window === "all";
-  // descending bars = a ranking, brightest (yellow, #1) tallest on the left.
-  const bars = [36, 28, 21, 15];
   return (
     <div className="flex min-h-0 flex-1 animate-fade-in flex-col items-center justify-center gap-5 px-6 py-12 text-center">
-      {/* podium emblem — solved bars as a ranking chart, warm halo behind for depth */}
-      <div className="relative">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -inset-5 blur-2xl"
-          style={{
-            background:
-              "radial-gradient(closest-side, rgba(249,223,109,0.13), transparent)",
-          }}
-        />
-        <div className="relative flex h-[68px] w-[68px] items-end justify-center gap-1.25 rounded-2xl border border-white/[0.07] bg-zinc-900/60 p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-          {bars.map((h, i) => (
-            <span
-              key={i}
-              className="w-1.5 animate-qpulse rounded-full"
-              style={{
-                height: h,
-                background: LEVELS[i].color,
-                animationDelay: `${i * 0.16}s`,
-              }}
-            />
-          ))}
-        </div>
-      </div>
-
       <div className="flex flex-col gap-1.5">
         <h3 className="font-display text-[19px] font-semibold leading-tight tracking-[-0.01em] text-[#efefe6]">
           First place is open
@@ -219,15 +189,6 @@ export function StandingsEmpty({ window }: { window: "season" | "all" }) {
           No scores on the {allTime ? "all-time" : "season"} board yet — finish
           today’s puzzle to put the first one up.
         </p>
-      </div>
-
-      <div className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-zinc-900/50 px-2.75 py-1 font-sans text-[11px] font-medium tracking-[0.01em] text-zinc-500">
-        {allTime ? (
-          <InfinityIcon size={12} strokeWidth={2.2} aria-hidden />
-        ) : (
-          <RotateCcw size={11} strokeWidth={2.2} aria-hidden />
-        )}
-        {allTime ? "Every game counts" : "Season resets monthly"}
       </div>
     </div>
   );

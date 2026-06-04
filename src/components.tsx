@@ -126,11 +126,11 @@ function Header({
 
 // Responsive game shell. Mobile: a single column — header, board + footer, then the
 // players section (Live / Season / All-time tabs + list). Desktop (≥820px): a 50/50
-// split — board + footer on the left, and a right rail (header, tabs, list, pinned
-// "Your standing") that absolute-fills the column so it matches the board's height
-// and scrolls its list rather than driving the layout taller. Season and All-time
-// share one standings table (different window); the end-screen locate arrow jumps
-// the live list to your row.
+// split — board + footer on the left, and a right rail (header, tabs, list) that
+// absolute-fills the column so it matches the board's height and scrolls its list
+// rather than driving the layout taller. Season and All-time share one standings
+// table (different window); the end-screen locate arrow scrolls + pulses your row in
+// whichever tab is open.
 export function GameView({
   game,
   gameKey,
@@ -167,13 +167,10 @@ export function GameView({
   // which list the rail/section shows: the live room, or the cumulative season /
   // all-time table (same table, different window).
   const [view, setView] = useState<RosterView>("live");
-  // bumping this asks the Roster to scroll to your row in the live list and pulse
-  // it (end-screen locate arrow), dropping back to Live from a standings tab first.
+  // bumping this asks the Roster to scroll to + pulse your row in the current tab
+  // (end-screen locate arrow) without changing tabs.
   const [jumpNonce, setJumpNonce] = useState(0);
-  const jumpToSelf = (): void => {
-    setView("live");
-    setJumpNonce((n) => n + 1);
-  };
+  const jumpToSelf = (): void => setJumpNonce((n) => n + 1);
 
   function showFeedback(msg: string): void {
     setFeedbackText(msg);
@@ -234,7 +231,6 @@ export function GameView({
             season={hasSeason ? season : undefined}
             allTime={hasSeason ? allTime : undefined}
             jumpSignal={jumpNonce}
-            showStanding
           />
         </div>
       </div>

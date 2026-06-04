@@ -1,5 +1,5 @@
 import { Flame, X } from "lucide-react";
-import { useState } from "react";
+import { useState, type Ref } from "react";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import { colorFor, initials } from "./roster";
 
@@ -97,13 +97,17 @@ function LedgerRow({
   e,
   you,
   first,
+  rowRef,
 }: {
   e: LedgerEntry;
   you: boolean;
   first: boolean;
+  // attached to your row so the locate arrow can scroll + pulse it here too.
+  rowRef?: Ref<HTMLDivElement>;
 }) {
   return (
     <div
+      ref={rowRef}
       className={
         LGRID +
         " px-2 py-2 " +
@@ -179,6 +183,7 @@ export function LedgerBody({
   avatar,
   query = "",
   fill = false,
+  selfRowRef,
 }: {
   data: Standings;
   selfId: string;
@@ -187,6 +192,8 @@ export function LedgerBody({
   query?: string;
   // fill: the row list flexes to fill its parent's height instead of capping at 46vh
   fill?: boolean;
+  // attached to your row (in-board or pinned) for the locate arrow.
+  selfRowRef?: Ref<HTMLDivElement>;
 }) {
   const { board, self } = data;
   if (!board.length) {
@@ -243,7 +250,13 @@ export function LedgerBody({
       >
         {rows.length ? (
           rows.map((e, i) => (
-            <LedgerRow key={e.id} e={e} you={e.id === selfId} first={i === 0} />
+            <LedgerRow
+              key={e.id}
+              e={e}
+              you={e.id === selfId}
+              first={i === 0}
+              rowRef={e.id === selfId ? selfRowRef : undefined}
+            />
           ))
         ) : (
           <div className="px-2 py-6 text-center text-[13px] text-zinc-600">
@@ -258,7 +271,7 @@ export function LedgerBody({
             <span className="h-[3px] w-[3px] rounded-full bg-zinc-700" />
             <span className="h-[3px] w-[3px] rounded-full bg-zinc-700" />
           </div>
-          <LedgerRow e={selfEntry} you first={false} />
+          <LedgerRow e={selfEntry} you first={false} rowRef={selfRowRef} />
         </>
       )}
       {!q && below > 0 && (

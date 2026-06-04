@@ -6,6 +6,26 @@ import { HoverButton } from "./hoverbutton";
 import { LedgerBody, type Standings } from "./season";
 
 const EMPTY_STANDINGS: Standings = { board: [], self: null };
+const GLIDE = "cubic-bezier(0.22,0.61,0.36,1)";
+
+// Inset focus pulse for the located row — a cream ring + inner glow, drawn entirely
+// with inset shadows so it hugs the row's rounded rect (never clipped by the scroll
+// container) and overlays any row tint (live /10, standings /6) without a background
+// change, reverting cleanly when it ends.
+const LOCATE_PULSE: Keyframe[] = [
+  { boxShadow: "inset 0 0 0 0 rgba(244,244,245,0), inset 0 0 0 0 rgba(244,244,245,0)" },
+  {
+    boxShadow:
+      "inset 0 0 0 1.8px rgba(244,244,245,0.95), inset 0 0 18px rgba(244,244,245,0.28)",
+    offset: 0.12,
+  },
+  {
+    boxShadow:
+      "inset 0 0 0 1px rgba(244,244,245,0.45), inset 0 0 11px rgba(244,244,245,0.15)",
+    offset: 0.5,
+  },
+  { boxShadow: "inset 0 0 0 0 rgba(244,244,245,0), inset 0 0 0 0 rgba(244,244,245,0)" },
+];
 
 // Live room tracker, redesigned as a Live / Leaderboard tab heading over one ranked
 // list (rank, avatar, mini-board, name, mistake dots, time + ✓/✗), with a bottom
@@ -330,12 +350,9 @@ function Tabs({
   );
 }
 
-const ORD = ["", "1st", "2nd", "3rd", "4th", "5th"];
-const ordinal = (n: number): string => ORD[n] ?? `${n}th`;
-
-// Renders as a fragment: the tab heading, the scrolling ranked list (bottom fade),
-// and — on the desktop rail only — a pinned "Your standing". On mobile the list is
-// capped and scrolls; on the desktop rail it flexes to fill the column height.
+// Renders as a fragment: the tab heading and the active list. Live shows the ranked
+// player rows; Season / All-time share one cumulative standings table. The list is
+// capped + scrolls on mobile and flexes to fill the rail on desktop.
 export function Roster({
   players,
   selfId,
@@ -343,7 +360,6 @@ export function Roster({
   selfAvatar,
   view: viewProp,
   onViewChange,
-  showStanding = false,
   season,
   allTime,
   jumpSignal,
@@ -352,13 +368,10 @@ export function Roster({
   selfId: string;
   selfName?: string;
   selfAvatar?: string;
-  // controlled by GameView (so finishing can flip to the leaderboard); uncontrolled
-  // (own state) when omitted, e.g. the standalone preview panel.
+  // controlled by GameView; uncontrolled (own state) when omitted (preview panel).
   view?: RosterView;
   onViewChange?: (v: RosterView) => void;
-  // pinned "Your standing" row — desktop rail only (hidden on mobile).
-  showStanding?: boolean;
-  // cumulative standings behind the "Season" tab; tab is hidden when both absent.
+  // cumulative standings behind the Season / All-time tabs; tabs hidden when absent.
   season?: Standings;
   allTime?: Standings;
   // bump (from the end-screen locate arrow) to scroll your row in + pulse it.
@@ -377,49 +390,52 @@ export function Roster({
   const now = useNow(players.some((p) => p.done === null));
   const flashing = useFlash(players);
   const sorted = useMemo(() => sortRoster(players, now), [players, now]);
-  const selfIdx = sorted.findIndex((p) => p.userId === selfId);
-  const self = selfIdx >= 0 ? sorted[selfIdx] : null;
 
-  // The locate arrow bumps jumpSignal; scroll your row to center and pulse it. The
-  // glow is drawn with INSET shadows so it hugs the row's rounded rect and is never
-  // clipped by the scroll container (which can't be overflow:visible and still
-  // scroll). WAAPI restarts cleanly on every bump; skip the initial mount.
+  // Locate arrow. Clicking it (jumpSignal bumps) scrolls to + pulses your row in the
+  // tab you're on, WITHOUT switching tabs; then for whichever other tab you open next
+  // it repositions to your row once (no pulse) so it's already in view. selfRowRef
+  // tracks whichever tab's "you" row is currently mounted. `repositioned` remembers,
+  // per tab, the last jump it handled — so a tab repositions at most once per jump.
   const selfRowRef = useRef<HTMLDivElement>(null);
+  const lastJump = useRef(0);
+  const repositioned = useRef<Record<RosterView, number>>({
+    live: 0,
+    season: 0,
+    all: 0,
+  });
   const armed = useRef(false);
+
+  const positionSelf = (pulse: boolean): void => {
+    const row = selfRowRef.current;
+    if (!row) return;
+    row.scrollIntoView({
+      behavior: pulse ? "smooth" : "auto",
+      // the live list owns its scroller (safe to center); the standings table keeps
+      // your row pinned/visible, so only nudge it in to avoid scrolling the page.
+      block: view === "live" ? "center" : "nearest",
+    });
+    if (pulse) row.animate(LOCATE_PULSE, { duration: 1700, easing: GLIDE });
+  };
+
+  // The click itself: pulse + scroll the current tab, and mark it handled for this
+  // jump so re-opening it later doesn't re-reposition. Skip the initial mount.
   useEffect(() => {
     if (!armed.current) {
       armed.current = true;
       return;
     }
-    const row = selfRowRef.current;
-    if (!row) return;
-    row.scrollIntoView({ behavior: "smooth", block: "center" });
-    row.animate(
-      [
-        {
-          backgroundColor: "rgba(244,244,245,0.10)",
-          boxShadow: "inset 0 0 0 0 rgba(244,244,245,0), inset 0 0 0 0 rgba(244,244,245,0)",
-        },
-        {
-          backgroundColor: "rgba(244,244,245,0.30)",
-          boxShadow:
-            "inset 0 0 0 1.6px rgba(244,244,245,0.85), inset 0 0 16px rgba(244,244,245,0.22)",
-          offset: 0.12,
-        },
-        {
-          backgroundColor: "rgba(244,244,245,0.15)",
-          boxShadow:
-            "inset 0 0 0 1px rgba(244,244,245,0.4), inset 0 0 10px rgba(244,244,245,0.12)",
-          offset: 0.5,
-        },
-        {
-          backgroundColor: "rgba(244,244,245,0.10)",
-          boxShadow: "inset 0 0 0 0 rgba(244,244,245,0), inset 0 0 0 0 rgba(244,244,245,0)",
-        },
-      ],
-      { duration: 1700, easing: "cubic-bezier(0.22,0.61,0.36,1)" },
-    );
+    if (!jumpSignal) return;
+    lastJump.current = jumpSignal;
+    repositioned.current[view] = jumpSignal;
+    positionSelf(true);
   }, [jumpSignal]);
+
+  // Opening a different tab after a jump: reposition to your row once (no pulse).
+  useEffect(() => {
+    if (!lastJump.current || repositioned.current[view] === lastJump.current) return;
+    repositioned.current[view] = lastJump.current;
+    positionSelf(false);
+  }, [view]);
 
   return (
     <>
@@ -431,6 +447,7 @@ export function Roster({
             selfId={selfId}
             name={selfName ?? "You"}
             avatar={selfAvatar}
+            selfRowRef={selfRowRef}
             fill
           />
         </div>
@@ -457,21 +474,6 @@ export function Roster({
               No one here yet.
             </div>
           )}
-        </div>
-      )}
-      {showStanding && self && !standings && (
-        <div className="hidden flex-none border-t border-dashed border-white/12 pt-2.5 min-[820px]:block">
-          <div className="px-1 pb-1.5 text-[10px] uppercase tracking-[0.07em] text-zinc-600">
-            Your standing · {ordinal(selfIdx + 1)} of {sorted.length}
-          </div>
-          <RosterRow
-            p={self}
-            rank={selfIdx + 1}
-            selfId={selfId}
-            now={now}
-            flash={false}
-            picking={false}
-          />
         </div>
       )}
     </>

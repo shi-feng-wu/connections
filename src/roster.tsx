@@ -245,19 +245,23 @@ function Status({ p, now }: { p: PlayerState; now: number }) {
   );
 }
 
-// mr-1 widens just the rank→avatar gap on mobile (the row's flex gap is otherwise
-// uniform); desktop keeps the snugger gap-2.75 it already had.
+// w-5.5 matches the leaderboard's 22px rank column (season.tsx LGRID) so the rank number
+// sits at the same x in both tabs. The rank→avatar gap is then tuned per breakpoint to
+// match the leaderboard's (its grid gap-2 + the player cell's pl-1/pl-0): mr-1 supplies
+// the mobile pl-1, and on desktop the row's wider gap-2.75 overshoots the leaderboard's
+// gap-2 by 3px, so -mr-0.75 trims it back. Net: switching Live ↔ Season/All-time never
+// nudges the row.
 function Rank({ rank }: { rank: number }) {
   if (rank === 1)
     return (
-      <div className="mr-1 w-4 flex-none text-center text-[13px] tabular-nums min-[820px]:mr-0 min-[820px]:w-4.5">
+      <div className="mr-1 w-5.5 flex-none text-center text-[13px] tabular-nums min-[820px]:-mr-0.75">
         <span className="inline-grid h-5 w-5 place-items-center rounded-md bg-zinc-100 text-[12px] font-extrabold text-zinc-900">
           1
         </span>
       </div>
     );
   return (
-    <div className="mr-1 w-4 flex-none text-center text-[13px] tabular-nums text-zinc-500 min-[820px]:mr-0 min-[820px]:w-4.5">
+    <div className="mr-1 w-5.5 flex-none text-center text-[13px] tabular-nums text-zinc-500 min-[820px]:-mr-0.75">
       {rank}
     </div>
   );

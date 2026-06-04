@@ -555,5 +555,39 @@ createRoot(document.getElementById("preview")!).render(
         <Roster players={ROSTER} selfId={SELF_ID} />
       </section>
     )}
+    {!onlySim && !onlyCard && (
+      <section className="w-full max-w-[360px] px-4">
+        <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
+          Roster panel · no scores yet (Season tab → placeholder)
+        </div>
+        <Roster
+          players={ROSTER}
+          selfId={SELF_ID}
+          selfName={SELF_NAME}
+          selfAvatar={SELF_AVATAR}
+          season={{ board: [], self: null }}
+          allTime={{ board: [], self: null }}
+          view="season"
+          onViewChange={noop}
+        />
+      </section>
+    )}
+    {!onlySim && !onlyCard && (
+      <section className="w-full max-w-[418px]">
+        <div className="mb-3 px-1 text-xs font-semibold uppercase tracking-wide text-amber-400">
+          Roster panel · season standings (Season tab, ~rail width)
+        </div>
+        <Roster
+          players={ROSTER}
+          selfId={SELF_ID}
+          selfName={SELF_NAME}
+          selfAvatar={SELF_AVATAR}
+          season={SEASON}
+          allTime={ALLTIME}
+          view="season"
+          onViewChange={noop}
+        />
+      </section>
+    )}
   </div>,
 );

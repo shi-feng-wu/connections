@@ -184,7 +184,6 @@ export function GameView({
     setView("live");
   }, [game]);
 
-  const hasSeason = season.board.length > 0 || allTime.board.length > 0;
   const canJump = players.some((p) => p.userId === selfId);
 
   const header = (className: string) => (
@@ -228,8 +227,8 @@ export function GameView({
             selfAvatar={selfAvatar}
             view={view}
             onViewChange={setView}
-            season={hasSeason ? season : undefined}
-            allTime={hasSeason ? allTime : undefined}
+            season={season}
+            allTime={allTime}
             jumpSignal={jumpNonce}
           />
         </div>

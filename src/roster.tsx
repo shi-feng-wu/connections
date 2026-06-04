@@ -3,7 +3,7 @@ import { Check, X } from "lucide-react";
 import { LEVELS, MAX_MISTAKES } from "./game";
 import type { PlayerState } from "./realtime";
 import { HoverButton } from "./hoverbutton";
-import { LedgerBody, type Standings } from "./season";
+import { LedgerBody, StandingsEmpty, type Standings } from "./season";
 
 const EMPTY_STANDINGS: Standings = { board: [], self: null };
 const GLIDE = "cubic-bezier(0.22,0.61,0.36,1)";
@@ -441,16 +441,21 @@ export function Roster({
     <>
       <Tabs view={view} setView={setView} showSeason={seasonAvailable} />
       {standings ? (
-        <div className="flex max-h-[46vh] min-h-0 flex-col min-[820px]:max-h-none min-[820px]:flex-1">
-          <LedgerBody
-            data={standingsData}
-            selfId={selfId}
-            name={selfName ?? "You"}
-            avatar={selfAvatar}
-            selfRowRef={selfRowRef}
-            fill
-          />
-        </div>
+        standingsData.board.length ? (
+          <div className="flex max-h-[46vh] min-h-0 flex-col min-[820px]:max-h-none min-[820px]:flex-1">
+            <LedgerBody
+              data={standingsData}
+              selfId={selfId}
+              name={selfName ?? "You"}
+              avatar={selfAvatar}
+              selfRowRef={selfRowRef}
+              fill
+            />
+          </div>
+        ) : (
+          // tabs stay live even with no scores; this is where they land
+          <StandingsEmpty window={view === "all" ? "all" : "season"} />
+        )
       ) : (
         <div className="list-fade flex max-h-[42vh] min-h-0 flex-col gap-1.25 overflow-y-auto scrollbar-thin min-[820px]:max-h-none min-[820px]:flex-1 min-[820px]:gap-1.5">
           {sorted.length ? (

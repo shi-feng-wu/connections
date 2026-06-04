@@ -14,12 +14,17 @@ export type PlayerState = {
   solvedCount: number;
   // Solved difficulty levels (0-3); roster paints each mini-board row its color.
   solvedLevels: number[];
-  // Tiles selected but not yet submitted; drives the emerald "picking…" halo.
+  // Tiles selected but not yet submitted. Still broadcast, but the roster ring now
+  // reflects presence (see `online`), not this.
   picking: boolean;
   done: 'won' | 'lost' | null;
   // Epoch ms. `startedAt` drives a local elapsed timer; `finishedAt` freezes it.
   startedAt: number;
   finishedAt: number | null;
+  // Derived client-side (not part of the broadcast): true while this player is in the live
+  // presence set — i.e. currently in the Activity. Drives the green "online" ring. A player
+  // who joined and then left stays in the roster with this unset/false.
+  online?: boolean;
 };
 
 let channel: RealtimeChannel | null = null;

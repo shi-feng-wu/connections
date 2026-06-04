@@ -179,6 +179,32 @@ describe("Game · submit outcomes", () => {
   });
 });
 
+describe("Game · deducedLevels", () => {
+  it("lists only correctly-guessed levels, in any order", () => {
+    const g = newGame();
+    guess(g, group(2));
+    guess(g, group(0));
+    expect(g.deducedLevels.slice().sort()).toEqual([0, 2]);
+  });
+
+  it("excludes the loss back-fill, so a loss never reports four solved", () => {
+    const g = newGame();
+    guess(g, group(0)); // two real deductions...
+    guess(g, group(1));
+    for (const w of FOUR_WRONG) if (g.status === "playing") guess(g, w);
+    expect(g.status).toBe("lost");
+    expect(g.solved.length).toBe(4); // ...the board got back-filled to four
+    expect(g.deducedLevels.slice().sort()).toEqual([0, 1]); // but only two deduced
+  });
+
+  it("is all four levels on a win", () => {
+    const g = newGame();
+    for (const lvl of [0, 1, 2, 3]) guess(g, group(lvl));
+    expect(g.status).toBe("won");
+    expect(g.deducedLevels.slice().sort()).toEqual([0, 1, 2, 3]);
+  });
+});
+
 describe("Game · score", () => {
   const base = SCORING.completionPerGroupSq * 16 + SCORING.solveBonus;
 

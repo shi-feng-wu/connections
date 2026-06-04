@@ -31,7 +31,8 @@ const LOCATE_PULSE: Keyframe[] = [
 // list (rank, avatar, mini-board, name, mistake dots, time + ✓/✗), with a bottom
 // fade and an optional pinned "Your standing" (desktop rail only).
 // Avatars stand in for Discord photos. Category colors only mean "solved";
-// emerald is reserved for "live" (picking / pulse).
+// emerald is reserved for live presence (a steady ring on players currently in the
+// Activity). Everyone who has joined stays listed; the ring just marks who's still here.
 
 // Identity palette, deliberately not the category colors.
 const AVCOL = [
@@ -128,16 +129,17 @@ function useFlash(players: PlayerState[]): Set<string> {
   return flashing;
 }
 
-// Colored initial circle. `picking` adds the emerald pulse ring (live view only);
-// the self avatar keeps a light ring. Photo layers over the initial placeholder.
+// Colored initial circle. `online` adds a steady emerald presence ring (live view only)
+// when the player is currently in the Activity; the self avatar keeps a light ring. Photo
+// layers over the initial placeholder.
 function Avatar({
   p,
   selfId,
-  picking,
+  online,
 }: {
   p: PlayerState;
   selfId: string;
-  picking: boolean;
+  online: boolean;
 }) {
   const you = p.userId === selfId;
   const [broken, setBroken] = useState<string | null>(null);
@@ -147,8 +149,8 @@ function Avatar({
       className={
         "relative grid h-6.5 w-6.5 flex-none place-items-center rounded-full text-[11px] font-extrabold text-[#0c0c0c] select-none min-[820px]:h-8 min-[820px]:w-8 min-[820px]:text-[13px] " +
         (you ? "shadow-[0_0_0_2px_#09090b,0_0_0_4px_#f4f4f5] " : "") +
-        (picking
-          ? "before:absolute before:-inset-1 before:animate-pick-ring before:rounded-full before:shadow-[0_0_0_2px_#34d399] before:content-['']"
+        (online
+          ? "before:absolute before:-inset-1 before:rounded-full before:shadow-[0_0_0_2px_#34d399] before:content-['']"
           : "")
       }
       style={{ background: colorFor(p.userId) }}
@@ -259,7 +261,7 @@ function RosterRow({
   selfId,
   now,
   flash,
-  picking,
+  online,
   rowRef,
 }: {
   p: PlayerState;
@@ -267,7 +269,7 @@ function RosterRow({
   selfId: string;
   now: number;
   flash: boolean;
-  picking: boolean;
+  online: boolean;
   // attached only to your row, so the locate arrow can scroll + pulse it.
   rowRef?: React.Ref<HTMLDivElement>;
 }) {
@@ -281,7 +283,7 @@ function RosterRow({
       }
     >
       <Rank rank={rank} />
-      <Avatar p={p} selfId={selfId} picking={picking} />
+      <Avatar p={p} selfId={selfId} online={online} />
       <MiniBoard p={p} flash={flash} />
       <span
         className={
@@ -469,7 +471,7 @@ export function Roster({
                   selfId={selfId}
                   now={now}
                   flash={flashing.has(p.userId)}
-                  picking={live && p.picking}
+                  online={live && !!p.online}
                   rowRef={you ? selfRowRef : undefined}
                 />
               );

@@ -83,7 +83,7 @@ type Seed = {
   mistakesLeft: number;
   sec: number;
   done?: "won" | "lost";
-  picking?: boolean;
+  online?: boolean;
   avatar?: string;
 };
 
@@ -100,15 +100,15 @@ const SELF_ID = "guest-mara";
 const seeds: Seed[] = [
   { id: "p-jun", name: "Jun Park", solved: [0, 1, 2, 3], mistakesLeft: 3, sec: 134, done: "won", avatar: pfp("#2f6fed") },
   { id: "p-aria", name: "Aria Voss", solved: [0, 1, 2, 3], mistakesLeft: 2, sec: 171, done: "won", avatar: pfp("#d9457a") },
-  { id: "p-theo", name: "Theo Lindqvist", solved: [0, 1, 2], mistakesLeft: 4, sec: 168, picking: true },
-  { id: "p-mei", name: "Mei Tanaka", solved: [0, 1, 3], mistakesLeft: 3, sec: 200, avatar: pfp("#1f9e6a") },
-  { id: "p-noa", name: "Noa Friedman", solved: [1, 3], mistakesLeft: 3, sec: 252, picking: true },
+  { id: "p-theo", name: "Theo Lindqvist", solved: [0, 1, 2], mistakesLeft: 4, sec: 168, online: true },
+  { id: "p-mei", name: "Mei Tanaka", solved: [0, 1, 3], mistakesLeft: 3, sec: 200, online: true, avatar: pfp("#1f9e6a") },
+  { id: "p-noa", name: "Noa Friedman", solved: [1, 3], mistakesLeft: 3, sec: 252, online: true },
   { id: "p-priya", name: "Priya Nair", solved: [0, 2], mistakesLeft: 2, sec: 211 },
   { id: "p-diego", name: "Diego Cruz", solved: [2, 3], mistakesLeft: 1, sec: 238 },
-  { id: SELF_ID, name: "Mara Okafor", solved: [0], mistakesLeft: 3, sec: 182, avatar: pfp("#b06bd6") },
+  { id: SELF_ID, name: "Mara Okafor", solved: [0], mistakesLeft: 3, sec: 182, online: true, avatar: pfp("#b06bd6") },
   { id: "p-sam", name: "Sam Cohen", solved: [2], mistakesLeft: 1, sec: 245 },
   { id: "p-yuki", name: "Yuki Sato", solved: [3], mistakesLeft: 0, sec: 310, done: "lost" },
-  { id: "p-omar", name: "Omar Haddad", solved: [], mistakesLeft: 4, sec: 8 },
+  { id: "p-omar", name: "Omar Haddad", solved: [], mistakesLeft: 4, sec: 8, online: true },
 ];
 const ROSTER: PlayerState[] = seeds.map((s) => ({
   userId: s.id,
@@ -117,7 +117,8 @@ const ROSTER: PlayerState[] = seeds.map((s) => ({
   mistakesLeft: s.mistakesLeft,
   solvedCount: s.solved.length,
   solvedLevels: s.solved,
-  picking: !!s.picking,
+  picking: false,
+  online: !!s.online,
   done: s.done ?? null,
   startedAt: NOW - s.sec * 1000,
   finishedAt: s.done ? NOW : null,

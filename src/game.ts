@@ -194,6 +194,16 @@ export class Game {
     return this.history.reduce((n, row) => n + (row.every((l) => l === row[0]) ? 1 : 0), 0);
   }
 
+  // Levels solved by deduction (a correct guess is four of a kind), excluding the loss
+  // back-fill (which lands in `solved`, not `history`). The roster/presence report these
+  // so a finished loss doesn't paint four solved bars. Shared by the client and the
+  // server-side roster replay (/api/roster).
+  get deducedLevels(): number[] {
+    const levels: number[] = [];
+    for (const row of this.history) if (row.every((l) => l === row[0])) levels.push(row[0]);
+    return levels;
+  }
+
   // 0 while playing. Wins reward fewer mistakes + speed; losses get convex
   // partial credit for groups reached.
   get score(): number {

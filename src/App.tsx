@@ -37,9 +37,7 @@ type StartInfo = {
 // `solved`. Matches what the Board broadcasts during play, so a rehydrated finished
 // loss doesn't report four solved in the roster.
 function deducedLevels(g: Game): number[] {
-  const deduced = new Set<number>();
-  for (const row of g.history) if (row.every((l) => l === row[0])) deduced.add(row[0]);
-  return g.solved.map((s) => s.level).filter((l) => deduced.has(l));
+  return g.deducedLevels; // shared with the server-side roster replay (/api/roster)
 }
 
 // Loss back-fill levels (solved minus deduced). Seeds the Board's revealed-on-loss
@@ -102,6 +100,17 @@ export function App({
   const joinedAtRef = useRef<number>(Date.now());
 
   const [players, setPlayers] = useState<PlayerState[]>([]);
+  // Live presence accumulates: once a player has been seen this session they stay in the
+  // roster even after they leave (state frozen at last-seen). presentIds marks who's
+  // currently in the Activity, which drives the green "online" ring. seenRef is the
+  // keep-everyone store the displayed list is rebuilt from on each sync.
+  const seenRef = useRef<Map<string, PlayerState>>(new Map());
+  const [presentIds, setPresentIds] = useState<Set<string>>(new Set());
+  // The room's persistent roster from /api/roster: everyone who joined this guild's daily
+  // today (even those who left before you opened), state replayed from committed guesses.
+  // Seeds the roster *under* live presence — presence overlays the live ones and adds the
+  // green ring. Empty for non-guild contexts, where presence is the only source.
+  const [serverRoster, setServerRoster] = useState<PlayerState[]>([]);
   const [self, setSelf] = useState<PlayerState | null>(null);
   // End-screen room leaderboard, two windows; fetched after a finish posts and on load.
   const [season, setSeason] = useState<Standings>(EMPTY_STANDINGS);
@@ -132,6 +141,15 @@ export function App({
       startedAt: g?.startedAt ?? Date.now(),
       finishedAt: g && g.durationMs != null ? g.startedAt + g.durationMs : null,
     };
+  }
+
+  // Presence sync → accumulate. Every player ever seen this session stays in `players`
+  // (left players frozen at their last state); presentIds is just who's here right now, so
+  // a departed player keeps their row but loses the green ring.
+  function handlePresenceSync(current: PlayerState[]): void {
+    for (const p of current) seenRef.current.set(p.userId, p);
+    setPlayers([...seenRef.current.values()]);
+    setPresentIds(new Set(current.map((p) => p.userId)));
   }
 
   // Board pushes its snapshot on each change; wrap with identity + timestamps,
@@ -195,6 +213,25 @@ export function App({
     ]);
     setSeason({ board: sBoard, self: sSelf });
     setAllTime({ board: aBoard, self: aSelf });
+  }
+
+  // Pull the room's persistent roster (joiners who came/went, replayed from their
+  // committed guesses) and merge it under live presence. Guild daily only — it self-gates
+  // and the server returns [] otherwise. Best-effort: a failure keeps the last roster.
+  async function fetchServerRoster(): Promise<void> {
+    if (!isDailyRef.current || !authTicketRef.current || !guildIdRef.current) return;
+    try {
+      const r = await fetch("/api/roster", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ guildId: guildIdRef.current, channelId: channelIdRef.current }),
+      });
+      if (!r.ok) return;
+      const d = (await r.json()) as { players?: PlayerState[] };
+      if (Array.isArray(d.players)) setServerRoster(d.players);
+    } catch {
+      /* keep the last roster */
+    }
   }
 
   function onFinish(): void {
@@ -317,6 +354,8 @@ export function App({
     // New board → let the first presence push through (a different puzzle/status).
     lastPresenceSig.current = "";
     isDailyRef.current = !opts.random && !opts.date;
+    // The persistent room roster is daily-scoped; practice/by-date shows presence only.
+    if (!isDailyRef.current) setServerRoster([]);
     const qs = new URLSearchParams();
     if (opts.date) qs.set("date", opts.date);
     if (opts.random) qs.set("random", "1");
@@ -342,7 +381,7 @@ export function App({
       const s = selfState();
       setSelf(s);
       if (!joinedRef.current) {
-        joinRoom(roomRef.current, s, setPlayers, {
+        joinRoom(roomRef.current, s, handlePresenceSync, {
           private: realtimeAuthedRef.current,
         });
         joinedRef.current = true;
@@ -352,6 +391,7 @@ export function App({
       setGameKey(`${puzzle.id}-${loadSeq.current++}`);
       setPhase("ready");
       pushPresence();
+      void fetchServerRoster();
     } catch {
       setPhase("error");
     }
@@ -511,13 +551,30 @@ export function App({
     })();
   }, []);
 
+  // Keep the persistent room roster fresh while playing: new joiners, and the progress of
+  // players who are offline (not in live presence). Guild daily only — fetchServerRoster
+  // self-gates; cleared on unmount. Live players already update via presence.
+  useEffect(() => {
+    if (!isEmbedded) return;
+    const id = setInterval(() => void fetchServerRoster(), 30_000);
+    return () => clearInterval(id);
+  }, [isEmbedded]);
+
   // Everyone in the room with own latest snapshot overlaid (presence sync can
   // lag own actions).
   const roster = useMemo(() => {
-    const byId = new Map(players.map((p) => [p.userId, p] as const));
+    // Persistent joiners form the base; live presence overlays the ones currently here
+    // (fresher state), and your own local state wins for you.
+    const byId = new Map<string, PlayerState>();
+    for (const p of serverRoster) byId.set(p.userId, p);
+    for (const p of players) byId.set(p.userId, p);
     if (self) byId.set(self.userId, self);
-    return [...byId.values()];
-  }, [players, self]);
+    // Tag presence: you're always here; everyone else is online while in the live set.
+    return [...byId.values()].map((p) => ({
+      ...p,
+      online: p.userId === meRef.current.id || presentIds.has(p.userId),
+    }));
+  }, [serverRoster, players, self, presentIds]);
 
   // Collapsed into Discord's picture-in-picture window: show the compact board
   // thumbnail (full-bleed) rather than the shrunken full UI. Takes precedence over

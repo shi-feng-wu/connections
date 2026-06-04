@@ -125,12 +125,12 @@ function Header({
 }
 
 // Responsive game shell. Mobile: a single column — header, board + footer, then the
-// players section (Live / Leaderboard tabs + list). Desktop (≥820px): a 50/50 split
-// — board + footer on the left, and a right rail (header, tabs, list, pinned "Your
-// standing") that absolute-fills the column so it matches the board's height and
-// scrolls its list rather than driving the layout taller. The cumulative season /
-// all-time standings live behind the rail's "Season" tab; the end-screen locate
-// arrow jumps the list to your row.
+// players section (Live / Season / All-time tabs + list). Desktop (≥820px): a 50/50
+// split — board + footer on the left, and a right rail (header, tabs, list, pinned
+// "Your standing") that absolute-fills the column so it matches the board's height
+// and scrolls its list rather than driving the layout taller. Season and All-time
+// share one standings table (different window); the end-screen locate arrow jumps
+// the live list to your row.
 export function GameView({
   game,
   gameKey,
@@ -164,17 +164,14 @@ export function GameView({
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
-  // which list the rail/section shows: the live room, today's standings, or the
-  // cumulative season/all-time table. Starts on the leaderboard for an already-
-  // finished (rehydrated) game.
-  const [view, setView] = useState<RosterView>(
-    game.status === "playing" ? "live" : "board",
-  );
-  // bumping this asks the Roster to scroll to your row and pulse it (end-screen
-  // locate arrow). Jumping from the season table first drops back to today's list.
+  // which list the rail/section shows: the live room, or the cumulative season /
+  // all-time table (same table, different window).
+  const [view, setView] = useState<RosterView>("live");
+  // bumping this asks the Roster to scroll to your row in the live list and pulse
+  // it (end-screen locate arrow), dropping back to Live from a standings tab first.
   const [jumpNonce, setJumpNonce] = useState(0);
   const jumpToSelf = (): void => {
-    setView((v) => (v === "season" ? "board" : v));
+    setView("live");
     setJumpNonce((n) => n + 1);
   };
 
@@ -187,7 +184,7 @@ export function GameView({
   useEffect(() => () => clearTimeout(feedbackTimer.current), []);
   useEffect(() => {
     setFeedbackOn(false);
-    setView(game.status === "playing" ? "live" : "board");
+    setView("live");
   }, [game]);
 
   const hasSeason = season.board.length > 0 || allTime.board.length > 0;
@@ -214,7 +211,7 @@ export function GameView({
           onCommit={onCommit}
           onFeedback={showFeedback}
           onFinish={() => {
-            setView("board");
+            setView("live");
             onFinish();
           }}
           onJumpToSelf={jumpToSelf}

@@ -3,7 +3,7 @@ import { Check, X } from "lucide-react";
 import { LEVELS, MAX_MISTAKES } from "./game";
 import type { PlayerState } from "./realtime";
 import { HoverButton } from "./hoverbutton";
-import { Leaderboard, type Standings } from "./season";
+import { LedgerBody, type Standings } from "./season";
 
 const EMPTY_STANDINGS: Standings = { board: [], self: null };
 
@@ -241,7 +241,6 @@ function RosterRow({
   flash,
   picking,
   rowRef,
-  pingRef,
 }: {
   p: PlayerState;
   rank: number;
@@ -251,7 +250,6 @@ function RosterRow({
   picking: boolean;
   // attached only to your row, so the locate arrow can scroll + pulse it.
   rowRef?: React.Ref<HTMLDivElement>;
-  pingRef?: React.Ref<HTMLSpanElement>;
 }) {
   const you = p.userId === selfId;
   return (
@@ -262,14 +260,6 @@ function RosterRow({
         (you ? "bg-zinc-100/10" : "bg-zinc-900/60")
       }
     >
-      {/* radar-ping ring for the locate pulse; idle at opacity 0, animated on jump */}
-      {you && (
-        <span
-          ref={pingRef}
-          aria-hidden
-          className="pointer-events-none absolute inset-0 rounded-[9px] opacity-0"
-        />
-      )}
       <Rank rank={rank} />
       <Avatar p={p} selfId={selfId} picking={picking} />
       <MiniBoard p={p} flash={flash} />
@@ -288,7 +278,7 @@ function RosterRow({
   );
 }
 
-export type RosterView = "live" | "board" | "season";
+export type RosterView = "live" | "season" | "all";
 
 const TAB =
   "relative inline-flex cursor-pointer items-center gap-1.5 bg-transparent px-0 pt-0.5 pb-1.75 font-sans text-[11px] font-bold uppercase tracking-[0.07em] transition-opacity duration-150 ease-out";
@@ -296,8 +286,9 @@ const TAB_ON =
   " text-zinc-100 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-zinc-300 after:content-['']";
 const TAB_OFF = " text-zinc-600";
 
-// Subtle tab heading that flips the list between the live room, today's standings,
-// and (when there are scored rows) the cumulative season / all-time table.
+// Subtle tab heading that flips between the live room and (when there are scored
+// rows) the cumulative season / all-time standings — the latter two share the exact
+// same table, differing only by window.
 function Tabs({
   view,
   setView,
@@ -317,21 +308,23 @@ function Tabs({
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
         Live
       </HoverButton>
-      <HoverButton
-        hover="opacity-60"
-        onClick={() => setView("board")}
-        className={TAB + (view === "board" ? TAB_ON : TAB_OFF)}
-      >
-        Leaderboard
-      </HoverButton>
       {showSeason && (
-        <HoverButton
-          hover="opacity-60"
-          onClick={() => setView("season")}
-          className={TAB + (view === "season" ? TAB_ON : TAB_OFF)}
-        >
-          Season
-        </HoverButton>
+        <>
+          <HoverButton
+            hover="opacity-60"
+            onClick={() => setView("season")}
+            className={TAB + (view === "season" ? TAB_ON : TAB_OFF)}
+          >
+            Season
+          </HoverButton>
+          <HoverButton
+            hover="opacity-60"
+            onClick={() => setView("all")}
+            className={TAB + (view === "all" ? TAB_ON : TAB_OFF)}
+          >
+            All-time
+          </HoverButton>
+        </>
       )}
     </div>
   );
@@ -376,7 +369,10 @@ export function Roster({
   const setView = onViewChange ?? setViewState;
   const live = view === "live";
   const seasonAvailable = season != null || allTime != null;
-  const showSeason = view === "season" && seasonAvailable;
+  // Season + All-time share one table, differing only by which window feeds it.
+  const standings = (view === "season" || view === "all") && seasonAvailable;
+  const standingsData =
+    view === "all" ? allTime ?? EMPTY_STANDINGS : season ?? EMPTY_STANDINGS;
 
   const now = useNow(players.some((p) => p.done === null));
   const flashing = useFlash(players);
@@ -384,11 +380,11 @@ export function Roster({
   const selfIdx = sorted.findIndex((p) => p.userId === selfId);
   const self = selfIdx >= 0 ? sorted[selfIdx] : null;
 
-  // The locate arrow bumps jumpSignal; scroll your row to center and run a one-shot
-  // pulse (cream focus glow on the row + a radar ping ring). WAAPI restarts cleanly
-  // on every bump. Skip the initial mount so it only fires on a real click.
+  // The locate arrow bumps jumpSignal; scroll your row to center and pulse it. The
+  // glow is drawn with INSET shadows so it hugs the row's rounded rect and is never
+  // clipped by the scroll container (which can't be overflow:visible and still
+  // scroll). WAAPI restarts cleanly on every bump; skip the initial mount.
   const selfRowRef = useRef<HTMLDivElement>(null);
-  const pingRef = useRef<HTMLSpanElement>(null);
   const armed = useRef(false);
   useEffect(() => {
     if (!armed.current) {
@@ -400,44 +396,41 @@ export function Roster({
     row.scrollIntoView({ behavior: "smooth", block: "center" });
     row.animate(
       [
-        { backgroundColor: "rgba(244,244,245,0.10)", boxShadow: "0 0 0 0 rgba(244,244,245,0)" },
         {
-          backgroundColor: "rgba(244,244,245,0.28)",
+          backgroundColor: "rgba(244,244,245,0.10)",
+          boxShadow: "inset 0 0 0 0 rgba(244,244,245,0), inset 0 0 0 0 rgba(244,244,245,0)",
+        },
+        {
+          backgroundColor: "rgba(244,244,245,0.30)",
           boxShadow:
-            "0 0 0 1.5px rgba(244,244,245,0.6), 0 10px 34px -10px rgba(244,244,245,0.32)",
+            "inset 0 0 0 1.6px rgba(244,244,245,0.85), inset 0 0 16px rgba(244,244,245,0.22)",
           offset: 0.12,
         },
         {
           backgroundColor: "rgba(244,244,245,0.15)",
           boxShadow:
-            "0 0 0 1px rgba(244,244,245,0.22), 0 6px 20px -12px rgba(244,244,245,0.16)",
+            "inset 0 0 0 1px rgba(244,244,245,0.4), inset 0 0 10px rgba(244,244,245,0.12)",
           offset: 0.5,
         },
-        { backgroundColor: "rgba(244,244,245,0.10)", boxShadow: "0 0 0 0 rgba(244,244,245,0)" },
+        {
+          backgroundColor: "rgba(244,244,245,0.10)",
+          boxShadow: "inset 0 0 0 0 rgba(244,244,245,0), inset 0 0 0 0 rgba(244,244,245,0)",
+        },
       ],
       { duration: 1700, easing: "cubic-bezier(0.22,0.61,0.36,1)" },
-    );
-    pingRef.current?.animate(
-      [
-        { boxShadow: "0 0 0 0 rgba(244,244,245,0.5)", opacity: 1 },
-        { boxShadow: "0 0 0 8px rgba(244,244,245,0)", opacity: 0 },
-      ],
-      { duration: 900, easing: "ease-out" },
     );
   }, [jumpSignal]);
 
   return (
     <>
       <Tabs view={view} setView={setView} showSeason={seasonAvailable} />
-      {showSeason ? (
+      {standings ? (
         <div className="flex max-h-[46vh] min-h-0 flex-col min-[820px]:max-h-none min-[820px]:flex-1">
-          <Leaderboard
-            season={season ?? EMPTY_STANDINGS}
-            allTime={allTime ?? EMPTY_STANDINGS}
+          <LedgerBody
+            data={standingsData}
             selfId={selfId}
             name={selfName ?? "You"}
             avatar={selfAvatar}
-            bare
             fill
           />
         </div>
@@ -456,7 +449,6 @@ export function Roster({
                   flash={flashing.has(p.userId)}
                   picking={live && p.picking}
                   rowRef={you ? selfRowRef : undefined}
-                  pingRef={you ? pingRef : undefined}
                 />
               );
             })
@@ -467,7 +459,7 @@ export function Roster({
           )}
         </div>
       )}
-      {showStanding && self && !showSeason && (
+      {showStanding && self && !standings && (
         <div className="hidden flex-none border-t border-dashed border-white/12 pt-2.5 min-[820px]:block">
           <div className="px-1 pb-1.5 text-[10px] uppercase tracking-[0.07em] text-zinc-600">
             Your standing · {ordinal(selfIdx + 1)} of {sorted.length}

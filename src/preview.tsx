@@ -550,7 +550,7 @@ createRoot(document.getElementById("preview")!).render(
     {!onlySim && !onlyCard && (
       <section className="w-full max-w-[360px] px-4">
         <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
-          Roster panel · standalone (Live / Leaderboard tabs)
+          Roster panel · standalone (Live tab)
         </div>
         <Roster players={ROSTER} selfId={SELF_ID} />
       </section>

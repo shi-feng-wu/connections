@@ -1,6 +1,5 @@
 import { Flame, X } from "lucide-react";
 import { useState } from "react";
-import { HoverButton } from "./hoverbutton";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import { colorFor, initials } from "./roster";
 
@@ -170,8 +169,10 @@ const toEntry = (r: BoardRow, rank: number): LedgerEntry => ({
 
 export type Standings = { board: BoardRow[]; self: SelfStanding | null };
 
-// One tab's body: header, top players, your pinned row, "+N below you".
-function LedgerBody({
+// The standings table for one window (season or all-time): column header, top
+// players, your pinned row, "+N below you". The roster renders it directly under
+// the "Season" and "All-time" tabs, so both windows share this exact layout.
+export function LedgerBody({
   data,
   selfId,
   name,
@@ -275,113 +276,3 @@ function LedgerBody({
   );
 }
 
-// Live-pulsing title + season/all-time tab switch over the dense table.
-export function Leaderboard({
-  season,
-  allTime,
-  selfId,
-  name,
-  avatar,
-  bare = false,
-  fill = false,
-  searchable = false,
-  onClose,
-}: {
-  season: Standings;
-  allTime: Standings;
-  selfId: string;
-  name: string;
-  avatar?: string;
-  // bare drops the standalone card surface (the modal supplies its own).
-  bare?: boolean;
-  // fill: stretch to the parent's height, scrolling the rows internally. Used when
-  // the leaderboard takes over the end-screen board area at its exact footprint.
-  fill?: boolean;
-  searchable?: boolean;
-  onClose?: () => void;
-}) {
-  const [tab, setTab] = useState<"season" | "all">("season");
-  const [query, setQuery] = useState("");
-  const data = tab === "season" ? season : allTime;
-  const tabs = [
-    ["season", "This season"],
-    ["all", "All-time"],
-  ] as const;
-
-  return (
-    <div
-      className={
-        (bare
-          ? "flex min-h-0 flex-col"
-          : "rounded-lg bg-zinc-900/60 p-3" +
-            (fill ? " flex min-h-0 flex-col" : "")) + (fill ? " h-full" : "")
-      }
-    >
-      <div
-        className={
-          "flex flex-wrap items-center gap-2 px-1.5 pt-0.5 pb-3 " +
-          // embedded under the roster's "Season" tab the caption is redundant, so
-          // drop it and let the season/all-time toggle sit on its own.
-          (bare ? "justify-end" : "justify-between")
-        }
-      >
-        {!bare && (
-          <span className="text-xs uppercase tracking-[0.05em] text-zinc-500">
-            Leaderboard
-          </span>
-        )}
-        <div className="flex items-center gap-2">
-          <div className="inline-flex gap-0.5 rounded-full border border-[#26262a] bg-zinc-900 p-0.75">
-            {tabs.map(([k, label]) => (
-              <HoverButton
-                key={k}
-                type="button"
-                onClick={() => setTab(k)}
-                hover="-translate-y-[1px]"
-                className={
-                  "cursor-pointer rounded-full px-3.5 py-1.5 text-[12px] font-semibold transition duration-150 ease-out " +
-                  (tab === k
-                    ? "bg-zinc-100 text-zinc-900"
-                    : "text-zinc-400 hover:text-zinc-100")
-                }
-              >
-                {label}
-              </HoverButton>
-            ))}
-          </div>
-          {onClose && (
-            <HoverButton
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              hover="scale-110"
-              className="grid h-7.5 w-7.5 flex-none cursor-pointer place-items-center rounded-lg text-zinc-400 transition duration-150 ease-out hover:bg-zinc-800 hover:text-zinc-100"
-            >
-              <X size={16} strokeWidth={2.2} aria-hidden />
-            </HoverButton>
-          )}
-        </div>
-      </div>
-      {searchable && (
-        <div className="px-1.5 pb-3">
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search players by name…"
-            autoComplete="off"
-            className="w-full rounded-full border border-[#2a2a2e] bg-zinc-900 px-3.75 py-2 font-sans text-[13px] text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 hover:border-zinc-600 focus:border-zinc-500"
-          />
-        </div>
-      )}
-      <LedgerBody
-        data={data}
-        selfId={selfId}
-        name={name}
-        avatar={avatar}
-        query={searchable ? query : ""}
-        fill={fill}
-      />
-    </div>
-  );
-}

@@ -374,7 +374,11 @@ export async function drawRoster(
   // to the card's right edge, then a full-width rule above the tiles ----
   drawBrandHeader(
     ctx,
-    { eyebrow: "NOW PLAYING", subline: nowPlayingSubline(opts), stats: nowPlayingStats(players) },
+    {
+      eyebrow: "NOW PLAYING",
+      subline: nowPlayingSubline(opts),
+      stats: nowPlayingStats(players),
+    },
     PAD_X,
     W - PAD_X,
   );
@@ -627,11 +631,16 @@ type BrandStat = { num: string; unit: string; label: string; accent: boolean };
 type BrandHeaderOpts = { eyebrow: string; subline: string; stats: BrandStat[] };
 
 // brand marks span 4·(mark+gap) − the trailing gap; then a fixed gap to the eyebrow text
-const RC_EYE_TEXT_X = 4 * (RC_MARK + RC_MARK_GAP) - RC_MARK_GAP + RC_MARK_TO_TEXT; // 55
+const RC_EYE_TEXT_X =
+  4 * (RC_MARK + RC_MARK_GAP) - RC_MARK_GAP + RC_MARK_TO_TEXT; // 55
 
 // One right-aligned stat (number + optional unit on a shared baseline, label beneath).
 // Returns the cluster's left edge so the caller can place a divider / the next stat.
-function drawStat(ctx: CanvasRenderingContext2D, rightX: number, stat: BrandStat): number {
+function drawStat(
+  ctx: CanvasRenderingContext2D,
+  rightX: number,
+  stat: BrandStat,
+): number {
   ctx.textBaseline = "alphabetic";
   ctx.textAlign = "right";
   let unitW = 0;
@@ -677,7 +686,11 @@ function statWidth(ctx: CanvasRenderingContext2D, stat: BrandStat): number {
 }
 
 // Draw the stat cluster right-to-left from `rightX`, with a divider between stats.
-function drawStatCluster(ctx: CanvasRenderingContext2D, rightX: number, stats: BrandStat[]): void {
+function drawStatCluster(
+  ctx: CanvasRenderingContext2D,
+  rightX: number,
+  stats: BrandStat[],
+): void {
   let right = rightX;
   for (let i = stats.length - 1; i >= 0; i--) {
     const left = drawStat(ctx, right, stats[i]);
@@ -691,7 +704,10 @@ function drawStatCluster(ctx: CanvasRenderingContext2D, rightX: number, stats: B
 }
 
 // Total width the stat cluster occupies (boxes + dividers + the gaps around them).
-function statsClusterWidth(ctx: CanvasRenderingContext2D, stats: BrandStat[]): number {
+function statsClusterWidth(
+  ctx: CanvasRenderingContext2D,
+  stats: BrandStat[],
+): number {
   let w = 0;
   stats.forEach((s, i) => {
     w += statWidth(ctx, s);
@@ -701,7 +717,11 @@ function statsClusterWidth(ctx: CanvasRenderingContext2D, stats: BrandStat[]): n
 }
 
 // Width of the header's left block (the widest of eyebrow, wordmark, subline).
-function brandHeaderLeftWidth(ctx: CanvasRenderingContext2D, eyebrow: string, subline: string): number {
+function brandHeaderLeftWidth(
+  ctx: CanvasRenderingContext2D,
+  eyebrow: string,
+  subline: string,
+): number {
   ctx.font = `700 ${RC_EYE_SIZE}px "Libre Franklin"`;
   ctx.letterSpacing = "1.8px";
   const eyeW = RC_EYE_TEXT_X + ctx.measureText(eyebrow).width;
@@ -793,11 +813,26 @@ function recapSubline(data: RecapData): string {
 function recapStats(data: RecapData): BrandStat[] {
   const stats: BrandStat[] = [];
   if (data.streak != null)
-    stats.push({ num: String(data.streak), unit: "d", label: "WIN STREAK", accent: true });
+    stats.push({
+      num: String(data.streak),
+      unit: "d",
+      label: "WIN STREAK",
+      accent: true,
+    });
   if (data.longest != null)
-    stats.push({ num: String(data.longest), unit: "d", label: "LONGEST", accent: false });
+    stats.push({
+      num: String(data.longest),
+      unit: "d",
+      label: "LONGEST",
+      accent: false,
+    });
   if (data.winRate != null)
-    stats.push({ num: String(data.winRate), unit: "%", label: "WIN RATE", accent: false });
+    stats.push({
+      num: String(data.winRate),
+      unit: "%",
+      label: "WIN RATE",
+      accent: false,
+    });
   return stats;
 }
 
@@ -860,7 +895,11 @@ export async function drawRecap(
   // with win streak (emerald) · win rate anchored right, then the full-width rule ----
   drawBrandHeader(
     ctx,
-    { eyebrow: "DAILY RECAP", subline: recapSubline(data), stats: recapStats(data) },
+    {
+      eyebrow: "DAILY RECAP",
+      subline: recapSubline(data),
+      stats: recapStats(data),
+    },
     RC_PAD_X,
     W - RC_PAD_X,
   );

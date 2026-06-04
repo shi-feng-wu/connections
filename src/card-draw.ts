@@ -32,10 +32,11 @@ export type DrawEnv = {
 export type CardOpts = { puzzleNo?: number; puzzleDate?: string };
 
 // ---- palette (lifted from the app: brand.css / game.ts LEVELS / roster.tsx) ----
-// Card background = Discord's default dark message surface, so the card blends into the
-// channel instead of sitting on a darker rectangle. (Opaque, not transparent, so the
-// light text stays legible regardless of the viewer's Discord theme.)
-const BG = "#1a1a1e"; // Discord default dark background
+// Card background — a near-black surface (zinc-950) inside a thin zinc-800 border, so
+// the card reads as a distinct framed panel in the channel. (Opaque, not transparent,
+// so the light text stays legible regardless of the viewer's Discord theme.)
+const BG = "#09090b"; // zinc-950
+const CARD_BORDER_W = 2; // border drawn last, on top of the bg/content
 const PANEL = "rgba(24,24,27,0.6)"; // zinc-900/60 — composited over BG
 const PANEL_BORDER = "#232327";
 const TITLE = "#efefe6"; // warm off-white wordmark
@@ -266,6 +267,19 @@ function drawIcon(
   ctx.lineJoin = "round";
   ctx.stroke(new Path2DCtor(icon.d));
   ctx.restore();
+}
+
+// The card's outer border (zinc-800), drawn last so neither the bg nor content covers
+// it. Inset by half the line width so the full stroke sits inside the canvas.
+function strokeCardBorder(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  height: number,
+): void {
+  const w = CARD_BORDER_W;
+  ctx.strokeStyle = ZINC_800;
+  ctx.lineWidth = w;
+  ctx.strokeRect(w / 2, w / 2, W - w, height - w);
 }
 
 function fitText(
@@ -523,6 +537,8 @@ export async function drawRoster(
     ctx.textBaseline = "middle";
     ctx.fillText(timeStr, statusLeft + ICON + STATUS_GAP, rowY + 1);
   });
+
+  strokeCardBorder(ctx, W, height);
 }
 
 // =====================================================================
@@ -1032,4 +1048,6 @@ export async function drawRecap(
     // total points
     drawPts(ctx, r.total, sPtsRight, base);
   });
+
+  strokeCardBorder(ctx, W, height);
 }

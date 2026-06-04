@@ -204,10 +204,10 @@ export function GameView({
     // height so the board stays vertically centered in the wide window.
     <div className="flex min-h-[calc(100dvh-3.5rem)] w-full animate-fade-in flex-col gap-3 min-[820px]:mx-auto min-[820px]:min-h-0 min-[820px]:max-w-[1080px] min-[820px]:flex-row min-[820px]:items-stretch min-[820px]:gap-6">
       {/* main column — board + footer. No header on mobile: Discord shows its own
-          activity header there, so we hide ours and keep a little top padding (on top
-          of #app's pt-8) to clear it. The header sits atop the players rail on desktop
+          activity header there, so we hide ours and keep some top padding (on top of
+          #app's pt-8) to clear it. The header sits atop the players rail on desktop
           instead (below). */}
-      <div className="flex w-full min-w-0 flex-col gap-3 pt-2 min-[820px]:flex-1 min-[820px]:pt-0">
+      <div className="flex w-full min-w-0 flex-col gap-3 pt-7 min-[820px]:flex-1 min-[820px]:pt-0">
         <Board
           key={gameKey}
           game={game}

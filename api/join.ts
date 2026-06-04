@@ -4,7 +4,7 @@ import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import { type CardPlayer, mergePlayer, renderRoster } from './_card.js';
 import { fetchDiscordUser, fetchUserGuildIds } from './_discord.js';
-import { botCardUrl, CARD_JOIN_THROTTLE_MS, cardPayload, sendCard, withGrids } from './_livecard.js';
+import { botCardUrl, CARD_JOIN_THROTTLE_MS, cardPayload, playerFinished, sendCard, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
 
 // Registers a player on the room's "who's playing today" card when they open the
@@ -50,6 +50,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     const date = todayET();
+
+    // A player who already finished today (won or lost) isn't playing anymore, so opening
+    // the Activity shouldn't (re)add them to the room card. Replayed from their committed
+    // guesses. The puzzle is also reused for the live grid render below; if it can't be
+    // fetched we can't tell, so we fall through and treat them as still playing.
+    let puzzle: Puzzle | null = null;
+    try {
+      puzzle = await fetchPuzzle(date);
+    } catch {
+      /* title falls back to no number; grids render blank */
+    }
+    if (puzzle && (await playerFinished(db, puzzle, user.id, date))) {
+      res.status(200).json({ ok: false, reason: 'finished' });
+      return;
+    }
+
     const { data: card } = await db
       .from('live_cards')
       .select('players, message_id, channel_id, edited_at')
@@ -83,12 +99,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const throttled = lastEdit != null && Date.now() - lastEdit < CARD_JOIN_THROTTLE_MS;
     let edited = false;
     if (messageId && botToken && cardChannel && !throttled) {
-      let puzzle: Puzzle | null = null;
-      try {
-        puzzle = await fetchPuzzle(date);
-      } catch {
-        /* title falls back to no number; grids render blank */
-      }
       const renderPlayers = puzzle ? await withGrids(db, puzzle, date, players) : players;
       const png = await renderRoster(renderPlayers, { puzzleNo: puzzle?.id, puzzleDate: date });
       const r = await sendCard(botCardUrl(cardChannel, messageId), cardPayload(), png, 'PATCH', 'card.png', {

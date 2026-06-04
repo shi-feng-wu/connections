@@ -5,7 +5,7 @@ import type { Puzzle } from '../src/game.js';
 import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import type { CardPlayer } from './_card.js';
-import { botCardUrl, CARD_POST_COOLDOWN_MS, cardPayload, interactionFollowupUrl, sendCard, withGrids } from './_livecard.js';
+import { botCardUrl, CARD_POST_COOLDOWN_MS, cardPayload, interactionFollowupUrl, playerFinished, sendCard, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
 import { PLAY_CUSTOM_ID } from './_recap.js';
 
@@ -187,6 +187,15 @@ async function postCard(body: LaunchInteraction): Promise<void> {
   } catch {
     /* title falls back to no number; grids render blank */
   }
+
+  // A player who already finished today's puzzle isn't playing anymore — don't add them
+  // to the room card or post a new one on their click. (Puzzle null = couldn't fetch, so
+  // we can't tell → fall through and treat them as still playing.)
+  if (puzzle && (await playerFinished(db, puzzle, player.id, date))) {
+    console.log('[card] skip: launcher already finished today', { scope, user: player.id });
+    return;
+  }
+
   const renderPlayers = puzzle ? await withGrids(db, puzzle, date, players) : players;
   const png = await renderRoster(renderPlayers, { puzzleNo: puzzle?.id, puzzleDate: date });
 

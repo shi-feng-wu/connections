@@ -56,6 +56,27 @@ export async function withGrids(
   });
 }
 
+// Whether a player has already finished (won or lost) today's puzzle, replayed from their
+// committed guesses (the same authoritative record /api/score scores). A finished player
+// isn't "playing", so a Join/Play click from them shouldn't add them to the room card or
+// spin up a new one. Needs the puzzle to replay; callers that couldn't fetch it skip the
+// check and proceed (fail open — never drop a card over a transient puzzle-fetch blip).
+export async function playerFinished(
+  db: SupabaseClient,
+  puzzle: Puzzle,
+  userId: string,
+  date: string,
+): Promise<boolean> {
+  const { data } = await db
+    .from('progress')
+    .select('guesses')
+    .eq('user_id', userId)
+    .eq('puzzle_date', date)
+    .maybeSingle();
+  const guesses = data && Array.isArray(data.guesses) ? (data.guesses as string[][]) : [];
+  return Game.fromGuesses(puzzle, guesses).status !== 'playing';
+}
+
 // Whether a grid (rows of four group-levels) shows a finished game: four groups solved
 // (a win) or four misses (a loss). A correct guess is four of a kind; anything else is
 // a miss. Lets a just-finished player's refresh skip the edit throttle.

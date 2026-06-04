@@ -4,7 +4,7 @@ import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import { type CardPlayer, mergePlayer, renderRoster } from './_card.js';
 import { fetchDiscordUser, fetchUserGuildIds } from './_discord.js';
-import { botCardUrl, cardPayload, sendCard, withGrids } from './_livecard.js';
+import { botCardUrl, CARD_JOIN_THROTTLE_MS, cardPayload, sendCard, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
 
 // Registers a player on the room's "who's playing today" card when they open the
@@ -52,7 +52,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const date = todayET();
     const { data: card } = await db
       .from('live_cards')
-      .select('players, message_id, channel_id')
+      .select('players, message_id, channel_id, edited_at')
       .eq('scope_id', scope)
       .eq('puzzle_date', date)
       .maybeSingle();
@@ -74,11 +74,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     // Edit the room's card in place if one exists (a launch established it). /api/join
     // never creates the card itself — it has no launch message to reply to — so without
     // an existing card it just records the roster for the next launch/refresh to show.
+    // Throttled like /api/refresh-card so a burst of opens can't spam the webhook; the
+    // dropped join's player still lands in the upsert and shows on the next edit.
     const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
     const messageId = (card?.message_id as string | null | undefined) ?? null;
     const cardChannel = (card?.channel_id as string | null | undefined) || channelId;
+    const lastEdit = card?.edited_at ? Date.parse(card.edited_at as string) : null;
+    const throttled = lastEdit != null && Date.now() - lastEdit < CARD_JOIN_THROTTLE_MS;
     let edited = false;
-    if (messageId && botToken && cardChannel) {
+    if (messageId && botToken && cardChannel && !throttled) {
       let puzzle: Puzzle | null = null;
       try {
         puzzle = await fetchPuzzle(date);

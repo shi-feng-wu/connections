@@ -5,7 +5,7 @@ import type { Puzzle } from '../src/game.js';
 import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import type { CardPlayer } from './_card.js';
-import { botCardUrl, cardPayload, interactionFollowupUrl, sendCard, withGrids } from './_livecard.js';
+import { botCardUrl, CARD_POST_COOLDOWN_MS, cardPayload, interactionFollowupUrl, sendCard, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
 import { PLAY_CUSTOM_ID } from './_recap.js';
 
@@ -106,11 +106,12 @@ type LaunchInteraction = Interaction & {
   message?: { id?: string };
 };
 
-// Post the room's "who's playing" card. A /connections command posts it as an interaction
-// followup (interaction-bound, no bot); the "Play now!" button posts it as a bot reply to
-// the clicked card (body.message), so cards thread off each other. The app/bot owns the
-// message, so /api/join + /api/refresh-card keep it live. Runs after the launch ACK is
-// already sent, so a failure here never blocks opening the game.
+// Post or refresh the room's "who's playing" card. At most one card per room every ~2h
+// (CARD_POST_COOLDOWN_MS): the launch that opens a window creates it — a /connections
+// command as an interaction followup (no bot), the "Play now!" button as a bot reply to
+// the clicked card — and launches within the window edit that same message in place
+// (needs the bot token) instead of posting a new card. /api/join + /api/refresh-card keep
+// it live too. Runs after the launch ACK is already sent, so a failure never blocks play.
 async function postCard(body: LaunchInteraction): Promise<void> {
   const appId = body.application_id ?? process.env.VITE_DISCORD_CLIENT_ID ?? '';
   const token = body.token ?? '';
@@ -154,7 +155,7 @@ async function postCard(body: LaunchInteraction): Promise<void> {
   const date = todayET();
   const { data: card, error: selErr } = await db
     .from('live_cards')
-    .select('players')
+    .select('players, message_id, channel_id, posted_at')
     .eq('scope_id', scope)
     .eq('puzzle_date', date)
     .maybeSingle();
@@ -175,24 +176,45 @@ async function postCard(body: LaunchInteraction): Promise<void> {
   const renderPlayers = puzzle ? await withGrids(db, puzzle, date, players) : players;
   const png = await renderRoster(renderPlayers, { puzzleNo: puzzle?.id, puzzleDate: date });
 
-  // A button click posts the card as a bot reply to the clicked message; a command posts it
-  // as an interaction followup. Either way wait/`?wait=true` returns the new message so we
-  // learn its id (which the bot edits afterward and /api/refresh-card / join keep current).
-  const viaButton = body.type === MESSAGE_COMPONENT;
-  let r: Response;
-  if (viaButton) {
-    const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
-    const replyTo = body.message?.id ? { messageId: body.message.id, channelId } : undefined;
-    r = await sendCard(botCardUrl(channelId), cardPayload(replyTo), png, 'POST', 'card.png', botToken ? { Authorization: `Bot ${botToken}` } : undefined);
-  } else {
-    r = await sendCard(interactionFollowupUrl(appId, token), cardPayload(), png, 'POST', 'card.png');
+  const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
+  const cardChannel = (card?.channel_id as string | null | undefined) || channelId;
+  const lastPost = card?.posted_at ? Date.parse(card.posted_at as string) : null;
+  const withinCooldown = lastPost != null && Date.now() - lastPost < CARD_POST_COOLDOWN_MS;
+  let messageId = (card?.message_id as string | null | undefined) ?? null;
+  let channelForRow = cardChannel;
+  let freshPost = false;
+
+  // Cooldown — at most one card per room every CARD_POST_COOLDOWN_MS (2h). A launch within
+  // that window edits the current card in place instead of posting another; editing needs
+  // the bot token (the followup token can't edit a prior message). A deleted card (404)
+  // falls through to a fresh post.
+  if (messageId && withinCooldown && botToken) {
+    const er = await sendCard(botCardUrl(cardChannel, messageId), cardPayload(), png, 'PATCH', 'card.png', { Authorization: `Bot ${botToken}` });
+    if (er.status === 404) messageId = null;
+    else if (!er.ok) console.error('[card] edit failed', { status: er.status }, await er.text().catch(() => ''));
   }
-  if (!r.ok) {
-    console.error('[card] post failed', { via: viaButton ? 'button' : 'command', status: r.status }, await r.text().catch(() => ''));
-    return;
+
+  // Post a fresh card when there's none yet, the last one is older than the cooldown, or it
+  // was just found deleted. A button click posts it as a bot reply to the clicked message;
+  // a command posts it as an interaction followup. `?wait=true` returns the new message id.
+  if (!messageId || !withinCooldown) {
+    const viaButton = body.type === MESSAGE_COMPONENT;
+    let r: Response;
+    if (viaButton) {
+      const replyTo = body.message?.id ? { messageId: body.message.id, channelId } : undefined;
+      r = await sendCard(botCardUrl(channelId), cardPayload(replyTo), png, 'POST', 'card.png', botToken ? { Authorization: `Bot ${botToken}` } : undefined);
+    } else {
+      r = await sendCard(interactionFollowupUrl(appId, token), cardPayload(), png, 'POST', 'card.png');
+    }
+    if (!r.ok) {
+      console.error('[card] post failed', { via: viaButton ? 'button' : 'command', status: r.status }, await r.text().catch(() => ''));
+      return;
+    }
+    messageId = ((await r.json()) as { id?: string }).id ?? null;
+    channelForRow = channelId;
+    freshPost = true;
+    console.log('[card] posted', { scope, via: viaButton ? 'button' : 'command', messageId, players: players.length });
   }
-  const messageId = ((await r.json()) as { id?: string }).id ?? null;
-  console.log('[card] posted', { scope, via: viaButton ? 'button' : 'command', messageId, players: players.length });
   if (!messageId) return;
 
   const nowIso = new Date().toISOString();
@@ -202,8 +224,9 @@ async function postCard(body: LaunchInteraction): Promise<void> {
       puzzle_date: date,
       players,
       message_id: messageId,
-      channel_id: channelId,
-      posted_at: nowIso,
+      channel_id: channelForRow,
+      // Only a fresh post resets the 2h cooldown; in-window edits keep the original time.
+      ...(freshPost ? { posted_at: nowIso } : {}),
       edited_at: nowIso, // anchors the live-edit throttle in /api/refresh-card
       updated_at: nowIso,
     },

@@ -16,6 +16,7 @@ import {
   updatePresence,
   type PlayerState,
 } from "./realtime";
+import { type PresenceInput, presenceSignature, setPresence } from "./presence";
 import { canonicalScope } from "./scope";
 import type { Standings } from "./season";
 
@@ -90,6 +91,11 @@ export function App({
   // Trailing-debounce for the live card refresh (see refreshCard): collapses a burst
   // of guesses into one webhook edit shortly after the player stops.
   const cardRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Discord SDK handle, set once the embedded handshake succeeds (null standalone),
+  // so post-load code can drive Rich Presence. lastPresenceSig dedupes setActivity
+  // calls — see pushPresence.
+  const sdkRef = useRef<DiscordSDK | null>(null);
+  const lastPresenceSig = useRef<string>("");
 
   const [players, setPlayers] = useState<PlayerState[]>([]);
   const [self, setSelf] = useState<PlayerState | null>(null);
@@ -143,6 +149,31 @@ export function App({
     };
     setSelf(player);
     void updatePresence(player);
+    pushPresence();
+  }
+
+  // Mirror the game onto the player's Discord profile (Rich Presence). Embedded
+  // only — sdkRef is null standalone, so this no-ops in the browser. Signature-
+  // gated so the board's per-tap snapshots can't spam Discord's rate-limited
+  // setActivity: only a solve, a mistake, or the finish changes the card.
+  function pushPresence(): void {
+    const sdk = sdkRef.current;
+    const g = gameRef.current;
+    if (!sdk || !g) return;
+    const input: PresenceInput = {
+      // Deduced groups only (excludes the loss back-fill), matching the roster.
+      solvedCount: deducedLevels(g).length,
+      total: g.puzzle.groups.length,
+      mistakesLeft: g.mistakesLeft,
+      status: g.status,
+      puzzleNo: g.puzzle.id,
+      startedAt: g.startedAt,
+      durationMs: g.durationMs,
+    };
+    const sig = presenceSignature(input);
+    if (sig === lastPresenceSig.current) return;
+    lastPresenceSig.current = sig;
+    void setPresence(sdk, input);
   }
 
   // Both end-screen tabs: this season (month) and all-time (since = null), each
@@ -165,6 +196,9 @@ export function App({
   function onFinish(): void {
     const g = gameRef.current;
     if (!g) return;
+    // Final card (won/lost + solve time), independent of scoring — practice games
+    // that don't submit still update the profile.
+    pushPresence();
     // Server verifies identity, replays, and scores. Requires the daily, a signed
     // session, and a Discord token; guests and replays don't earn season rows.
     const session = sessionRef.current;
@@ -276,6 +310,8 @@ export function App({
 
   async function loadPuzzle(opts: { date?: string; random?: boolean } = {}): Promise<void> {
     setPhase("loading");
+    // New board → let the first presence push through (a different puzzle/status).
+    lastPresenceSig.current = "";
     isDailyRef.current = !opts.random && !opts.date;
     const qs = new URLSearchParams();
     if (opts.date) qs.set("date", opts.date);
@@ -311,6 +347,7 @@ export function App({
       }
       setGameKey(`${puzzle.id}-${loadSeq.current++}`);
       setPhase("ready");
+      pushPresence();
     } catch {
       setPhase("error");
     }
@@ -323,6 +360,7 @@ export function App({
   async function setupDiscord(): Promise<boolean> {
     try {
       const sdk = new DiscordSDK(CLIENT_ID);
+      sdkRef.current = sdk; // so pushPresence() can drive Rich Presence post-handshake
       // ready() never resolves outside Discord; cap the wait so a forged ?frame_id
       // lands on the blocked screen instead of hanging on "Loading…".
       await Promise.race([
@@ -362,8 +400,12 @@ export function App({
         // user has already granted these scopes (consent is collected by Discord at
         // activity-launch time).
         prompt: "none",
-        // `guilds` lets /api/score confirm membership before writing a guild board.
-        scope: ["identify", "guilds"],
+        // `guilds` lets /api/score confirm membership before writing a guild board;
+        // `rpc.activities.write` lets the Activity set Rich Presence (the "Playing
+        // Connections" profile card, see presence.ts). Discord collects consent for
+        // these at launch, so prompt:none still returns a code; adding a scope just
+        // re-prompts once at the next launch.
+        scope: ["identify", "guilds", "rpc.activities.write"],
       });
       const res = await fetch("/api/token", {
         method: "POST",

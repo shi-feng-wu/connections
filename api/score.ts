@@ -17,8 +17,13 @@ import { verifySession } from './_session.js';
 // via the channel slot. Writes use the service role, so the anon key can't touch
 // the table.
 
-const SESSION_MAX_AGE = 18 * 60 * 60 * 1000; // daily session shouldn't outlive its day
-const DURATION_CAP = 6 * 60 * 60 * 1000;
+// A full day. The daily-reset check (session.date !== todayET, below) is the real
+// per-day boundary — anyone who hasn't finished by reset just stays incomplete — so
+// this is only a hard ceiling that stops an ancient session from scoring.
+const SESSION_MAX_AGE = 24 * 60 * 60 * 1000;
+// Speed-component cap. The reset ends the day before this binds, so it only guards
+// extremes (e.g. a session started right at midnight ET and finished a full day later).
+const DURATION_CAP = 24 * 60 * 60 * 1000;
 const MAX_GUESSES = 40; // upper bound on a real game's submissions
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {

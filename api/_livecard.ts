@@ -8,12 +8,16 @@ import { PLAY_CUSTOM_ID } from './_recap.js';
 // this module turns stored rosters into render-ready players and posts them to the
 // room's webhook. Leading underscore keeps Vercel from treating it as a route.
 
-// Throttle live edits so a flurry of guesses can't spam the webhook. A refresh inside
-// this window is dropped (the next event carries the latest state from the DB); a
-// player who just finished bypasses it so the final grid always lands.
-// TEMP (testing): set to 0 so every guess edits the card immediately. Restore to 2500
-// when done testing.
-export const CARD_EDIT_THROTTLE_MS = 0;
+// At most one "who's playing" card per room per this window: a launch older than the
+// last post starts a fresh card; launches/joins within it edit the current one in place.
+export const CARD_POST_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+// Throttle live card edits so a flurry of events can't spam the webhook: an edit within
+// the window is dropped (the next event carries the latest DB state). A new player tile
+// (join) refreshes a bit faster than mid-game progress (update); a player who just
+// finished bypasses the update throttle so the final grid always lands.
+export const CARD_JOIN_THROTTLE_MS = 15_000; // 15s
+export const CARD_UPDATE_THROTTLE_MS = 30_000; // 30s
 
 // Attach each player's current Connections grid (replayed from their committed guesses)
 // and their time: finish duration for a completed game, else elapsed-so-far. One query

@@ -3,7 +3,7 @@ import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import { type CardPlayer, renderRoster } from './_card.js';
 import { bearerToken } from './_discord.js';
-import { botCardUrl, CARD_EDIT_THROTTLE_MS, cardPayload, gridFinished, sendCard, withGrids } from './_livecard.js';
+import { botCardUrl, CARD_UPDATE_THROTTLE_MS, cardPayload, gridFinished, sendCard, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
 import { isLocalDev, verifyAuth } from './_session.js';
 
@@ -77,7 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     // final grid always shows (their own grid, so it can't be spoofed to bypass).
     const finished = gridFinished(renderPlayers.find((p) => p.id === uid)?.grid);
     const lastEdit = card?.edited_at ? Date.parse(card.edited_at as string) : null;
-    if (!finished && lastEdit && Date.now() - lastEdit < CARD_EDIT_THROTTLE_MS) {
+    if (!finished && lastEdit && Date.now() - lastEdit < CARD_UPDATE_THROTTLE_MS) {
       res.status(200).json({ ok: true, throttled: true });
       return;
     }

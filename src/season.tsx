@@ -7,7 +7,7 @@ import { colorFor, initials } from "./roster";
 // End-screen room leaderboard: two tabs ("This season" = the month, "All-time")
 // over the same scores rows, differing only by window. Dense table per tab
 // (rank, player, score, streak, played, win%, avg mistakes). Top players, then
-// your pinned row, then "+N below you". Fed by room_board / room_self RPCs.
+// your pinned row. Fed by room_board / room_self RPCs.
 
 function LeaderAvatar({
   id,
@@ -232,7 +232,7 @@ export function StandingsEmpty({ window }: { window: "season" | "all" }) {
 }
 
 // The standings table for one window (season or all-time): column header, top
-// players, your pinned row, "+N below you". The roster renders it directly under
+// players, your pinned row. The roster renders it directly under
 // the "Season" and "All-time" tabs, so both windows share this exact layout.
 export function LedgerBody({
   data,
@@ -280,7 +280,6 @@ export function LedgerBody({
           avg_mistakes: self.avg_mistakes,
         }
       : null;
-  const below = self && selfRank != null ? self.total_players - selfRank : 0;
 
   return (
     <>
@@ -314,14 +313,6 @@ export function LedgerBody({
           </div>
           <LedgerRow e={selfEntry} you rowRef={selfRowRef} />
         </>
-      )}
-      {!q && below > 0 && (
-        <div className="mt-1 flex items-center px-1.5 pt-2 pb-0.5">
-          <div className="text-[12.5px] text-zinc-500">
-            + {below.toLocaleString()} {below === 1 ? "player" : "players"}{" "}
-            below you
-          </div>
-        </div>
       )}
       {/* column labels sit at the BOTTOM (a legend), not the top — so the first row
           lands at the same height as the live list's first row (which has no header),

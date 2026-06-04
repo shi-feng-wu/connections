@@ -165,7 +165,21 @@ async function postCard(body: LaunchInteraction): Promise<void> {
   // button (which never render) don't pay the native-addon cold start.
   const { mergePlayer, renderRoster } = await import('./_card.js');
   const existing: CardPlayer[] = Array.isArray(card?.players) ? (card.players as CardPlayer[]) : [];
-  const { players } = mergePlayer(existing, player);
+
+  const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
+  const cardChannel = (card?.channel_id as string | null | undefined) || channelId;
+  const lastPost = card?.posted_at ? Date.parse(card.posted_at as string) : null;
+  const withinCooldown = lastPost != null && Date.now() - lastPost < CARD_POST_COOLDOWN_MS;
+  let messageId = (card?.message_id as string | null | undefined) ?? null;
+  let channelForRow = cardChannel;
+  let freshPost = false;
+
+  // A fresh card (none yet, or the last one aged past the 2h cooldown) starts the roster
+  // over with just this launcher; only an in-window edit merges onto the existing roster.
+  // Without the reset the previous card's players carry forward and the roster accumulates
+  // all day, so every new card reprints everyone who played earlier.
+  const startingFresh = !messageId || !withinCooldown;
+  const players = startingFresh ? [player] : mergePlayer(existing, player).players;
 
   let puzzle: Puzzle | null = null;
   try {
@@ -175,14 +189,6 @@ async function postCard(body: LaunchInteraction): Promise<void> {
   }
   const renderPlayers = puzzle ? await withGrids(db, puzzle, date, players) : players;
   const png = await renderRoster(renderPlayers, { puzzleNo: puzzle?.id, puzzleDate: date });
-
-  const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
-  const cardChannel = (card?.channel_id as string | null | undefined) || channelId;
-  const lastPost = card?.posted_at ? Date.parse(card.posted_at as string) : null;
-  const withinCooldown = lastPost != null && Date.now() - lastPost < CARD_POST_COOLDOWN_MS;
-  let messageId = (card?.message_id as string | null | undefined) ?? null;
-  let channelForRow = cardChannel;
-  let freshPost = false;
 
   // Cooldown — at most one card per room every CARD_POST_COOLDOWN_MS (2h). A launch within
   // that window edits the current card in place instead of posting another; editing needs

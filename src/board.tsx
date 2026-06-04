@@ -132,7 +132,8 @@ export function Board({
   onCommit?: (guess: string[]) => Promise<boolean>;
   onFinish: () => void;
   // transient submission feedback for the header date slot — now only the rare
-  // "Connection issue — try again" (guess results show on the Submit pill instead).
+  // "couldn’t save that guess" note when a background commit fails after retries
+  // (guess results show on the Submit pill instead).
   onFeedback: (msg: string) => void;
   // jump the roster list to your row and pulse it (end-screen locate arrow).
   onJumpToSelf: () => void;
@@ -502,19 +503,20 @@ export function Board({
     busy.current = true;
     const words = [...selected.current];
 
-    // Commit-then-reveal: record the guess server-side BEFORE showing its result,
-    // so a player can't see the outcome and then leave to erase it (the server
-    // replays the committed list to score). On a failed commit we don't touch the
-    // local game — the player retries rather than revealing an uncommitted guess.
-    // The board stays locked (busy) across the await, so nothing else mutates it.
-    if (onCommit && !(await onCommit(words))) {
-      onFeedback("Connection issue — try again");
-      busy.current = false;
-      return;
-    }
-
     game.selected = new Set(words);
     const result = game.submit();
+
+    // Optimistic reveal: the result is computed locally and matches the server's, so we
+    // show it immediately instead of waiting on the /api/guess round-trip (which made
+    // every guess feel laggy once a real network was in play). onCommit records the
+    // guess in the background (keepalive + ordered queue, see commitGuess); a guess that
+    // still can't be saved after retries surfaces a quiet header note rather than
+    // blocking play. Duplicates/noops aren't recorded server-side, so we skip them.
+    if (onCommit && result.type !== "duplicate" && result.type !== "noop") {
+      void onCommit(words).then((ok) => {
+        if (!ok) onFeedback("Couldn’t save that guess");
+      });
+    }
 
     if (result.type === "duplicate") {
       flashHint("Already guessed");

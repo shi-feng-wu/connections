@@ -89,6 +89,10 @@ export function App({
   // Trailing-debounce for the live card refresh (see refreshCard): collapses a burst
   // of guesses into one webhook edit shortly after the player stops.
   const cardRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Serial chain for background guess commits (see commitGuess): each commit runs
+  // after the previous settles, so the server records them in submission order and
+  // two in-flight POSTs can't double-append the same guess.
+  const commitChain = useRef<Promise<unknown>>(Promise.resolve());
   // Discord SDK handle, set once the embedded handshake succeeds (null standalone),
   // so post-load code can drive Rich Presence. lastPresenceSig dedupes setActivity
   // calls — see pushPresence.
@@ -265,24 +269,54 @@ export function App({
   // to retry rather than revealing — then abandoning — an uncommitted result.
   // Standalone (no auth ticket) and practice (non-daily) have nothing to track, so
   // they advance locally.
-  async function commitGuess(guess: string[]): Promise<boolean> {
-    if (!isDailyRef.current || !authTicketRef.current) return true;
+  // Record one guess to the player's authoritative daily record. The board reveals the
+  // result optimistically (it's computed locally and matches the server's), so this
+  // runs in the background instead of gating the reveal on the round-trip — that round-
+  // trip is what made every guess feel laggy on a real network. Commits are chained so
+  // they land in submission order, and use keepalive so an in-flight commit still
+  // completes if the Activity is closed mid-reveal (preserving record-before-leave for
+  // the common case). Resolves false only after retries are exhausted, so the board can
+  // surface a quiet "couldn't save" note. Standalone/local (no ticket) is a no-op.
+  function commitGuess(guess: string[]): Promise<boolean> {
+    if (!isDailyRef.current || !authTicketRef.current) return Promise.resolve(true);
     const g = gameRef.current;
-    if (!g) return true;
+    if (!g) return Promise.resolve(true);
+    const date = g.puzzle.date;
+    const link = commitChain.current.then(() => sendGuess(date, guess));
+    // keep the chain alive regardless of this link's outcome, but don't swallow the
+    // result the caller awaits.
+    commitChain.current = link.then(
+      () => {},
+      () => {},
+    );
+    return link;
+  }
+
+  async function sendGuess(date: string, guess: string[], attempt = 0): Promise<boolean> {
     try {
       const r = await fetch("/api/guess", {
         method: "POST",
+        keepalive: true,
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ date: g.puzzle.date, guess }),
+        body: JSON.stringify({ date, guess }),
       });
-      if (!r.ok) return false;
-      const ok = ((await r.json()) as { ok?: boolean }).ok !== false;
-      // Committed → reflect the new grid on the room card (debounced, best-effort).
-      if (ok) scheduleCardRefresh();
-      return ok;
+      if (r.ok) {
+        const ok = ((await r.json()) as { ok?: boolean }).ok !== false;
+        // Committed → reflect the new grid on the room card (debounced, best-effort).
+        if (ok) scheduleCardRefresh();
+        return ok;
+      }
     } catch {
-      return false;
+      /* network blip → fall through to retry */
     }
+    // The reveal already happened; we just need the record to land eventually. A couple
+    // of backed-off retries cover a transient blip, then we give up (the rare divergence
+    // is the accepted cost of the optimistic reveal).
+    if (attempt < 2) {
+      await new Promise((res) => setTimeout(res, 400 * (attempt + 1)));
+      return sendGuess(date, guess, attempt + 1);
+    }
+    return false;
   }
 
   // Edit the room's "who's playing today" card so the player's guess grid fills in

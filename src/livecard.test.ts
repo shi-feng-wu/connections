@@ -16,6 +16,13 @@ describe("cardPayload", () => {
     };
     expect(p.message_reference).toEqual({ message_id: "111", channel_id: "222", fail_if_not_exists: false });
   });
+
+  // The live card is routine churn, so it posts silently (SUPPRESS_NOTIFICATIONS,
+  // 1 << 12 = 4096) on both create and edit; only the recap is allowed to notify.
+  it("suppresses notifications on create and reply", () => {
+    expect((cardPayload() as { flags?: number }).flags).toBe(4096);
+    expect((cardPayload({ messageId: "1", channelId: "2" }) as { flags?: number }).flags).toBe(4096);
+  });
 });
 
 describe("botCardUrl", () => {

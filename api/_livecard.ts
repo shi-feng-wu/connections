@@ -63,14 +63,20 @@ export function gridFinished(grid: number[][] | undefined): boolean {
   return solved >= 4 || misses >= 4;
 }
 
+// Message flag (1 << 12): the message posts silently — no push/desktop ping. Every
+// live "who's playing" card (and its edits) is routine churn, so it's suppressed; only
+// the daily recap (recapPayload, no flag) is allowed to notify.
+const SUPPRESS_NOTIFICATIONS = 1 << 12;
+
 // The Discord message: the rendered PNG plus the "Play" button. The image is the hero
 // (it carries the title and player count, like the Wordle card), so it's sent as a bare
 // inline attachment — no embed, so Discord draws no frame/border or coloured side bar
 // around it; the PNG sits directly in the message. Pass `replyTo` on the initial post so
 // the card replies to the launcher's "<user> used /connections" message
-// (fail_if_not_exists:false → a normal message if it's gone).
+// (fail_if_not_exists:false → a normal message if it's gone). Posted silently.
 export function cardPayload(replyTo?: { messageId: string; channelId: string }): object {
   const base = {
+    flags: SUPPRESS_NOTIFICATIONS,
     components: [
       { type: 1, components: [{ type: 2, style: 1, label: 'Play now!', custom_id: PLAY_CUSTOM_ID }] },
     ],

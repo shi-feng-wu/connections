@@ -26,4 +26,11 @@ describe("recapPayload", () => {
     expect(recapPayload()).not.toHaveProperty("content");
     expect(recapPayload("hello")).toMatchObject({ content: "hello" });
   });
+
+  // The recap is the one bot message allowed to notify, so unlike the live card it
+  // carries no SUPPRESS_NOTIFICATIONS flag.
+  it("does not suppress notifications", () => {
+    expect(recapPayload()).not.toHaveProperty("flags");
+    expect(recapPayload("hi")).not.toHaveProperty("flags");
+  });
 });

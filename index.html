@@ -16,8 +16,10 @@
          content is taller than the viewport (the end screen), justify-center pushes
          the top off-screen with no way to scroll to it — clipping the score hero.
          Auto margins collapse to a top anchor on overflow, so the top stays reachable.
-         pt-8 leaves headroom for the score hero, which rides up out of the title row. -->
-    <div id="app" class="mx-auto flex min-h-dvh w-full max-w-[1160px] flex-col px-4 pb-6 pt-8 [&>*]:my-auto"></div>
+         pt-8 leaves headroom for the score hero, which rides up out of the title row —
+         a mobile-only concern (desktop's score lives in the footer, not above a title),
+         so the desktop view drops the top padding and the header hugs the top. -->
+    <div id="app" class="mx-auto flex min-h-dvh w-full max-w-[940px] flex-col px-4 pb-6 pt-8 min-[820px]:pt-0 [&>*]:my-auto"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

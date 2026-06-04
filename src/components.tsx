@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import logoUrl from "./assets/connections-logo.webp";
+import iconUrl from "./assets/connections-nyt.png";
 import { Board, type BoardSnapshot } from "./board";
 import { HoverButton } from "./hoverbutton";
 import { LEVELS, type Game, type Puzzle } from "./game";
@@ -59,13 +59,13 @@ export function LoadingScreen({
   );
 }
 
-// Brand lockup matching the PIP thumbnail header (src/pip.tsx): the brick logo · the
-// "Connections" wordmark, with a serif "No. 642 · date" meta line riding the right edge
-// in the title serif (Newsreader) — number and date one consistent muted line, joined by
-// a middot, exactly as the thumbnail. During play that meta line cross-fades to the rare
-// "couldn’t save that guess" note and back (guess results show on the Submit pill). Sits
-// atop the players rail on desktop only; hidden on mobile, where Discord shows its own
-// activity header above the board.
+// Brand lockup for the desktop players-rail header (per the "Desktop Connections"
+// redesign): the kept brick logo · the "Connections" serif wordmark · a bordered "No. 642"
+// pill, grouped on the left, with the serif date riding the right edge and a hairline
+// divider beneath. During play the date slot cross-fades to transient guess feedback
+// ("One away…" / the rare "couldn’t save that guess" note) and back — guess results show
+// on the Submit pill. Sits atop the players rail on desktop only; hidden on mobile, where
+// Discord shows its own activity header above the board.
 function Header({
   puzzle,
   feedbackText,
@@ -82,34 +82,36 @@ function Header({
     { year: "numeric", month: "long", day: "numeric" },
   );
   return (
-    <header className={"flex items-center gap-2.5 " + className}>
-      <img
-        src={logoUrl}
-        alt=""
-        className="h-[26px] w-[26px] flex-none rounded-[7px] min-[820px]:h-6 min-[820px]:w-6"
-      />
-      <span className="font-display text-[23px] font-bold leading-none tracking-[-0.025em] text-[#efefe6] min-[820px]:text-[21px]">
-        Connections
-      </span>
-      {/* serif meta line — "No. 642 · date" — number and date one consistent muted
-          serif line joined by a middot, matching the PIP thumbnail. The whole line
-          cross-fades to transient guess feedback ("One away…") during play. */}
-      <span className="relative ml-auto inline-flex items-baseline justify-end whitespace-nowrap text-right">
+    <header
+      className={
+        "flex items-center justify-between gap-3.5 border-b border-white/[0.08] pb-3 " +
+        className
+      }
+    >
+      {/* wordmark lockup — the brick icon (frameless, wordmark-height) · "Connections" · a bordered "No. 642" pill */}
+      <div className="flex items-center gap-2.5">
+        <img
+          src={iconUrl}
+          alt=""
+          className="h-[27px] w-[27px] flex-none object-contain"
+        />
+        <span className="font-display text-[27px] font-bold leading-none tracking-[-0.025em] text-[#efefe6]">
+          Connections
+        </span>
+        <span className="flex-none rounded-full border border-white/[0.13] px-2 py-[3px] font-sans text-[10px] font-bold uppercase leading-none tracking-[0.08em] tabular-nums text-zinc-400">
+          No. {puzzle.id}
+        </span>
+      </div>
+      {/* serif date riding the right edge; cross-fades to transient guess feedback
+          ("One away…") during play, then back. */}
+      <span className="relative inline-flex items-baseline justify-end whitespace-nowrap text-right">
         <span
           className={
-            "inline-flex items-baseline gap-1.5 transition-opacity duration-300 " +
+            "font-display text-[14px] font-semibold leading-none text-zinc-500 transition-opacity duration-300 " +
             (feedbackOn ? "opacity-0" : "opacity-100")
           }
         >
-          <span className="font-display text-[13px] font-normal leading-none tabular-nums text-zinc-500 min-[820px]:text-[12px]">
-            No. {puzzle.id}
-          </span>
-          <span className="font-display text-[11px] leading-none text-zinc-700 min-[820px]:text-[10px]">
-            ·
-          </span>
-          <span className="font-display text-[13px] font-normal leading-none tabular-nums text-zinc-500 min-[820px]:text-[12px]">
-            {dateLabel}
-          </span>
+          {dateLabel}
         </span>
         <span
           aria-live="polite"
@@ -202,7 +204,7 @@ export function GameView({
     // which, with a short roster, stranded a big gap above the board. The players
     // column then flex-grows into that space (see below). Desktop resets to content
     // height so the board stays vertically centered in the wide window.
-    <div className="flex min-h-[calc(100dvh-3.5rem)] w-full animate-fade-in flex-col gap-3 min-[820px]:mx-auto min-[820px]:min-h-0 min-[820px]:max-w-[1080px] min-[820px]:flex-row min-[820px]:items-stretch min-[820px]:gap-6">
+    <div className="flex min-h-[calc(100dvh-3.5rem)] w-full animate-fade-in flex-col gap-3 min-[820px]:mx-auto min-[820px]:min-h-0 min-[820px]:max-w-[860px] min-[820px]:flex-row min-[820px]:items-stretch min-[820px]:gap-6">
       {/* main column — board + footer. No header on mobile: Discord shows its own
           activity header there, so we hide ours and keep some top padding (on top of
           #app's pt-8) to clear it. The header sits atop the players rail on desktop

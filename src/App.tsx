@@ -590,7 +590,13 @@ export function App({
   // self-gates; cleared on unmount. Live players already update via presence.
   useEffect(() => {
     if (!isEmbedded) return;
-    const id = setInterval(() => void fetchServerRoster(), 30_000);
+    const id = setInterval(() => {
+      void fetchServerRoster();
+      // Keep the season/all-time boards live too — a steady poll catches scores from
+      // players we never saw in presence (joined + left between syncs). Near-real-time
+      // updates ride on the presence-driven refresh below; this is the safety net.
+      void refreshLeaderboard();
+    }, 30_000);
     return () => clearInterval(id);
   }, [isEmbedded]);
 
@@ -609,6 +615,32 @@ export function App({
       online: p.userId === meRef.current.id || presentIds.has(p.userId),
     }));
   }, [serverRoster, players, self, presentIds]);
+
+  // Live leaderboard, the near-real-time path: when another player wraps the daily their
+  // season/all-time totals change server-side a beat later (once their score write lands),
+  // so we refresh ~2.5s after first seeing them finish. The board then reshuffles and the
+  // FLIP rows slide to their new ranks. Own finishes already refresh via onFinish; the 30s
+  // poll backstops anyone we miss here.
+  const seenFinishers = useRef<Set<string>>(new Set());
+  const lbRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!isEmbedded) return;
+    let freshFinish = false;
+    for (const p of roster) {
+      if (!p.done || seenFinishers.current.has(p.userId)) continue;
+      seenFinishers.current.add(p.userId);
+      if (p.userId !== meRef.current.id) freshFinish = true;
+    }
+    if (!freshFinish) return;
+    if (lbRefreshTimer.current) clearTimeout(lbRefreshTimer.current);
+    lbRefreshTimer.current = setTimeout(() => void refreshLeaderboard(), 2500);
+  }, [roster, isEmbedded]);
+  useEffect(
+    () => () => {
+      if (lbRefreshTimer.current) clearTimeout(lbRefreshTimer.current);
+    },
+    [],
+  );
 
   // Collapsed into Discord's picture-in-picture window: show the compact board
   // thumbnail (full-bleed) rather than the shrunken full UI. Takes precedence over

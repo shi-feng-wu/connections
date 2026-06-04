@@ -39,6 +39,9 @@
   --animate-sheet-rise: sheetrise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
   /* score hero easing into the header row at game end */
   --animate-hero-in: heroIn 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
+  /* roster Live/Season/All-time tab swap — a quick, smaller heroIn so switching
+     tabs feels of a piece with the score hero (same glide), just snappier. */
+  --animate-tab-in: tabIn 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) both;
   /* Loading screen: category colors pulse in sequence, then the loaded page
      fades in over the loader. */
   --animate-qpulse: qpulse 1.5s ease-in-out infinite;
@@ -105,6 +108,16 @@
     from {
       opacity: 0;
       transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes tabIn {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
     }
     to {
       opacity: 1;
@@ -180,16 +193,6 @@ body {
      instead of early. Below ~350px it bottoms out at 52px. dvh matches the
      min-h-dvh container and tracks mobile browser chrome. */
   --tile-h: clamp(52px, calc((100dvh - 140px) / 4), 80px);
-}
-
-/* Desktop two-column layout (≥820px): the board column is much wider, so let tiles
-   grow taller too (100px cap) — otherwise wide-but-80px-tall tiles go letterbox, and
-   the game stays small in the middle of a large screen. Still clamps down on short
-   desktop windows (Discord's wide-but-short case), so it only grows where it fits. */
-@media (min-width: 820px) {
-  :root {
-    --tile-h: clamp(52px, calc((100dvh - 140px) / 4), 100px);
-  }
 }
 
 /* Discord activity iframe can be narrow; never scroll sideways. */

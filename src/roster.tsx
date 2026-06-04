@@ -3,6 +3,7 @@ import { Check, X } from "lucide-react";
 import { LEVELS, MAX_MISTAKES } from "./game";
 import type { PlayerState } from "./realtime";
 import { HoverButton } from "./hoverbutton";
+import { FlipList } from "./fliplist";
 import { LedgerBody, StandingsEmpty, type Standings } from "./season";
 
 const EMPTY_STANDINGS: Standings = { board: [], self: null };
@@ -289,6 +290,7 @@ function RosterRow({
   return (
     <div
       ref={rowRef}
+      data-flip-row={p.userId}
       className={
         "relative flex flex-none items-center gap-2 rounded-[9px] px-2.5 py-1.5 min-[820px]:gap-2.75 min-[820px]:px-3 min-[820px]:py-2.25 " +
         (you ? "bg-zinc-100/10" : "bg-zinc-900/60")
@@ -454,9 +456,12 @@ export function Roster({
   return (
     <>
       <Tabs view={view} setView={setView} showSeason={seasonAvailable} />
+      {/* key={view} remounts the active panel on each tab change so animate-tab-in
+          re-fires (incl. Season↔All-time, which reuse one element) — the new list
+          fades up on the site's score-hero glide. */}
       {standings ? (
         standingsData.board.length ? (
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div key={view} className="flex min-h-0 flex-1 animate-tab-in flex-col">
             <LedgerBody
               data={standingsData}
               selfId={selfId}
@@ -468,10 +473,13 @@ export function Roster({
           </div>
         ) : (
           // tabs stay live even with no scores; this is where they land
-          <StandingsEmpty window={view === "all" ? "all" : "season"} />
+          <StandingsEmpty key={view} window={view === "all" ? "all" : "season"} />
         )
       ) : (
-        <div className="list-fade flex min-h-0 flex-1 flex-col gap-1.25 overflow-y-auto scrollbar-thin min-[820px]:gap-1.5">
+        <FlipList
+          key={view}
+          className="flex animate-tab-in flex-col gap-1.25 min-[820px]:gap-1.5"
+        >
           {sorted.length ? (
             sorted.map((p, i) => {
               const you = p.userId === selfId;
@@ -493,7 +501,7 @@ export function Roster({
               No one here yet.
             </div>
           )}
-        </div>
+        </FlipList>
       )}
     </>
   );

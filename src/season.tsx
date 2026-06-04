@@ -1,6 +1,7 @@
 import { Flame, X } from "lucide-react";
 import { useState, type Ref } from "react";
 import type { BoardRow, SelfStanding } from "./leaderboard";
+import { FlipList } from "./fliplist";
 import { colorFor, initials } from "./roster";
 
 // End-screen room leaderboard: two tabs ("This season" = the month, "All-time")
@@ -109,6 +110,7 @@ function LedgerRow({
   return (
     <div
       ref={rowRef}
+      data-flip-row={e.id}
       className={
         // same card as the live roster row (src/roster.tsx RosterRow): a rounded
         // zinc-900/60 panel, your row lifted to zinc-100/10 — spaced, not divided.
@@ -180,7 +182,11 @@ export type Standings = { board: BoardRow[]; self: SelfStanding | null };
 export function StandingsEmpty({ window }: { window: "season" | "all" }) {
   const allTime = window === "all";
   return (
-    <div className="flex min-h-0 flex-1 animate-fade-in flex-col items-center justify-center gap-5 px-6 py-12 text-center">
+    // Desktop: the rail starts this block below the header+tabs yet runs down past
+    // the grid into the footer, so a plain center lands ~71px low. The extra bottom
+    // padding lifts the centered text back onto the grid's vertical midline (offset
+    // is fixed by the header/tabs/footer heights — independent of --tile-h).
+    <div className="flex min-h-0 flex-1 animate-tab-in flex-col items-center justify-center gap-5 px-6 py-12 text-center min-[820px]:pt-0 min-[820px]:pb-[140px]">
       <div className="flex flex-col gap-1.5">
         <h3 className="font-display text-[19px] font-semibold leading-tight tracking-[-0.01em] text-[#efefe6]">
           First place is open
@@ -246,7 +252,7 @@ export function LedgerBody({
 
   return (
     <>
-      <div
+      <FlipList
         className={
           (fill ? "min-h-0 flex-1" : "max-h-[46vh]") +
           " list-fade flex flex-col gap-1.25 overflow-y-auto scrollbar-thin min-[820px]:gap-1.5"
@@ -266,7 +272,7 @@ export function LedgerBody({
             No players match.
           </div>
         )}
-      </div>
+      </FlipList>
       {!q && selfEntry && !selfShown && (
         <>
           <div className="flex items-center justify-center gap-1.25 py-2">

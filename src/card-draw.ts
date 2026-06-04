@@ -579,9 +579,9 @@ export type RecapData = {
 };
 
 // ---- recap layout (px) ----
-const RC_PAD_X = 30;
-const RC_PAD_TOP = 28;
-const RC_PAD_BOTTOM = 28;
+const RC_PAD_X = 50;
+const RC_PAD_TOP = 46;
+const RC_PAD_BOTTOM = 46;
 const RC_RESULTS_W = 452; // left column (results) width
 const RC_STAND_W = 340; // right column (season standings) width
 const RC_COL_GAP = 26;
@@ -602,10 +602,10 @@ const RC_SUB_BASE = RC_TITLE_BASE + 28; // 108
 const RC_STAT_NUM = 30;
 const RC_STAT_UNIT = 16;
 const RC_STAT_LBL = 10;
-const RC_STAT_NUM_BASE = 68;
-const RC_STAT_LBL_BASE = 90;
+const RC_STAT_NUM_BASE = 86;
+const RC_STAT_LBL_BASE = 108;
 const RC_STAT_GAP = 22;
-const RC_STAT_DIV_TOP = 52;
+const RC_STAT_DIV_TOP = 70;
 const RC_STAT_DIV_H = 36;
 
 const RC_RULE_Y = RC_SUB_BASE + 18; // 126 — the full-width divider under the header

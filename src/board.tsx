@@ -555,7 +555,14 @@ export function Board({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-2" ref={boardRef}>
+      {/* gap above the grid only once a solved bar exists — an empty solved
+          container would otherwise reserve 8px atop the grid. Driven off
+          solvedLevels (re-rendered on each solve) rather than a :has selector,
+          so it holds even where :has isn't supported. */}
+      <div
+        className={"flex flex-col" + (solvedLevels.current.length ? " gap-2" : "")}
+        ref={boardRef}
+      >
         <div className="flex flex-col gap-2" ref={solvedRef}>
           {solvedLevels.current.map((lvl) => {
             const g = group(lvl);

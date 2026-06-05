@@ -83,14 +83,38 @@ export function toRecapData(opts: {
 }
 
 // The text body posted above the recap PNG (the PNG carries the per-player results and the
-// streak stats). One line: a bold streak clause naming the room's current solve streak
-// (with a 🔥), then the results intro; the longest streak lives in the graphic's stat
-// cluster, not here. No @mentions — the card lists who played.
-export function recapText(opts: { streak: number | null }): string {
+// streak stats). One of five lines, by yesterday's outcome:
+//   1. someone solved        → the streak headline, with one 🔥 per digit of the streak count.
+//   2. broke streak + failed  → "**N-day streak broken!** Yesterday's … stumped everyone … 🌞"
+//   3. broke streak + no play → "**N-day streak broken!** Nobody played yesterday's … 🌞"
+//   4. no streak + failed     → same as 2 without the prefix.
+//   5. no streak + no play    → same as 3 without the prefix.
+// `played` separates "everyone failed" (finishers, none solved) from "nobody played" (none).
+export function recapText(opts: {
+  streak: number | null;
+  // Did anyone solve yesterday? true → streak maintained; false → one of the "down" lines.
+  solved?: boolean;
+  // Were there any finishers? separates "everyone failed" (true) from "nobody played" (false).
+  played?: boolean;
+  // Length of the solve streak that ended yesterday (0/undefined if none) — named in the prefix.
+  brokenStreak?: number;
+  puzzleNo?: number;
+}): string {
+  const puzzle = opts.puzzleNo ? `Connections #${opts.puzzleNo}` : 'Connections';
+  if (opts.solved === false) {
+    const broken = opts.brokenStreak ?? 0;
+    const prefix = broken >= 1 ? `**${broken}-day streak broken!** ` : '';
+    const body = opts.played
+      ? `Yesterday's ${puzzle} stumped everyone`
+      : `Nobody played yesterday's ${puzzle}`;
+    return `${prefix}${body}… but today is a new day 🌞`;
+  }
+  // Streak maintained: one 🔥 per digit of the streak count (5 → 🔥, 12 → 🔥🔥, 100 → 🔥🔥🔥).
   const streak = opts.streak ?? 0;
   const tail = "Here are yesterday's results:";
   if (streak < 1) return tail;
-  return `**Your group is on a ${streak} day streak! 🔥** ${tail}`;
+  const fires = '🔥'.repeat(String(streak).length);
+  return `**Your group is on a ${streak} day streak! ${fires}** ${tail}`;
 }
 
 // The Discord message: the rendered recap PNG plus the Play button, with an optional

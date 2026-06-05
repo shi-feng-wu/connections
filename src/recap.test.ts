@@ -6,18 +6,52 @@ import { recapPayload, recapText } from "../api/_recap";
 // The longest streak and the per-player results live in the PNG, so the text carries
 // neither them nor @mentions.
 describe("recapText", () => {
-  it("bolds the streak clause with a 🔥 before the results intro", () => {
-    expect(recapText({ streak: 369 })).toBe(
-      "**Your group is on a 369 day streak! 🔥** Here are yesterday's results:",
+  // Case 1 — someone solved: streak headline with one 🔥 per digit of the streak count.
+  it("streak maintained: one fire per digit of the streak count", () => {
+    expect(recapText({ streak: 5, solved: true })).toBe(
+      "**Your group is on a 5 day streak! 🔥** Here are yesterday's results:",
     );
-    expect(recapText({ streak: 1 })).toBe(
-      "**Your group is on a 1 day streak! 🔥** Here are yesterday's results:",
+    expect(recapText({ streak: 12, solved: true })).toBe(
+      "**Your group is on a 12 day streak! 🔥🔥** Here are yesterday's results:",
+    );
+    expect(recapText({ streak: 369, solved: true })).toBe(
+      "**Your group is on a 369 day streak! 🔥🔥🔥** Here are yesterday's results:",
     );
   });
 
-  it("is just the results intro when there's no active streak", () => {
-    expect(recapText({ streak: 0 })).toBe("Here are yesterday's results:");
-    expect(recapText({ streak: null })).toBe("Here are yesterday's results:");
+  it("is just the results intro when a solve hasn't built a streak yet", () => {
+    expect(recapText({ streak: 0, solved: true })).toBe("Here are yesterday's results:");
+    expect(recapText({ streak: null, solved: true })).toBe("Here are yesterday's results:");
+  });
+
+  // Cases 2 & 4 — finishers but nobody solved: "stumped everyone", named prefix if a streak ended.
+  it("everyone failed: stumped-everyone line, names the broken streak only when one ended", () => {
+    expect(
+      recapText({ streak: 0, solved: false, played: true, brokenStreak: 12, puzzleNo: 642 }),
+    ).toBe(
+      "**12-day streak broken!** Yesterday's Connections #642 stumped everyone… but today is a new day 🌞",
+    );
+    expect(
+      recapText({ streak: 0, solved: false, played: true, brokenStreak: 0, puzzleNo: 642 }),
+    ).toBe("Yesterday's Connections #642 stumped everyone… but today is a new day 🌞");
+  });
+
+  // Cases 3 & 5 — no finishers at all: "nobody played", named prefix if a streak ended.
+  it("nobody played: nobody-played line, names the broken streak only when one ended", () => {
+    expect(
+      recapText({ streak: 0, solved: false, played: false, brokenStreak: 3, puzzleNo: 642 }),
+    ).toBe(
+      "**3-day streak broken!** Nobody played yesterday's Connections #642… but today is a new day 🌞",
+    );
+    expect(
+      recapText({ streak: 0, solved: false, played: false, brokenStreak: 0, puzzleNo: 642 }),
+    ).toBe("Nobody played yesterday's Connections #642… but today is a new day 🌞");
+  });
+
+  it("falls back to a generic puzzle name when the number is unknown", () => {
+    expect(recapText({ streak: 0, solved: false, played: false })).toBe(
+      "Nobody played yesterday's Connections… but today is a new day 🌞",
+    );
   });
 });
 

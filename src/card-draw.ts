@@ -632,6 +632,10 @@ const RC_ROW_R = 10;
 const RC_AV = 30; // recap avatar diameter
 const RC_DOT = 7;
 const RC_DOT_GAP = 5;
+// No-finisher day: stand in this many dashed "ghost" rows where the results would be, so the
+// column reads as an empty slate (not broken). Reserved in recapLayout too, so the card grows
+// to fit them.
+const RC_GHOST_ROWS = 3;
 
 const RC_EMERALD_UNIT = "#7fd9b0"; // emerald-400 mixed ~65% toward zinc-500 (streak unit)
 const RC_RANK_BRONZE = "#cd9a6b";
@@ -908,7 +912,7 @@ function recapBottoms(
 export function recapLayout(data: RecapData): RecapLayout {
   const results = data.results.slice(0, RC_MAX_RESULTS);
   const standings = data.standings.slice();
-  const { contentBottom } = recapBottoms(results.length, standings.length);
+  const { contentBottom } = recapBottoms(results.length || RC_GHOST_ROWS, standings.length);
   const height = Math.round(contentBottom + RC_PAD_BOTTOM);
   return { results, standings, W: RC_W, height };
 }
@@ -919,8 +923,13 @@ function recapSubline(data: RecapData): string {
   if (data.puzzleNo) parts.push(`Puzzle #${data.puzzleNo}`);
   const d = fmtDate(data.puzzleDate);
   if (d) parts.push(d);
-  const solved = data.results.filter((r) => r.solved).length;
-  parts.push(`${solved}/${data.results.length} solved`);
+  // "0/0 solved" reads as broken when nobody played; say "No Plays" instead.
+  if (data.results.length > 0) {
+    const solved = data.results.filter((r) => r.solved).length;
+    parts.push(`${solved}/${data.results.length} solved`);
+  } else {
+    parts.push("No Plays");
+  }
   return parts.join(" · ");
 }
 
@@ -1116,6 +1125,33 @@ export async function drawRecap(
     const color = r.solved ? EMERALD : ZINC_600;
     drawIcon(ctx, env.Path2D, icon, statusCx - 8, cy - 8, 16, color);
   });
+
+  // No finishers yesterday: stand in dashed "ghost" rows where the results would be — an empty
+  // slate, not a broken card. (The "nobody got it… new day" copy rides in the message body.)
+  if (results.length === 0) {
+    ctx.save();
+    ctx.strokeStyle = ZINC_700;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 4]);
+    for (let i = 0; i < RC_GHOST_ROWS; i++) {
+      const rowTop = RC_LIST_TOP + i * (RC_ROW_H + RC_ROW_GAP);
+      const cy = rowTop + RC_ROW_H / 2;
+      const avCx = RC_PAD_X + 8 + 50; // matches drawRowBase's avatar centre
+      const nameLeft = RC_PAD_X + 8 + 78;
+      roundRect(ctx, RC_PAD_X, rowTop, RC_RESULTS_W, RC_ROW_H, RC_ROW_R);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(avCx, cy, RC_AV / 2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(nameLeft, cy);
+      ctx.lineTo(nameLeft + 130, cy);
+      ctx.moveTo(RC_PAD_X + RC_RESULTS_W - 52, cy);
+      ctx.lineTo(RC_PAD_X + RC_RESULTS_W - 12, cy);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
 
   // ---- right column: season standings ----
   const sX = RC_PAD_X + RC_RESULTS_W + RC_COL_GAP;

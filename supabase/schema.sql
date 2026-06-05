@@ -392,6 +392,25 @@ $$;
 
 grant execute on function public.day_results(text, date, text) to anon, authenticated;
 
+-- Every (guild, channel) that has ever had a finisher — the set of channels the daily recap
+-- posts to. The recap fires for ALL of these every day, not just channels that played
+-- yesterday: a channel with an established habit still gets a card ("nobody got it… new day")
+-- on a day no one solved. Truly inactive channels (never played) are absent; a channel the
+-- bot was removed from just 403s at post time and is skipped for that day. g: scopes only —
+-- the bot posts in guild channels; c: DM/group scopes are excluded.
+drop function if exists public.recap_channels();
+create or replace function public.recap_channels()
+returns table (scope_id text, channel_id text)
+language sql
+stable
+as $$
+  select distinct s.scope_id, s.channel_id
+  from public.scores s
+  where s.scope_id like 'g:%' and s.channel_id is not null;
+$$;
+
+grant execute on function public.recap_channels() to anon, authenticated;
+
 -- Room-level header stats for the daily recap, as of a date: the room's current
 -- solve streak (consecutive most-recent days at least one player solved), its longest
 -- solve streak ever (max_streak), and its season solve rate (% of played days the room

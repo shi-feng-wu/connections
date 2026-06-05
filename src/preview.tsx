@@ -235,6 +235,15 @@ const CARD_RECAP: RecapData = {
   ],
 };
 
+// No-play day: every active channel still gets a card. The results column stands in dashed
+// "ghost" rows, the subline reads "No Plays", and the streak resets to 0 (the "Streak broken!
+// Nobody got it… new day 🌞" copy rides in the Discord message body).
+const CARD_RECAP_EMPTY: RecapData = {
+  ...CARD_RECAP,
+  streak: 0,
+  results: [],
+};
+
 function Card({ label, players }: { label: string; players: CardPlayer[] }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -579,6 +588,7 @@ createRoot(document.getElementById("preview")!).render(
     {showCards && <Card label="Discord card · busy room" players={CARD_BUSY} />}
     {showCards && <Card label="Discord card · single player" players={CARD_SOLO} />}
     {(showCards || onlyRecap) && <Recap label="Discord recap · daily reset post" data={CARD_RECAP} />}
+    {(showCards || onlyRecap) && <Recap label="Discord recap · nobody played (streak broken)" data={CARD_RECAP_EMPTY} />}
     {!onlySim && !onlyCard && !onlyScope && !onlyRecap && !onlyTurnover && (
       <section className="w-full max-w-[360px] px-4">
         <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">

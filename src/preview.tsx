@@ -215,6 +215,8 @@ const CARD_RECAP: RecapData = {
   season: "May",
   streak: 12,
   winRate: 84,
+  guildName: "Puzzle Club",
+  channelName: "daily-connections",
   results: [
     { id: "p-noa", name: "Noa Friedman", avatar: pfp("#2f6fed"), solved: true, score: 96, mistakes: 0, sec: 102 },
     { id: "p-theo", name: "Theo Lindqvist", avatar: null, solved: true, score: 91, mistakes: 0, sec: 88 },
@@ -512,15 +514,17 @@ const STATES = [
   <State key="l" label="Results · lost" game={lost} revealed={[2, 3]} />,
 ];
 const pick = decodeURIComponent(location.hash.slice(1)).toLowerCase();
-const known = ["progress", "perfect", "won", "lost", "loading", "error", "blocked", "simulate", "feedback", "card", "pip", "scope"];
+const known = ["progress", "perfect", "won", "lost", "loading", "error", "blocked", "simulate", "feedback", "card", "pip", "scope", "recap"];
 // #simulate and #feedback both isolate the Simulate playground (#feedback also
 // auto-fires a one-away guess to surface the header feedback pill); #card isolates the
 // Discord "who's playing" card; #pip isolates the collapsed PIP thumbnail.
 const onlySim = pick === "simulate" || pick === "feedback";
 const onlyCard = pick === "card";
 const onlyPip = pick === "pip";
-// #scope isolates the roster panel that carries the Channel/Server toggle.
+// #scope isolates the roster panel that carries the Channel/Server toggle; #recap
+// isolates the daily recap card (server/channel eyebrow).
 const onlyScope = pick === "scope";
+const onlyRecap = pick === "recap";
 const shown =
   known.includes(pick) && !onlySim && !onlyCard && !onlyPip
     ? STATES.filter((s) => String(s.props.label).toLowerCase().includes(pick))
@@ -549,8 +553,8 @@ createRoot(document.getElementById("preview")!).render(
     {showCards && <Card label="Discord card · who's playing today" players={CARD_ROOM} />}
     {showCards && <Card label="Discord card · busy room" players={CARD_BUSY} />}
     {showCards && <Card label="Discord card · single player" players={CARD_SOLO} />}
-    {showCards && <Recap label="Discord recap · daily reset post" data={CARD_RECAP} />}
-    {!onlySim && !onlyCard && !onlyScope && (
+    {(showCards || onlyRecap) && <Recap label="Discord recap · daily reset post" data={CARD_RECAP} />}
+    {!onlySim && !onlyCard && !onlyScope && !onlyRecap && (
       <section className="w-full max-w-[360px] px-4">
         <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
           Roster panel · standalone (Live tab)
@@ -558,7 +562,7 @@ createRoot(document.getElementById("preview")!).render(
         <Roster players={ROSTER} selfId={SELF_ID} />
       </section>
     )}
-    {!onlySim && !onlyCard && !onlyScope && (
+    {!onlySim && !onlyCard && !onlyScope && !onlyRecap && (
       <section className="w-full max-w-[360px] px-4">
         <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
           Roster panel · no scores yet (Season tab → placeholder)
@@ -575,7 +579,7 @@ createRoot(document.getElementById("preview")!).render(
         />
       </section>
     )}
-    {!onlySim && !onlyCard && (
+    {!onlySim && !onlyCard && !onlyRecap && (
       <section className="w-full max-w-[418px]">
         <div className="mb-3 px-1 text-xs font-semibold uppercase tracking-wide text-amber-400">
           Roster panel · season standings (Season tab, ~rail width)

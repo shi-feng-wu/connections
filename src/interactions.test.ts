@@ -1,6 +1,6 @@
 import { generateKeyPairSync, sign as edSign } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { routeInteraction, verifyDiscordSig } from "../api/interactions";
+import { isUserInstallOnly, routeInteraction, verifyDiscordSig } from "../api/interactions";
 
 // api/interactions.ts: Discord signs every interaction (Ed25519); an unverified
 // request must be refused, and the recap's Play button must map to a launch.
@@ -59,5 +59,27 @@ describe("routeInteraction", () => {
   it("does not launch for an unknown slash command", () => {
     const r = routeInteraction({ type: 2, data: { name: "nope" } }) as { type: number };
     expect(r.type).not.toBe(12);
+  });
+});
+
+// The card is a bot message, so it's skipped when the launch is a user install in a server
+// without the bot (only "1" present, no "0") — there it would only 403. "0" = guild install,
+// "1" = user install.
+describe("isUserInstallOnly", () => {
+  it("is true for a user-install-only launch (no guild install)", () => {
+    expect(isUserInstallOnly({ authorizing_integration_owners: { "1": "user123" } })).toBe(true);
+  });
+
+  it("is false when the app is guild-installed (bot is present)", () => {
+    expect(isUserInstallOnly({ authorizing_integration_owners: { "0": "guild123" } })).toBe(false);
+  });
+
+  it("is false when both install types authorized it", () => {
+    expect(isUserInstallOnly({ authorizing_integration_owners: { "0": "guild123", "1": "user123" } })).toBe(false);
+  });
+
+  it("is false (proceeds) when the field is absent or empty", () => {
+    expect(isUserInstallOnly({})).toBe(false);
+    expect(isUserInstallOnly({ authorizing_integration_owners: {} })).toBe(false);
   });
 });

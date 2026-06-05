@@ -50,6 +50,8 @@ export function toRecapData(opts: {
   streak?: number | null;
   longest?: number | null;
   winRate?: number | null;
+  guildName?: string | null;
+  channelName?: string | null;
 }): RecapData {
   return {
     puzzleNo: opts.puzzleNo,
@@ -58,6 +60,8 @@ export function toRecapData(opts: {
     streak: opts.streak ?? null,
     longest: opts.longest ?? null,
     winRate: opts.winRate ?? null,
+    guildName: opts.guildName ?? null,
+    channelName: opts.channelName ?? null,
     results: opts.results.map((r) => ({
       id: r.user_id,
       name: r.name,

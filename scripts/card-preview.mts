@@ -34,6 +34,8 @@ const RECAP: RecapData = {
   streak: 12,
   longest: 21,
   winRate: 84,
+  guildName: 'Puzzle Club',
+  channelName: 'daily-connections',
   results: [
     { id: 'p-noa', name: 'Noa Friedman', solved: true, score: 96, mistakes: 0, sec: 102 },
     { id: 'p-theo', name: 'Theo Lindqvist', solved: true, score: 91, mistakes: 0, sec: 88 },

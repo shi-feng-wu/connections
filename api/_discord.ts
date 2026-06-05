@@ -60,6 +60,39 @@ export async function fetchUserGuildIds(accessToken: unknown): Promise<string[] 
   }
 }
 
+// Server (guild) name via the bot token, for the recap card's room eyebrow. Best-effort:
+// null on any failure (bot not in the guild, rate limit, etc.) → the recap falls back to
+// the static "DAILY RECAP" label. Needs the bot to be a member of the guild.
+export async function fetchGuildName(guildId: string, botToken: string): Promise<string | null> {
+  if (!guildId || !botToken) return null;
+  try {
+    const r = await fetch(`https://discord.com/api/v10/guilds/${guildId}`, {
+      headers: { Authorization: `Bot ${botToken}` },
+    });
+    if (!r.ok) return null;
+    const g = (await r.json()) as { name?: string };
+    return typeof g.name === 'string' && g.name ? g.name : null;
+  } catch {
+    return null;
+  }
+}
+
+// Channel name via the bot token, for the recap card's room eyebrow. Best-effort (null on
+// failure). The bot is posting the recap to this channel, so it normally has access.
+export async function fetchChannelName(channelId: string, botToken: string): Promise<string | null> {
+  if (!channelId || !botToken) return null;
+  try {
+    const r = await fetch(`https://discord.com/api/v10/channels/${channelId}`, {
+      headers: { Authorization: `Bot ${botToken}` },
+    });
+    if (!r.ok) return null;
+    const c = (await r.json()) as { name?: string };
+    return typeof c.name === 'string' && c.name ? c.name : null;
+  } catch {
+    return null;
+  }
+}
+
 // Short-lived Supabase JWT (HS256, role=authenticated) for one private Realtime
 // room. Only verified Discord users get one, so presence can't be joined
 // anonymously; the `room` claim scopes the token to a single channel (see the

@@ -92,6 +92,19 @@ export function routeInteraction(body: Interaction): object {
   return { type: CHANNEL_MESSAGE_WITH_SOURCE, data: { content: 'Unsupported interaction.', flags: EPHEMERAL } };
 }
 
+// Whether this interaction was authorized ONLY as a user install — the app is on the user's
+// account, not installed to this guild, so the bot isn't a member and can't post/edit the
+// card (it would 403 with Missing Access). authorizing_integration_owners keys the install
+// types that authorized the interaction: "0" = GUILD_INSTALL (the bot is in this guild),
+// "1" = USER_INSTALL. We skip the card only when it's positively user-install ("1") and not
+// guild-install ("0") — an absent or unexpected field proceeds (old behaviour), so a real
+// guild card is never suppressed. Scoring/leaderboard are unaffected (they don't need the bot).
+export function isUserInstallOnly(body: { authorizing_integration_owners?: Record<string, string> }): boolean {
+  const owners = body.authorizing_integration_owners;
+  if (!owners || typeof owners !== 'object') return false;
+  return '1' in owners && !('0' in owners);
+}
+
 // Fields we read off the launch interaction beyond the routing ones above.
 type DiscordUserLite = { id?: string; username?: string; global_name?: string | null; avatar?: string | null };
 type LaunchInteraction = Interaction & {
@@ -104,6 +117,8 @@ type LaunchInteraction = Interaction & {
   user?: DiscordUserLite;
   // For the Play button (a component interaction), the message the button was on.
   message?: { id?: string };
+  // Which install types authorized this interaction: "0" = guild install, "1" = user install.
+  authorizing_integration_owners?: Record<string, string>;
 };
 
 // Post or refresh the room's "who's playing" card. At most one card per room every ~2h
@@ -131,6 +146,15 @@ async function postCard(body: LaunchInteraction): Promise<void> {
   const scope = canonicalScope(guildId, channelId);
   if (!scope || !scope.startsWith('g:') || !channelId) {
     console.warn('[card] skip: no guild scope/channel', { guildId, channelId, scope });
+    return;
+  }
+
+  // A user-install launch in a server without the bot still has a guild_id (so the scope
+  // gate above passes), but the bot can't post/edit there — it isn't a member. Skip the card
+  // (the game, scoring, and the in-app leaderboard/roster all work without it) rather than
+  // 403'ing on every edit.
+  if (isUserInstallOnly(body)) {
+    console.log('[card] skip: user-install launch (bot not in this guild)', { guildId });
     return;
   }
 

@@ -582,6 +582,8 @@ export type RecapData = {
   streak?: number | null; // room win streak in days (null hides the stat)
   longest?: number | null; // room's all-time longest win streak in days (null hides the stat)
   winRate?: number | null; // room season solve rate %, 0–100 (null hides the stat)
+  guildName?: string | null; // server name for the room eyebrow (null → "DAILY RECAP")
+  channelName?: string | null; // channel name, bare or with '#' (null hides the channel)
   results: RecapResult[];
   standings: RecapStanding[];
 };
@@ -636,6 +638,20 @@ const RC_RANK_BRONZE = "#cd9a6b";
 const RC_DIVIDER = "#232327";
 const RC_RULE_DIV = "#2a2a2e";
 const RC_WL = "#e4e4e7";
+// Room eyebrow (recap): the community identity reads first (brighter zinc-300), then the
+// channel trailing dimmer with a middot that matches the subline separators and a quiet
+// brand-blue hash. Truncates so it stays clear of the right-anchored stat cluster.
+const RC_ROOM_SEP = "#3f3f46"; // zinc-700, same as the subline middots
+const RC_ROOM_HASH = "#6aa0e0"; // the brand mark's blue — a nod to a Discord channel
+const RC_EYE_SERVER_MAX = 210; // px cap on the server name before the channel
+const RC_EYE_MAX_RIGHT = 470; // px from leftX the room eyebrow may reach before truncating
+
+// "See the full leaderboard" CTA centered in the empty bottom-right area, beneath the
+// season standings: "/connections" in accent emerald over two muted lines pointing at the
+// full in-app leaderboard. No container — just centered text.
+const RC_BLURB_GAP = 14; // min gap below the last standings row
+const RC_BLURB_H = 52; // reserved height for the three centered lines
+const RC_SLASH = "rgba(52,211,153,0.66)"; // the leading "/", a touch dimmer than the word
 
 function rankColor(i: number): string {
   if (i === 0) return CAT_COLOR[0]; // yellow
@@ -651,7 +667,17 @@ function rankColor(i: number): string {
 // full-width rule. drawRecap and drawRoster both render this so the two cards' heads
 // stay literally identical — only the eyebrow text, subline, and stats differ.
 type BrandStat = { num: string; unit: string; label: string; accent: boolean };
-type BrandHeaderOpts = { eyebrow: string; subline: string; stats: BrandStat[] };
+// When set, the eyebrow line shows the room ("Server · #channel") instead of the static
+// label string — used by the recap. channel is the bare name (no leading '#').
+type Room = { server: string; channel: string | null };
+// titleSuffix joins the wordmark in the same serif (the recap's "Connections Recap").
+type BrandHeaderOpts = {
+  eyebrow: string;
+  subline: string;
+  stats: BrandStat[];
+  room?: Room | null;
+  titleSuffix?: string | null;
+};
 
 // brand marks span 4·(mark+gap) − the trailing gap; then a fixed gap to the eyebrow text
 const RC_EYE_TEXT_X =
@@ -758,6 +784,47 @@ function brandHeaderLeftWidth(
   return Math.max(eyeW, titleW, subW);
 }
 
+// The recap eyebrow when the room is known: "Server · #channel" in place of the static
+// "DAILY RECAP" label — the community's name first (zinc-300), the channel trailing dimmer
+// with a brand-blue hash. Truncates the server, then the channel, to stay clear of the stats.
+function drawRoomEyebrow(
+  ctx: CanvasRenderingContext2D,
+  leftX: number,
+  room: Room,
+): void {
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  let x = leftX + RC_EYE_TEXT_X;
+  const maxRight = leftX + RC_EYE_MAX_RIGHT;
+
+  ctx.font = `700 ${RC_EYE_SIZE}px "Libre Franklin"`;
+  ctx.letterSpacing = "0.6px";
+  const server = fitText(ctx, room.server, RC_EYE_SERVER_MAX);
+  ctx.fillStyle = ZINC_300;
+  ctx.fillText(server, x, RC_EYE_BASE);
+  x += ctx.measureText(server).width;
+  ctx.letterSpacing = "0px";
+
+  const channel = room.channel?.replace(/^#/, "") ?? "";
+  if (channel && x < maxRight) {
+    ctx.font = `700 ${RC_EYE_SIZE}px "Libre Franklin"`;
+    ctx.fillStyle = RC_ROOM_SEP;
+    x += 7;
+    ctx.fillText("·", x, RC_EYE_BASE);
+    x += ctx.measureText("·").width + 7;
+
+    ctx.font = `600 ${RC_EYE_SIZE}px "Libre Franklin"`;
+    ctx.fillStyle = RC_ROOM_HASH;
+    ctx.fillText("#", x, RC_EYE_BASE);
+    x += ctx.measureText("#").width;
+
+    ctx.fillStyle = ZINC_500;
+    ctx.letterSpacing = "0.2px";
+    ctx.fillText(fitText(ctx, channel, maxRight - x), x, RC_EYE_BASE);
+    ctx.letterSpacing = "0px";
+  }
+}
+
 // Draw the whole brand header between [leftX, rightX] (stats anchored at rightX).
 function drawBrandHeader(
   ctx: CanvasRenderingContext2D,
@@ -774,16 +841,24 @@ function drawBrandHeader(
   }
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
-  ctx.fillStyle = ZINC_500;
-  ctx.font = `700 ${RC_EYE_SIZE}px "Libre Franklin"`;
-  ctx.letterSpacing = "1.8px"; // 0.16em of 11px
-  ctx.fillText(opts.eyebrow, leftX + RC_EYE_TEXT_X, RC_EYE_BASE);
-  ctx.letterSpacing = "0px";
+  if (opts.room) {
+    drawRoomEyebrow(ctx, leftX, opts.room);
+  } else {
+    ctx.fillStyle = ZINC_500;
+    ctx.font = `700 ${RC_EYE_SIZE}px "Libre Franklin"`;
+    ctx.letterSpacing = "1.8px"; // 0.16em of 11px
+    ctx.fillText(opts.eyebrow, leftX + RC_EYE_TEXT_X, RC_EYE_BASE);
+    ctx.letterSpacing = "0px";
+  }
 
   ctx.fillStyle = TITLE;
   ctx.font = `700 ${RC_TITLE_SIZE}px Newsreader`;
   ctx.letterSpacing = "-0.76px"; // -0.02em
-  ctx.fillText("Connections", leftX, RC_TITLE_BASE);
+  // titleSuffix joins the wordmark in the same serif (the recap's "Connections Recap").
+  const wordmark = opts.titleSuffix
+    ? `Connections ${opts.titleSuffix}`
+    : "Connections";
+  ctx.fillText(wordmark, leftX, RC_TITLE_BASE);
   ctx.letterSpacing = "0px";
 
   ctx.fillStyle = ZINC_500;
@@ -809,13 +884,33 @@ export type RecapLayout = {
 // of 25 rows is unwieldy). Standings already arrive capped by room_board's p_limit.
 const RC_MAX_RESULTS = 12;
 
+// Bottom edge of a column of `n` rows (RC_LIST_TOP for 0 rows).
+function colBottom(n: number): number {
+  return RC_LIST_TOP + n * RC_ROW_H + Math.max(0, n - 1) * RC_ROW_GAP;
+}
+
+// The recap's content bottom (before pad) and the standings-column bottom. The standings
+// column carries the CTA blurb beneath it, so its side can run taller than the results
+// column; the card grows to fit whichever is longer. Shared by layout (height) and draw
+// (centering the blurb in the [standBottom, contentBottom] gap).
+function recapBottoms(
+  resultsRows: number,
+  standRows: number,
+): { standBottom: number; contentBottom: number } {
+  const resultsBottom = colBottom(Math.max(resultsRows, 1));
+  const standBottom = colBottom(standRows);
+  const contentBottom = Math.max(
+    resultsBottom,
+    standBottom + RC_BLURB_GAP + RC_BLURB_H,
+  );
+  return { standBottom, contentBottom };
+}
+
 export function recapLayout(data: RecapData): RecapLayout {
   const results = data.results.slice(0, RC_MAX_RESULTS);
   const standings = data.standings.slice();
-  const rows = Math.max(results.length, standings.length, 1);
-  const height = Math.round(
-    RC_LIST_TOP + rows * RC_ROW_H + (rows - 1) * RC_ROW_GAP + RC_PAD_BOTTOM,
-  );
+  const { contentBottom } = recapBottoms(results.length, standings.length);
+  const height = Math.round(contentBottom + RC_PAD_BOTTOM);
   return { results, standings, W: RC_W, height };
 }
 
@@ -902,6 +997,44 @@ function drawPts(
   return numRight - ctx.measureText(num).width;
 }
 
+// The CTA centered in the empty bottom-right area beneath the season standings: an emerald
+// "/connections" (the accent color carries the "this is a command" read — the canvas has no
+// mono font) over two muted lines pointing at the full in-app leaderboard. Centered within
+// [areaTop, areaBottom] of the standings column. Quiet and secondary — the recap is the hero.
+function drawRecapBlurb(
+  ctx: CanvasRenderingContext2D,
+  sX: number,
+  areaTop: number,
+  areaBottom: number,
+): void {
+  const centerX = sX + RC_STAND_W / 2;
+  const cy = (areaTop + areaBottom) / 2;
+  ctx.textBaseline = "alphabetic";
+
+  // line 1: "/connections" (emerald, dimmed slash), horizontally centered as one unit
+  ctx.textAlign = "left";
+  ctx.font = `700 14px "Libre Franklin"`;
+  ctx.letterSpacing = "0.1px";
+  const slashW = ctx.measureText("/").width;
+  const restW = ctx.measureText("connections").width;
+  const startX = centerX - (slashW + restW) / 2;
+  ctx.fillStyle = RC_SLASH;
+  ctx.fillText("/", startX, cy - 15);
+  ctx.fillStyle = EMERALD;
+  ctx.fillText("connections", startX + slashW, cy - 15);
+  ctx.letterSpacing = "0px";
+
+  // lines 2 & 3: muted descriptor, centered
+  ctx.textAlign = "center";
+  ctx.fillStyle = ZINC_300;
+  ctx.font = `600 12px "Libre Franklin"`;
+  ctx.fillText("See the full leaderboard", centerX, cy + 4);
+  ctx.fillStyle = ZINC_500;
+  ctx.font = `500 11px "Libre Franklin"`;
+  ctx.fillText("season & all-time · server standings", centerX, cy + 21);
+  ctx.textAlign = "left";
+}
+
 export async function drawRecap(
   ctx: CanvasRenderingContext2D,
   data: RecapData,
@@ -919,6 +1052,13 @@ export async function drawRecap(
     ctx,
     {
       eyebrow: "DAILY RECAP",
+      // When the server name is known, the eyebrow becomes "Server · #channel" (the recap's
+      // room); otherwise it falls back to the static "DAILY RECAP" label.
+      room: data.guildName
+        ? { server: data.guildName, channel: data.channelName ?? null }
+        : null,
+      // The wordmark reads "Connections recap" — "recap" as a smaller, dimmer serif descriptor.
+      titleSuffix: "Recap",
       subline: recapSubline(data),
       stats: recapStats(data),
     },
@@ -1054,4 +1194,11 @@ export async function drawRecap(
     // total points
     drawPts(ctx, r.total, sPtsRight, base);
   });
+
+  // ---- CTA centered in the bottom-right area: open /connections for the full leaderboard ----
+  const { standBottom, contentBottom } = recapBottoms(
+    results.length,
+    standings.length,
+  );
+  drawRecapBlurb(ctx, sX, standBottom, contentBottom);
 }

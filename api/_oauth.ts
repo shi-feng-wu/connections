@@ -2,7 +2,6 @@
 // /api/install starts it (redirect to Discord) and /api/discord-callback finishes
 // it (code -> token -> webhook). Leading underscore keeps Vercel from routing this
 // file. Pure helpers so the URL/redirect logic can be unit-tested without a request.
-import { canonicalScope } from '../src/scope.js';
 
 // applications.commands re-installs the launch command; webhook.incoming is the
 // piece that matters here — Discord shows a channel picker and, on approval, mints
@@ -34,45 +33,4 @@ export function buildAuthorizeUrl(clientId: string, redirectUri: string, state: 
     state,
   });
   return `https://discord.com/oauth2/authorize?${q.toString()}`;
-}
-
-// The incoming-webhook object Discord returns in the token exchange when
-// webhook.incoming is granted (see docs.discord.com OAuth2 → webhooks).
-export type IncomingWebhook = {
-  id: string;
-  token: string;
-  url: string;
-  channel_id: string;
-  guild_id?: string | null;
-  name?: string;
-};
-
-// A public.recap_channels row.
-export type RecapChannelRow = {
-  scope_id: string;
-  channel_id: string;
-  guild_id: string | null;
-  webhook_id: string;
-  webhook_url: string;
-  updated_at: string;
-};
-
-// Map a granted webhook to the recap_channels row to upsert, or null if it's
-// unusable (no guild, or missing the fields we post with). scope_id is the canonical
-// g:<guild> key so it lines up with the scores rows the cron reads.
-export function webhookToRecapRow(
-  webhook: IncomingWebhook | null | undefined,
-  updatedAt: string,
-): RecapChannelRow | null {
-  const guildId = webhook?.guild_id ?? null;
-  const scopeId = canonicalScope(guildId);
-  if (!webhook || !scopeId || !webhook.channel_id || !webhook.url || !webhook.id) return null;
-  return {
-    scope_id: scopeId,
-    channel_id: webhook.channel_id,
-    guild_id: guildId,
-    webhook_id: webhook.id,
-    webhook_url: webhook.url,
-    updated_at: updatedAt,
-  };
 }

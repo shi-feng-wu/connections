@@ -73,16 +73,6 @@ create table if not exists public.guild_members (
 create index if not exists guild_members_guild_idx on public.guild_members (guild_id);
 alter table public.guild_members enable row level security;
 
--- Backfill from existing scores so no current board regresses to empty before players
--- replay: everyone who has already finished in a g: room is a known member of that guild.
--- Cross-server propagation (a player's OTHER guilds) begins on their next finish, when
--- /api/score captures their full guild list.
-insert into public.guild_members (guild_id, user_id)
-select distinct substring(s.scope_id from 3), s.user_id
-from public.scores s
-where s.scope_id like 'g:%'
-on conflict (guild_id, user_id) do nothing;
-
 -- Cumulative per-player totals for one room since a date, highest first.
 -- Latest name/avatar (by puzzle date) represents each player.
 drop function if exists public.season_standings(text, date, int);
@@ -344,33 +334,17 @@ create policy "room presence: authenticated write"
   on realtime.messages for insert to authenticated
   with check ( realtime.topic() = 'room:' || (auth.jwt() ->> 'room') );
 
--- Daily recap plumbing. The bot posts yesterday's results + season standings to
--- the channel an Activity was last played in, per room, on the midnight-ET reset
--- (see /api/cron-recap). Both tables are written only by the service role, which
--- bypasses RLS, so neither carries an anon policy (unlike scores there is no
--- "readable by all" grant: the anon key sees nothing here).
+-- Daily recap plumbing. The bot posts yesterday's results + season standings to the
+-- channel an Activity was last played in, per room, on the midnight-ET reset (see
+-- /api/cron-recap; the post target is read straight from the scores rows' channel_id).
+-- The recap_posts ledger is written only by the service role, which bypasses RLS, so it
+-- carries no anon policy (unlike scores there is no "readable by all" grant: the anon
+-- key sees nothing here).
 
--- Where to post a room's recap. scope_id mirrors public.scores.scope_id (g:<guild>
--- or c:<channel>). channel_id is the post target: the channel the room last played in,
--- upserted by /api/score (for a g: scope it is NOT recoverable from scope_id, which
--- holds the guild id). /api/cron-recap posts the recap there as the app's bot user
--- (added when an admin chooses "Add to Server"), mirroring Wordle's daily summary. A
--- room with no channel_id (nobody has finished a game there) gets no recap.
---
--- webhook_id/webhook_url are legacy, from the earlier webhook.incoming install flow;
--- the bot-posting cron no longer reads them. Kept so old rows don't error.
-create table if not exists public.recap_channels (
-  scope_id    text        primary key,
-  channel_id  text        not null,
-  guild_id    text,
-  webhook_id  text,                          -- legacy (webhook.incoming install); unused
-  webhook_url text,                          -- legacy (webhook.incoming install); unused
-  updated_at  timestamptz not null default now()
-);
-
--- Legacy columns from the incoming-webhook recap; retained so older installs still load.
-alter table public.recap_channels add column if not exists webhook_id  text;
-alter table public.recap_channels add column if not exists webhook_url text;
+-- recap_channels (the legacy webhook.incoming recap target) was removed: the cron now
+-- derives the post channel from scores, so nothing read this table. Dropped so existing
+-- DBs converge; harmless on a fresh DB.
+drop table if exists public.recap_channels;
 
 -- Idempotency ledger: one row per (scope, puzzle_date) once a recap is posted, so
 -- a retried or overlapping cron run can't double-post. /api/cron-recap claims a
@@ -401,8 +375,7 @@ begin
   end if;
 end $$;
 
-alter table public.recap_channels enable row level security;
-alter table public.recap_posts    enable row level security;
+alter table public.recap_posts enable row level security;
 
 -- One row per player for a single puzzle in one room, ranked richest-first
 -- (solved before unsolved, then score, fewer mistakes, faster). Backs the daily

@@ -105,21 +105,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
     const scopeId = canonicalScope(guildId, channelId);
 
-    // Remember the channel this room last played in, so the daily recap cron knows
-    // where to post (mirrors the Wordle activity's daily summary). channelId is the
-    // post target even for a g: scope, where it isn't recoverable from scopeId.
-    // Strictly best-effort: a hiccup here must never fail a legitimate score.
-    if (scopeId && channelId) {
-      try {
-        await db.from('recap_channels').upsert(
-          { scope_id: scopeId, channel_id: channelId, guild_id: guildId, updated_at: new Date().toISOString() },
-          { onConflict: 'scope_id' },
-        );
-      } catch {
-        /* recap channel is a convenience; never block scoring on it */
-      }
-    }
-
     await db.from('scores').upsert(
       {
         puzzle_id: puzzle.id,

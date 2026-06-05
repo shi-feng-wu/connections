@@ -255,7 +255,7 @@ export function LedgerBody({
       <FlipList
         className={
           (fill ? "min-h-0 flex-1" : "max-h-[46vh]") +
-          " list-fade flex flex-col gap-1.25 overflow-y-auto scrollbar-thin min-[820px]:gap-1.5"
+          " list-fade flex flex-col gap-1.25 overflow-y-auto scrollbar-thin pb-6 min-[820px]:gap-1.5"
         }
       >
         {rows.length ? (

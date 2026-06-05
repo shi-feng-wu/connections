@@ -3,7 +3,7 @@
     "api/interactions.ts": { "includeFiles": "api/_assets/**" },
     "api/join.ts": { "includeFiles": "api/_assets/**" },
     "api/refresh-card.ts": { "includeFiles": "api/_assets/**" },
-    "api/cron-recap.ts": { "includeFiles": "api/_assets/**" }
+    "api/cron-recap.ts": { "includeFiles": "api/_assets/**", "maxDuration": 60 }
   },
   "headers": [
     {

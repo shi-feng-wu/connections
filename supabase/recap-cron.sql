@@ -12,16 +12,26 @@
 --
 -- (To rotate later: select vault.update_secret(id, '<new value>') — find id in vault.secrets.)
 --
--- SCHEDULE — pg_cron evaluates in UTC and, like Vercel, does NOT follow DST. 0 4 * * * is
--- midnight ET in summer (EDT) / 11pm ET in winter (EST). This matches api/cron-recap.ts's
--- note: bump to '0 5 * * *' at the fall DST change to stay at/after the reset year-round.
--- Re-running this file is safe — cron.schedule upserts by job name.
+-- SCHEDULE — pg_cron evaluates in UTC and does NOT follow DST, but the Connections reset is
+-- fixed at midnight ET, whose UTC time shifts with DST: 04:00 UTC in summer (EDT), 05:00 UTC
+-- in winter (EST). So we register TWO jobs, at 04:00 and 05:00 UTC, ~1h apart. In every
+-- season at least one fires at/after the true midnight ET — by which point today's puzzle is
+-- published and yesterday's day is complete, so the handler's todayET()/yesterdayET() and its
+-- puzzle-warm are correct. The redundant run is harmless: api/cron-recap.ts claims a
+-- recap_posts ledger row before posting (no double-post) and the puzzle fetch is cache-backed
+-- (no double NYT call). This replaces the old single-row job that needed a manual seasonal
+-- bump and skipped a day at the spring-forward transition. Re-running this file is safe —
+-- cron.schedule upserts by job name.
 
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
 
+-- Drop the legacy single-row job if it's still registered. unschedule(jobid) matches zero
+-- rows without raising; unschedule('name') would error when the job is absent.
+select cron.unschedule(jobid) from cron.job where jobname = 'daily-recap';
+
 select cron.schedule(
-  'daily-recap',
+  'daily-recap-a',
   '0 4 * * *',
   $$
   select net.http_post(
@@ -37,7 +47,22 @@ select cron.schedule(
   $$
 );
 
--- To remove later:  select cron.unschedule('daily-recap');
--- To inspect runs:  select * from cron.job_run_details where jobid =
---                     (select jobid from cron.job where jobname = 'daily-recap')
+select cron.schedule(
+  'daily-recap-b',
+  '0 5 * * *',
+  $$
+  select net.http_post(
+    url     => 'https://connections-olive.vercel.app/api/cron-recap',
+    headers => jsonb_build_object(
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'cron_secret'),
+      'Content-Type',  'application/json'
+    ),
+    timeout_milliseconds => 30000
+  );
+  $$
+);
+
+-- To remove later:  select cron.unschedule('daily-recap-a'); select cron.unschedule('daily-recap-b');
+-- To inspect runs:  select * from cron.job_run_details where jobid in
+--                     (select jobid from cron.job where jobname like 'daily-recap%')
 --                   order by start_time desc limit 10;

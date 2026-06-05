@@ -8,6 +8,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { flushSync } from "react-dom";
+import { ResetCountdown } from "./countdown";
 import { Game, LEVELS, MAX_MISTAKES, shuffle, type Group } from "./game";
 import { HoverButton } from "./hoverbutton";
 
@@ -709,12 +710,13 @@ export function Board({
             />
           ))}
         </span>
-        <div className="flex flex-1 justify-center">
+        <div className="flex flex-1 flex-col items-center justify-center gap-0.5">
           <div className="flex items-center gap-1.75 text-[13px] tabular-nums text-zinc-400">
             <span>{fmtClock(game.durationMs)}</span>
             <span className="text-zinc-700">·</span>
             <span>{game.groupsSolved}/4</span>
           </div>
+          <ResetCountdown className="text-[11px] tabular-nums text-zinc-500" />
         </div>
         <div className="flex flex-none items-center gap-3.5">
           <div className="flex flex-col items-end gap-0.75">

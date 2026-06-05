@@ -444,6 +444,9 @@ export function Roster({
   const standings = (view === "season" || view === "all") && seasonAvailable;
   const standingsData =
     view === "all" ? allTime ?? EMPTY_STANDINGS : season ?? EMPTY_STANDINGS;
+  // Remount key for the active panel: changing the tab OR the Channel/Server scope swaps it,
+  // so animate-tab-in re-fires and the new list fades up the same way a tab switch does.
+  const panelKey = `${view}:${scope ?? ""}`;
 
   const now = useNow(players.some((p) => p.done === null));
   const flashing = useFlash(players);
@@ -504,12 +507,12 @@ export function Roster({
         scope={scope}
         onScopeChange={onScopeChange}
       />
-      {/* key={view} remounts the active panel on each tab change so animate-tab-in
-          re-fires (incl. Season↔All-time, which reuse one element) — the new list
-          fades up on the site's score-hero glide. */}
+      {/* panelKey remounts the active panel on each tab OR scope change so animate-tab-in
+          re-fires (incl. Season↔All-time, which reuse one element, and Channel↔Server) —
+          the new list fades up on the site's score-hero glide. */}
       {standings ? (
         standingsData.board.length ? (
-          <div key={view} className="flex min-h-0 flex-1 animate-tab-in flex-col">
+          <div key={panelKey} className="flex min-h-0 flex-1 animate-tab-in flex-col">
             <LedgerBody
               data={standingsData}
               selfId={selfId}
@@ -521,11 +524,11 @@ export function Roster({
           </div>
         ) : (
           // tabs stay live even with no scores; this is where they land
-          <StandingsEmpty key={view} window={view === "all" ? "all" : "season"} />
+          <StandingsEmpty key={panelKey} window={view === "all" ? "all" : "season"} />
         )
       ) : (
         <FlipList
-          key={view}
+          key={panelKey}
           // Own scroller (matches the standings list): flex-1 + min-h-0 lets it fill the
           // rail and overflow-y-auto scrolls internally instead of spilling past the board
           // on desktop when the live room is long (the rail is a fixed-height panel there).

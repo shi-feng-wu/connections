@@ -57,21 +57,13 @@ create index if not exists scores_puzzle_idx on public.scores (puzzle_id, score 
 create index if not exists scores_season_idx on public.scores (scope_id, puzzle_date);
 create index if not exists scores_channel_season_idx on public.scores (scope_id, channel_id, puzzle_date);
 
--- Cross-server membership: which Discord guilds each player belongs to, so a player's
--- daily score shows on EVERY server they're in the first time they finish anywhere — not
--- only the room they launched the Activity in. Written by /api/score from the player's
--- Discord guild list (/users/@me/guilds). The server-view leaderboard (room_board /
--- room_self in membership mode) ranks a guild's members from here instead of by the scope a
--- score was earned in. Holds a player's full guild list, so it is NOT anon-readable (RLS,
--- no policy, like progress); the board RPCs read it via security definer.
-create table if not exists public.guild_members (
-  guild_id   text        not null,
-  user_id    text        not null,
-  updated_at timestamptz not null default now(),
-  primary key (guild_id, user_id)
-);
-create index if not exists guild_members_guild_idx on public.guild_members (guild_id);
-alter table public.guild_members enable row level security;
+-- guild_members (a player's full Discord guild list, used to pre-populate the board of
+-- every server they belong to) was removed: the server-view board now ranks ONLY players
+-- who have actually finished a puzzle in that server, derived straight from scores.scope_id
+-- (see room_board / room_self). A listed player's total is still their global cross-server
+-- score — only the roster is play-gated, so no one shows on a server they never played in.
+-- Dropped so existing DBs converge; harmless on a fresh DB.
+drop table if exists public.guild_members;
 
 -- Cumulative per-player totals for one room since a date, highest first.
 -- Latest name/avatar (by puzzle date) represents each player.
@@ -205,14 +197,14 @@ stable
 security definer
 set search_path = public
 as $$
-  -- Server view of a guild (g: scope, no channel filter) ranks the guild's MEMBERS by
-  -- their daily results earned in ANY room, so a score follows a player to every server
-  -- they're in. Channel views and c: (DM/group) scopes stay scoped to the room a score was
-  -- earned in. SECURITY DEFINER so the membership lookup can read guild_members (otherwise
-  -- not anon-readable); set search_path pins it for safety.
+  -- Server view of a guild (g: scope, no channel filter) ranks everyone who has FINISHED a
+  -- puzzle in that server (membership derived from scores.scope_id) by their daily results
+  -- earned in ANY room — so the roster is play-gated (no one shows on a server they never
+  -- played in) while a listed player's total still follows them across every server.
+  -- Channel views and c: (DM/group) scopes stay scoped to the room a score was earned in.
+  -- set search_path pins the (security definer) function for safety.
   with mode as (
-    select (p_scope like 'g:%' and p_channel is null) as by_member,
-           substring(p_scope from 3)                  as gid
+    select (p_scope like 'g:%' and p_channel is null) as by_member
   ),
   agg as (
     select s.user_id,
@@ -225,7 +217,7 @@ as $$
     from public.scores s, mode m
     where (p_since is null or s.puzzle_date >= p_since)
       and case when m.by_member
-        then s.user_id in (select gm.user_id from public.guild_members gm where gm.guild_id = m.gid)
+        then s.user_id in (select s2.user_id from public.scores s2 where s2.scope_id = p_scope)
         else s.scope_id = p_scope and (p_channel is null or s.channel_id = p_channel)
       end
     group by s.user_id
@@ -260,10 +252,10 @@ security definer
 set search_path = public
 as $$
   -- Mirrors room_board's scoping: the guild server view (g: scope, no channel) ranks over
-  -- the guild's members (a score counts wherever earned); channel/DM views stay scope-bound.
+  -- everyone who has finished a puzzle in that server (membership from scores.scope_id; a
+  -- listed player's total still counts wherever earned); channel/DM views stay scope-bound.
   with mode as (
-    select (p_scope like 'g:%' and p_channel is null) as by_member,
-           substring(p_scope from 3)                  as gid
+    select (p_scope like 'g:%' and p_channel is null) as by_member
   ),
   board as (
     select s.user_id,
@@ -274,7 +266,7 @@ as $$
     from public.scores s, mode m
     where (p_since is null or s.puzzle_date >= p_since)
       and case when m.by_member
-        then s.user_id in (select gm.user_id from public.guild_members gm where gm.guild_id = m.gid)
+        then s.user_id in (select s2.user_id from public.scores s2 where s2.scope_id = p_scope)
         else s.scope_id = p_scope and (p_channel is null or s.channel_id = p_channel)
       end
     group by s.user_id

@@ -57,11 +57,6 @@ beforeAll(async () => {
       solved boolean not null default false, groups_solved smallint not null default 0,
       duration_ms int, puzzle_date date, created_at timestamptz not null default now()
     );
-    create table public.guild_members (
-      guild_id text not null, user_id text not null,
-      updated_at timestamptz not null default now(),
-      primary key (guild_id, user_id)
-    );
   `);
   expect(fnBlocks).toHaveLength(6); // current_streak, user_streak, room_board, room_self, day_results, room_recap_stats
   for (const block of fnBlocks) await db.exec(block);
@@ -290,20 +285,19 @@ describe("p_channel scoping", () => {
   });
 });
 
-// Server view of a real guild scope (g:<id>) aggregates over guild MEMBERS (guild_members),
-// so a score earned in one server shows on every server the player belongs to — the
-// cross-server fix. Channel views and non-g: scopes stay scope-bound (covered above).
+// Server view of a real guild scope (g:<id>) is play-gated: it lists ONLY players who have
+// finished a puzzle in that server (membership derived from scores.scope_id), but ranks
+// them by their GLOBAL total — so a listed player's score follows them across every server,
+// while no one is pre-populated onto a server they never played in. Channel views and
+// non-g: scopes stay scope-bound (covered above).
 describe("membership (g: server view)", () => {
   beforeAll(async () => {
-    // zoe belongs to servers 111 and 222; max only to 111.
-    await db.exec(`
-      insert into public.guild_members (guild_id, user_id) values
-        ('111','zoe'), ('222','zoe'), ('111','max');
-    `);
-    // Both played ONLY in server 111 (scope g:111). zoe solved two straight days.
+    // zoe played in BOTH servers (g:111 twice, g:222 once); max only in g:111. Three
+    // straight solves for zoe across the two servers (06-03 in 222, 06-04/05 in 111).
     const rows: [string, string, string, number, boolean, string][] = [
       ["g:111", "zoe", "Zoe", 1000, true, "2026-06-04"],
       ["g:111", "zoe", "Zoe", 900, true, "2026-06-05"],
+      ["g:222", "zoe", "Zoe", 500, true, "2026-06-03"],
       ["g:111", "max", "Max", 700, true, "2026-06-05"],
     ];
     for (const [scope, user, name, score, solved, date] of rows) {
@@ -320,31 +314,35 @@ describe("membership (g: server view)", () => {
       (r) => r.user_id,
     );
 
-  it("shows a player on a server they belong to, even one they never played in", async () => {
-    // server 222: zoe is a member and has a score (earned in g:111) → she appears; max is
-    // not a member of 222 → excluded, despite having a score row in the same table.
+  it("lists only players who have actually finished a puzzle in that server", async () => {
+    // server 222: only zoe ever played there → only zoe. max has a score (in g:111) but
+    // never played in 222, so he is NOT pre-populated onto its board.
     expect(await members("g:222")).toEqual(["zoe"]);
+    // a server nobody has played in has an empty board.
+    expect(await members("g:999")).toEqual([]);
   });
 
-  it("ranks both members on a server they did play in", async () => {
-    expect(await members("g:111")).toEqual(["zoe", "max"]); // zoe 1900 > max 700
+  it("ranks everyone who played there by their GLOBAL cross-server total", async () => {
+    // both played in 111; zoe's total spans both servers (1000+900+500=2400) > max (700).
+    expect(await members("g:111")).toEqual(["zoe", "max"]);
   });
 
-  it("uses the player's personal (scope-agnostic) streak on the membership board", async () => {
+  it("a listed player's total still counts scores earned in other servers", async () => {
+    // zoe makes 222's board off a single 222 play, but her shown total is her global 2400.
+    const raw = (await db.query<{ r: unknown }>(`select public.room_self('g:222', null, 'zoe') as r`)).rows[0].r;
+    const self = typeof raw === "string" ? JSON.parse(raw) : raw;
+    expect(self).toMatchObject({ rank: 1, total_players: 1, total: 2400, plays: 3, streak: 3 });
+  });
+
+  it("uses the player's personal (scope-agnostic) streak on the server board", async () => {
     const { rows } = await db.query<{ user_id: string; streak: number }>(
       `select user_id, streak from public.room_board('g:222', null, 50)`,
     );
-    expect(Number(rows.find((r) => r.user_id === "zoe")!.streak)).toBe(2); // 06-04 + 06-05
-  });
-
-  it("room_self ranks the member by their global total", async () => {
-    const raw = (await db.query<{ r: unknown }>(`select public.room_self('g:222', null, 'zoe') as r`)).rows[0].r;
-    const self = typeof raw === "string" ? JSON.parse(raw) : raw;
-    expect(self).toMatchObject({ rank: 1, total_players: 1, total: 1900, plays: 2, streak: 2 });
+    expect(Number(rows.find((r) => r.user_id === "zoe")!.streak)).toBe(3); // 06-03 + 06-04 + 06-05
   });
 
   it("user_streak counts a player's solves across all rooms", async () => {
     const s = Number((await db.query<{ s: number }>(`select public.user_streak('zoe') as s`)).rows[0].s);
-    expect(s).toBe(2);
+    expect(s).toBe(3);
   });
 });

@@ -1,6 +1,6 @@
 {
   "crons": [
-    { "path": "/api/cron-recap", "schedule": "0 6 * * *" }
+    { "path": "/api/cron-recap", "schedule": "0 4 * * *" }
   ],
   "functions": {
     "api/interactions.ts": { "includeFiles": "api/_assets/**" },

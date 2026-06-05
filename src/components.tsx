@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import iconUrl from "./assets/connections-nyt.png";
 import { Board, type BoardSnapshot } from "./board";
 import { HoverButton } from "./hoverbutton";
@@ -134,6 +134,55 @@ function Header({
 // rather than driving the layout taller. Season and All-time share one standings
 // table (different window); the end-screen locate arrow scrolls + pulses your row in
 // whichever tab is open.
+// Desktop "scale to fill". The board layout caps out at max-w-860px with 80px tiles
+// (--tile-h) and text frozen at its clamp ceilings, so on a big monitor it's a small
+// island floating in black. Rather than bump each ceiling (tile height, the three
+// text clamps, gaps, padding) in lockstep — which drifts the proportions apart — we
+// scale the whole GameView uniformly with a CSS transform, which preserves every
+// aspect ratio by construction. The factor is bounded by BOTH the viewport width and
+// height (so the scaled board never clips), capped at MAX_SCALE, and never below 1:
+// the sub-860px / mobile shrink is already handled by the layout's dvh/vw clamps, and
+// anything under DESKTOP_BP opts out entirely. offsetWidth/offsetHeight read the
+// *unscaled* layout box (CSS transforms don't affect them), so measuring the very
+// element we scale is both correct and loop-free — and a ResizeObserver re-measures
+// when the board's height changes (rows collapsing into solved bars).
+const DESKTOP_BP = 820;
+const MAX_SCALE = 1.5;
+// Only let the board grow into this fraction of the viewport, leaving the rest as
+// breathing room — ~12.5% on every side at 0.75. A fraction (not a fixed px margin)
+// keeps the margins proportional, so bigger screens get proportionally bigger gutters.
+const VIEWPORT_FILL = 0.75;
+
+function useScaleToFit(ref: RefObject<HTMLElement | null>): number {
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = (): void => {
+      if (window.innerWidth < DESKTOP_BP) {
+        setScale(1);
+        return;
+      }
+      const natW = el.offsetWidth;
+      const natH = el.offsetHeight;
+      if (!natW || !natH) return;
+      const fitW = (window.innerWidth * VIEWPORT_FILL) / natW;
+      const fitH = (window.innerHeight * VIEWPORT_FILL) / natH;
+      const next = Math.min(fitW, fitH, MAX_SCALE);
+      setScale(next < 1 ? 1 : next);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [ref]);
+  return scale;
+}
+
 export function GameView({
   game,
   gameKey,
@@ -194,6 +243,10 @@ export function GameView({
 
   const canJump = players.some((p) => p.userId === selfId);
 
+  // Grow the whole board to fill large desktop windows (mobile is untouched).
+  const scaleRef = useRef<HTMLDivElement>(null);
+  const scale = useScaleToFit(scaleRef);
+
   const header = (className: string) => (
     <Header
       puzzle={game.puzzle}
@@ -209,7 +262,14 @@ export function GameView({
     // which, with a short roster, stranded a big gap above the board. The players
     // column then flex-grows into that space (see below). Desktop resets to content
     // height so the board stays vertically centered in the wide window.
-    <div className="flex min-h-[calc(100dvh-3.5rem)] w-full animate-fade-in flex-col gap-3 min-[820px]:mx-auto min-[820px]:min-h-0 min-[820px]:max-w-[860px] min-[820px]:flex-row min-[820px]:items-stretch min-[820px]:gap-6">
+    <div
+      ref={scaleRef}
+      // transform-origin defaults to center, so the board grows symmetrically and
+      // stays centered (matching #app's auto-margin centering). scale(1) is omitted
+      // so mobile never gets a needless containing block from the transform.
+      style={scale !== 1 ? { transform: `scale(${scale})` } : undefined}
+      className="flex min-h-[calc(100dvh-3.5rem)] w-full animate-fade-in flex-col gap-3 min-[820px]:mx-auto min-[820px]:min-h-0 min-[820px]:max-w-[860px] min-[820px]:flex-row min-[820px]:items-stretch min-[820px]:gap-6"
+    >
       {/* main column — board + footer. No header on mobile: Discord shows its own
           activity header there, so we hide ours and keep some top padding (on top of
           #app's pt-8) to clear it. The header sits atop the players rail on desktop

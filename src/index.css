@@ -46,6 +46,9 @@
      fades in over the loader. */
   --animate-qpulse: qpulse 1.5s ease-in-out infinite;
   --animate-fade-in: fadeIn 0.45s ease-out both;
+  /* Midnight day-rollover veil: the centered "new puzzle" lockup eases up and unblurs
+     as the overlay fades the old board out and the fresh one in. */
+  --animate-dayrise: dayrise 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 
   @keyframes pickRing {
     0%,
@@ -152,6 +155,18 @@
     28% {
       opacity: 1;
       transform: scale(1.06);
+    }
+  }
+  @keyframes dayrise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+      filter: blur(7px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+      filter: blur(0);
     }
   }
 }

@@ -59,6 +59,72 @@ export function LoadingScreen({
   );
 }
 
+// Midnight day-rollover veil. When the ET date crosses, the daily swaps to the new puzzle;
+// rather than the old board hard-cutting to the loader, App fades this veil over the live
+// board, swaps the puzzle underneath (hidden), then drops the veil to reveal the fresh one.
+// It reuses the LoadingScreen's four pulsing category squares — framed by a quiet eyebrow
+// and the new day's date in the wordmark serif — so the turnover reads as a deliberate
+// "new day" beat in the same visual language, not a separate screen. App owns the timing:
+// `active` true → fade in + hold; false → fade out, then this self-unmounts after the fade.
+export function DayTurnover({ active, date }: { active: boolean; date?: string }) {
+  const [mounted, setMounted] = useState(active);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (active) {
+      setMounted(true);
+      // Paint mounted (opacity-0) first, then flip to opacity-100 next frame so the
+      // CSS opacity transition actually runs instead of snapping on.
+      const r = requestAnimationFrame(() => setShown(true));
+      return () => cancelAnimationFrame(r);
+    }
+    setShown(false);
+    const t = setTimeout(() => setMounted(false), 520); // outlast the 500ms fade-out
+    return () => clearTimeout(t);
+  }, [active]);
+
+  if (!mounted) return null;
+
+  const label = date
+    ? new Date(`${date}T00:00:00`).toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      })
+    : "";
+
+  return (
+    <div
+      aria-hidden
+      className={
+        "fixed inset-0 z-50 flex items-center justify-center bg-black transition-opacity duration-500 ease-out " +
+        (shown ? "opacity-100" : "opacity-0")
+      }
+    >
+      {/* faint center glow so the flat black has depth behind the lockup */}
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(58%_46%_at_50%_42%,rgba(255,255,255,0.05),transparent_72%)]" />
+      <div className="relative flex animate-dayrise flex-col items-center gap-5">
+        <span className="font-sans text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-500">
+          A new puzzle
+        </span>
+        <div className="flex gap-2.5">
+          {LEVELS.map((l, i) => (
+            <span
+              key={l.key}
+              className="h-6 w-6 animate-qpulse rounded"
+              style={{ background: l.color, animationDelay: `${i * 0.16}s` }}
+            />
+          ))}
+        </div>
+        {label && (
+          <span className="font-display text-[15px] leading-none text-zinc-400">
+            {label}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Brand lockup for the desktop players-rail header (per the "Desktop Connections"
 // redesign): the kept brick logo · the "Connections" serif wordmark · a bordered "No. 642"
 // pill, grouped on the left, with the serif date riding the right edge and a hairline

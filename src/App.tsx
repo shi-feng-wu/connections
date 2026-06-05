@@ -1,7 +1,8 @@
 import { Common, DiscordSDK } from "@discord/embedded-app-sdk";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BoardSnapshot } from "./board";
-import { GameView, LoadingScreen } from "./components";
+import { DayTurnover, GameView, LoadingScreen } from "./components";
+import { msUntilNextEtMidnight } from "./countdown";
 import { PipThumbnail } from "./pip";
 import type { RosterScope } from "./roster";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
@@ -54,6 +55,9 @@ function etDate(): string {
     day: "2-digit",
   }).format(new Date());
 }
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((r) => setTimeout(r, ms));
 
 // What /api/start hands back: the signed session, the pinned start time, the last
 // write time, and the committed guess list to rehydrate the board from.
@@ -159,6 +163,12 @@ export function App({
   const [phase, setPhase] = useState<"loading" | "ready" | "error" | "blocked">(
     "loading",
   );
+  // Midnight day-rollover veil (src/components.tsx DayTurnover): `resetting` drives the
+  // overlay; the ref guards swapToNewDay so the precise timer and the 30s poll can't both
+  // fire a swap; newDayDate is the date we're rolling into, shown on the veil.
+  const [resetting, setResetting] = useState(false);
+  const resettingRef = useRef(false);
+  const [newDayDate, setNewDayDate] = useState<string | undefined>(undefined);
   // Discord activity layout: FOCUSED (0) normally, PIP (1) when collapsed. Drives the
   // compact thumbnail swap.
   const [layoutMode, setLayoutMode] = useState<number>(
@@ -473,6 +483,27 @@ export function App({
     }
   }
 
+  // Swap to the new day's puzzle at the midnight-ET rollover, veiled by the DayTurnover
+  // overlay so the live board doesn't hard-cut. Both the precise timer and the 30s poll
+  // call this; resettingRef makes it single-flight, and it no-ops unless the daily is loaded
+  // and the ET date has actually moved past it. Choreography: fade the veil over the old
+  // board, swap underneath, hold a beat so a cached (instant) load still reads as a
+  // deliberate turnover, then drop the veil to reveal the fresh board.
+  async function swapToNewDay(): Promise<void> {
+    const g = gameRef.current;
+    if (resettingRef.current || !isDailyRef.current || !g || etDate() === g.puzzle.date) {
+      return;
+    }
+    resettingRef.current = true;
+    setNewDayDate(etDate());
+    setResetting(true);
+    await sleep(540); // let the veil fade fully opaque (500ms) over the old board first
+    await loadPuzzle();
+    await sleep(620); // hold the "new puzzle" beat so a cached load still registers
+    setResetting(false);
+    resettingRef.current = false;
+  }
+
   // Runs the Discord handshake and returns true once a verified access token is in
   // hand. A plain browser can't get here: `ready()` needs a real Discord parent and
   // `authorize()` needs Discord to mint the code. A false return (or a stuck
@@ -644,19 +675,15 @@ export function App({
   useEffect(() => {
     if (!isEmbedded) return;
     const id = setInterval(() => {
-      // Daily reset: if a client is left open across midnight ET, the board is pinned to the
-      // old day. When the ET date crosses past the loaded daily's date, reload the new day's
-      // puzzle (loadPuzzle pulls today's and refetches the roster). Don't yank a player who's
-      // actively mid-game — a finished or untouched board reloads now; an in-progress one
-      // waits until they finish (a later tick sees status != "playing" and reloads).
+      // Daily reset (fallback): a client left open across midnight ET is pinned to the old
+      // day. The precise timer below swaps at the exact reset, but backgrounded tabs throttle
+      // it — so the poll re-checks every 30s and swaps too, including mid-game. Once the new
+      // puzzle is out the old one is closed, so no one keeps playing it: an unfinished old
+      // board just ends unscored, and a finish after midnight is already rejected server-side
+      // by the session.date !== todayET() gate in api/score.ts.
       const g = gameRef.current;
-      if (
-        isDailyRef.current &&
-        g &&
-        etDate() !== g.puzzle.date &&
-        (g.status !== "playing" || g.history.length === 0)
-      ) {
-        void loadPuzzle();
+      if (isDailyRef.current && g && etDate() !== g.puzzle.date) {
+        void swapToNewDay();
         return;
       }
       void fetchServerRoster();
@@ -666,6 +693,26 @@ export function App({
       void refreshLeaderboard();
     }, 30_000);
     return () => clearInterval(id);
+  }, [isEmbedded]);
+
+  // Precise midnight-ET swap: a self-rescheduling one-shot timer fires at the exact reset
+  // (+2s so NYT has published the new puzzle), then re-arms for the next day. swapToNewDay
+  // is single-flight and self-checks the date, so a foreground tab gets the swap the instant
+  // the new puzzle is live; the 30s poll above is the robust fallback for throttled tabs.
+  useEffect(() => {
+    if (!isEmbedded) return;
+    let timer = 0;
+    const arm = (): void => {
+      timer = window.setTimeout(
+        () => {
+          void swapToNewDay();
+          arm();
+        },
+        msUntilNextEtMidnight() + 2000,
+      );
+    };
+    arm();
+    return () => window.clearTimeout(timer);
   }, [isEmbedded]);
 
   // Everyone in the room with own latest snapshot overlaid (presence sync can
@@ -724,41 +771,46 @@ export function App({
     );
   }
 
-  if (phase !== "ready" || !gameRef.current) {
-    const retry = (): void => {
-      void (async () => {
-        await loadPuzzle();
-        await refreshLeaderboard();
-      })();
-    };
-    // Loading takes precedence (gameRef null until first fetch); error only once
-    // a fetch has failed; blocked when opened outside Discord.
-    return (
+  const retry = (): void => {
+    void (async () => {
+      await loadPuzzle();
+      await refreshLeaderboard();
+    })();
+  };
+  // Loading takes precedence (gameRef null until first fetch); error only once a fetch has
+  // failed; blocked when opened outside Discord. The DayTurnover veil overlays whichever of
+  // these is showing, so the midnight swap (ready → loading → ready) plays out underneath it.
+  const content =
+    phase !== "ready" || !gameRef.current ? (
       <LoadingScreen
         error={phase === "error"}
         blocked={phase === "blocked"}
         onRetry={retry}
       />
+    ) : (
+      <GameView
+        game={gameRef.current}
+        gameKey={gameKey}
+        players={roster}
+        selfId={meRef.current.id}
+        selfName={meRef.current.name}
+        selfAvatar={meRef.current.avatar}
+        season={season}
+        allTime={allTime}
+        // Channel/Server toggle only in a guild — a DM/group (c: scope) has no distinction.
+        scope={guildIdRef.current ? scopeMode : undefined}
+        onScopeChange={guildIdRef.current ? setScopeMode : undefined}
+        onPresence={onPresence}
+        onCommit={commitGuess}
+        onFinish={onFinish}
+        initialRevealed={revealedLevelsOf(gameRef.current)}
+      />
     );
-  }
 
   return (
-    <GameView
-      game={gameRef.current}
-      gameKey={gameKey}
-      players={roster}
-      selfId={meRef.current.id}
-      selfName={meRef.current.name}
-      selfAvatar={meRef.current.avatar}
-      season={season}
-      allTime={allTime}
-      // Channel/Server toggle only in a guild — a DM/group (c: scope) has no distinction.
-      scope={guildIdRef.current ? scopeMode : undefined}
-      onScopeChange={guildIdRef.current ? setScopeMode : undefined}
-      onPresence={onPresence}
-      onCommit={commitGuess}
-      onFinish={onFinish}
-      initialRevealed={revealedLevelsOf(gameRef.current)}
-    />
+    <>
+      {content}
+      <DayTurnover active={resetting} date={newDayDate} />
+    </>
   );
 }

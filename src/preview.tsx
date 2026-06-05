@@ -12,7 +12,7 @@ import LibreFranklin800 from "./preview-assets/LibreFranklin-800.ttf?url";
 import Newsreader700 from "./preview-assets/Newsreader-700.ttf?url";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
 import { cardLayout, type CardPlayer, drawRecap, type RecapData, recapLayout, drawRoster } from "./card-draw";
-import { GameView, LoadingScreen } from "./components";
+import { DayTurnover, GameView, LoadingScreen } from "./components";
 import { PipThumbnail } from "./pip";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import type { Standings } from "./season";
@@ -482,6 +482,26 @@ function PipState({
   );
 }
 
+// The midnight day-rollover veil (src/components.tsx DayTurnover). It's a `fixed inset-0`
+// overlay, so to show it inline among the other previews it's framed in a box with a
+// `transform` — a transformed ancestor becomes the containing block for `position: fixed`,
+// which clips the overlay to this card instead of covering the whole page.
+function TurnoverState() {
+  return (
+    <section className="w-full max-w-[940px] px-4">
+      <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
+        Day turnover · midnight veil
+      </div>
+      <div
+        className="relative h-[440px] w-full overflow-hidden rounded-xl ring-1 ring-zinc-800"
+        style={{ transform: "translateZ(0)" }}
+      >
+        <DayTurnover active date="2026-06-06" />
+      </div>
+    </section>
+  );
+}
+
 // wraps LoadingScreen the way State wraps GameView
 function LoadState({
   label,
@@ -514,7 +534,7 @@ const STATES = [
   <State key="l" label="Results · lost" game={lost} revealed={[2, 3]} />,
 ];
 const pick = decodeURIComponent(location.hash.slice(1)).toLowerCase();
-const known = ["progress", "perfect", "won", "lost", "loading", "error", "blocked", "simulate", "feedback", "card", "pip", "scope", "recap"];
+const known = ["progress", "perfect", "won", "lost", "loading", "error", "blocked", "simulate", "feedback", "card", "pip", "scope", "recap", "turnover"];
 // #simulate and #feedback both isolate the Simulate playground (#feedback also
 // auto-fires a one-away guess to surface the header feedback pill); #card isolates the
 // Discord "who's playing" card; #pip isolates the collapsed PIP thumbnail.
@@ -525,6 +545,9 @@ const onlyPip = pick === "pip";
 // isolates the daily recap card (server/channel eyebrow).
 const onlyScope = pick === "scope";
 const onlyRecap = pick === "recap";
+// #turnover isolates the midnight day-rollover veil (src/components.tsx DayTurnover),
+// shown over a sample in-progress board so you can check the lockup over real content.
+const onlyTurnover = pick === "turnover";
 const shown =
   known.includes(pick) && !onlySim && !onlyCard && !onlyPip
     ? STATES.filter((s) => String(s.props.label).toLowerCase().includes(pick))
@@ -536,9 +559,11 @@ const shown =
 const showSim = pick === "" || onlySim;
 const showCards = pick === "" || onlyCard;
 const showPips = pick === "" || onlyPip;
+const showTurnover = pick === "" || onlyTurnover;
 
 createRoot(document.getElementById("preview")!).render(
   <div className="flex flex-col items-center gap-16 py-10">
+    {showTurnover && <TurnoverState />}
     {showSim && <Simulate />}
     {!onlySim && shown}
     {showPips && (
@@ -554,7 +579,7 @@ createRoot(document.getElementById("preview")!).render(
     {showCards && <Card label="Discord card · busy room" players={CARD_BUSY} />}
     {showCards && <Card label="Discord card · single player" players={CARD_SOLO} />}
     {(showCards || onlyRecap) && <Recap label="Discord recap · daily reset post" data={CARD_RECAP} />}
-    {!onlySim && !onlyCard && !onlyScope && !onlyRecap && (
+    {!onlySim && !onlyCard && !onlyScope && !onlyRecap && !onlyTurnover && (
       <section className="w-full max-w-[360px] px-4">
         <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
           Roster panel · standalone (Live tab)
@@ -562,7 +587,7 @@ createRoot(document.getElementById("preview")!).render(
         <Roster players={ROSTER} selfId={SELF_ID} />
       </section>
     )}
-    {!onlySim && !onlyCard && !onlyScope && !onlyRecap && (
+    {!onlySim && !onlyCard && !onlyScope && !onlyRecap && !onlyTurnover && (
       <section className="w-full max-w-[360px] px-4">
         <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
           Roster panel · no scores yet (Season tab → placeholder)
@@ -579,7 +604,7 @@ createRoot(document.getElementById("preview")!).render(
         />
       </section>
     )}
-    {!onlySim && !onlyCard && !onlyRecap && (
+    {!onlySim && !onlyCard && !onlyRecap && !onlyTurnover && (
       <section className="w-full max-w-[418px]">
         <div className="mb-3 px-1 text-xs font-semibold uppercase tracking-wide text-amber-400">
           Roster panel · season standings (Season tab, ~rail width)

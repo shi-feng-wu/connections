@@ -417,6 +417,24 @@ create table if not exists public.progress (
   primary key (user_id, puzzle_date)
 );
 
+-- Read-through cache of the official NYT daily puzzle, one row per date. Backs
+-- api/_nyt.ts fetchPuzzle: the first request for a date fetches NYT and upserts here;
+-- every later request (any function, any cold start) reads this instead, so NYT — an
+-- undocumented endpoint scraped on the game's hot path — is hit ~once per date globally
+-- and a NYT outage can't break a day already captured. A puzzle is immutable once
+-- published, so rows are never invalidated (no TTL). Written only by the service role;
+-- `data` holds the answers (group membership), so like progress/live_cards it carries NO
+-- anon policy — RLS with no policy denies the anon key entirely. The client still gets the
+-- puzzle through the auth-gated /api/puzzle, never from here.
+create table if not exists public.puzzles (
+  puzzle_date date        primary key,
+  puzzle_id   integer     not null,
+  data        jsonb       not null,                 -- normalized Puzzle {id,date,editor,groups,layout}
+  fetched_at  timestamptz not null default now()
+);
+
+alter table public.puzzles enable row level security;
+
 alter table public.progress enable row level security;
 
 -- "Who's playing today" card, one row per room per puzzle. The card is a BOT message in

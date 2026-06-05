@@ -1,3 +1,6 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { admin } from './_admin.js';
+
 // Shared NYT puzzle helper. Leading underscore keeps Vercel from treating this
 // file as a route. Fetches and normalizes the official daily Connections puzzle:
 // categories are difficulty 0-3, and each card's board position rebuilds the exact
@@ -25,14 +28,43 @@ type RawPuzzle = {
 const BASE = 'https://www.nytimes.com/svc/connections/v2';
 export const FIRST_DATE = '2023-06-12'; // Connections puzzle #1
 const DAY = 86_400_000;
+// Don't let a slow/hung NYT (an undocumented endpoint) stall guess/score; the first
+// fetch of each date is the only one that reaches origin, so this bounds the worst case.
+const FETCH_TIMEOUT_MS = 3000;
 const cache = new Map<string, Puzzle>();
 
-export async function fetchPuzzle(dateStr: string): Promise<Puzzle> {
+// Read-through cache for the official daily puzzle, cheapest layer first:
+//   L1  in-memory Map (per warm instance) — set on every resolve, never expires
+//   L2  Supabase `puzzles` table — shared across instances/functions/cold starts and
+//       durable, so NYT is hit ~once per date globally and a later NYT outage can't break
+//       a day already captured
+//   origin  the NYT endpoint — the only network hop, taken on a full miss
+// A puzzle is immutable once published, so it's cached forever (no TTL). `db` defaults to
+// the service-role admin() client, evaluated only after an L1 miss so warm hits stay free;
+// pass an override, or null to skip L2 (tests / unconfigured dev). Only a validated success
+// is stored — a 404/parse failure throws and caches nothing (no negative caching), so a
+// puzzle that publishes late at the date boundary is never pinned as missing.
+export async function fetchPuzzle(dateStr: string, dbOverride?: SupabaseClient | null): Promise<Puzzle> {
   const cached = cache.get(dateStr);
   if (cached) return cached;
 
+  const db = dbOverride !== undefined ? dbOverride : admin();
+  if (db) {
+    const { data: row } = await db
+      .from('puzzles')
+      .select('data')
+      .eq('puzzle_date', dateStr)
+      .maybeSingle();
+    const stored = (row as { data?: Puzzle } | null)?.data;
+    if (stored) {
+      cache.set(dateStr, stored);
+      return stored;
+    }
+  }
+
   const res = await fetch(`${BASE}/${dateStr}.json`, {
     headers: { 'User-Agent': 'Mozilla/5.0 (Connections Activity)', Accept: 'application/json' },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (res.status === 404) throw new Error('NOT_FOUND');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -56,6 +88,21 @@ export async function fetchPuzzle(dateStr: string): Promise<Puzzle> {
 
   const puzzle: Puzzle = { id: raw.id, date: raw.print_date, editor: raw.editor, groups, layout };
   cache.set(dateStr, puzzle);
+  // Persist to L2 best-effort — the caller already holds a valid puzzle and L1 covers this
+  // instance, so a write hiccup must never fail the fetch. Keyed by the requested dateStr
+  // (what L2 reads back by), idempotent since the puzzle never changes.
+  if (db) {
+    try {
+      await db
+        .from('puzzles')
+        .upsert(
+          { puzzle_date: dateStr, puzzle_id: puzzle.id, data: puzzle },
+          { onConflict: 'puzzle_date' },
+        );
+    } catch {
+      /* L2 is an optimization; never block a resolved puzzle on it */
+    }
+  }
   return puzzle;
 }
 

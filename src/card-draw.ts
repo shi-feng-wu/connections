@@ -651,7 +651,6 @@ const RC_EYE_MAX_RIGHT = 470; // px from leftX the room eyebrow may reach before
 // full in-app leaderboard. No container — just centered text.
 const RC_BLURB_GAP = 14; // min gap below the last standings row
 const RC_BLURB_H = 52; // reserved height for the three centered lines
-const RC_SLASH = "rgba(52,211,153,0.66)"; // the leading "/", a touch dimmer than the word
 
 function rankColor(i: number): string {
   if (i === 0) return CAT_COLOR[0]; // yellow
@@ -1001,39 +1000,6 @@ function drawPts(
 // "/connections" (the accent color carries the "this is a command" read — the canvas has no
 // mono font) over two muted lines pointing at the full in-app leaderboard. Centered within
 // [areaTop, areaBottom] of the standings column. Quiet and secondary — the recap is the hero.
-function drawRecapBlurb(
-  ctx: CanvasRenderingContext2D,
-  sX: number,
-  areaTop: number,
-  areaBottom: number,
-): void {
-  const centerX = sX + RC_STAND_W / 2;
-  const cy = (areaTop + areaBottom) / 2;
-  ctx.textBaseline = "alphabetic";
-
-  // line 1: "/connections" (emerald, dimmed slash), horizontally centered as one unit
-  ctx.textAlign = "left";
-  ctx.font = `700 14px "Libre Franklin"`;
-  ctx.letterSpacing = "0.1px";
-  const slashW = ctx.measureText("/").width;
-  const restW = ctx.measureText("connections").width;
-  const startX = centerX - (slashW + restW) / 2;
-  ctx.fillStyle = RC_SLASH;
-  ctx.fillText("/", startX, cy - 15);
-  ctx.fillStyle = EMERALD;
-  ctx.fillText("connections", startX + slashW, cy - 15);
-  ctx.letterSpacing = "0px";
-
-  // lines 2 & 3: muted descriptor, centered
-  ctx.textAlign = "center";
-  ctx.fillStyle = ZINC_300;
-  ctx.font = `600 12px "Libre Franklin"`;
-  ctx.fillText("See the full leaderboard", centerX, cy + 4);
-  ctx.fillStyle = ZINC_500;
-  ctx.font = `500 11px "Libre Franklin"`;
-  ctx.fillText("season & all-time · server standings", centerX, cy + 21);
-  ctx.textAlign = "left";
-}
 
 export async function drawRecap(
   ctx: CanvasRenderingContext2D,
@@ -1194,11 +1160,4 @@ export async function drawRecap(
     // total points
     drawPts(ctx, r.total, sPtsRight, base);
   });
-
-  // ---- CTA centered in the bottom-right area: open /connections for the full leaderboard ----
-  const { standBottom, contentBottom } = recapBottoms(
-    results.length,
-    standings.length,
-  );
-  drawRecapBlurb(ctx, sX, standBottom, contentBottom);
 }

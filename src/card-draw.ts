@@ -479,8 +479,8 @@ export async function drawRoster(
     );
     ctx.letterSpacing = "0px";
 
-    // ---- four group slots: a category bar per solved group, flat slot for the rest ----
-    const order = [...s.solved].sort((a, b) => a - b);
+    // ---- four group slots: a category bar per solved group (in solve order), flat slot for the rest ----
+    const order = s.solved;
     const barX = px + TILE_PAD;
     const barW = panelW - 2 * TILE_PAD;
     for (let b = 0; b < 4; b++) {

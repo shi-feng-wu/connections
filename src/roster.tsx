@@ -180,10 +180,10 @@ function Avatar({
   );
 }
 
-// Vertical stack: a solid colored bar per solved group (in difficulty order), grey
+// Vertical stack: a solid colored bar per solved group (in solve order), grey
 // segmented rows for the rest. Flashes the newest bar when a group just landed.
 function MiniBoard({ p, flash }: { p: PlayerState; flash: boolean }) {
-  const solved = [...p.solvedLevels].sort((a, b) => a - b);
+  const solved = p.solvedLevels;
   return (
     <div className="flex w-5.5 flex-none flex-col gap-[2px] min-[820px]:w-7.5">
       {solved.map((lvl, i) => (

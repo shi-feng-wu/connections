@@ -213,7 +213,7 @@ export function Board({
     );
     onPresence({
       mistakesLeft: game.mistakesLeft,
-      solvedLevels: [...real].sort((a, b) => a - b),
+      solvedLevels: real,
       picking: game.status === "playing" && selected.current.size > 0,
       done: game.status === "playing" ? null : game.status,
     });

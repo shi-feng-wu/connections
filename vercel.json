@@ -1,7 +1,4 @@
 {
-  "crons": [
-    { "path": "/api/cron-recap", "schedule": "0 4 * * *" }
-  ],
   "functions": {
     "api/interactions.ts": { "includeFiles": "api/_assets/**" },
     "api/join.ts": { "includeFiles": "api/_assets/**" },

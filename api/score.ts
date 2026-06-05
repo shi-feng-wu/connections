@@ -93,15 +93,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     // 6. Authorize the room. Guild ids aren't secret, so write a guild board only
     //    after confirming this user belongs to that guild. A DM/group channel id is
     //    known only to its participants, so it needs no check; the g:/c: prefix
-    //    keeps the two namespaces apart.
+    //    keeps the two namespaces apart. The guild list does double duty: it both
+    //    authorizes the g: write and seeds guild_members below, so this score reaches
+    //    every server the player is in — not just the room they launched.
     const guildId = typeof body.guildId === 'string' ? body.guildId : null;
     const channelId = typeof body.channelId === 'string' ? body.channelId : null;
-    if (guildId) {
-      const guilds = await fetchUserGuildIds(body.accessToken);
-      if (!guilds || !guilds.includes(guildId)) {
-        res.status(403).json({ ok: false, reason: 'not-a-member' });
-        return;
-      }
+    const userGuilds = await fetchUserGuildIds(body.accessToken);
+    if (guildId && (!userGuilds || !userGuilds.includes(guildId))) {
+      res.status(403).json({ ok: false, reason: 'not-a-member' });
+      return;
     }
     const scopeId = canonicalScope(guildId, channelId);
 
@@ -142,6 +142,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       // first finish wins; a reload of today's puzzle can't overwrite it
       { onConflict: 'puzzle_id,user_id', ignoreDuplicates: true },
     );
+
+    // Attach this player to every guild they belong to, so their daily score lands on each
+    // of those servers' membership-scoped boards the first time they finish anywhere — not
+    // only the room they launched in. Idempotent (PK guild_id,user_id) and best-effort: a
+    // hiccup here only delays cross-server propagation, so it must never fail a real score.
+    if (userGuilds && userGuilds.length) {
+      try {
+        await db.from('guild_members').upsert(
+          userGuilds.map((gid) => ({ guild_id: gid, user_id: user.id })),
+          { onConflict: 'guild_id,user_id', ignoreDuplicates: true },
+        );
+      } catch {
+        /* membership only powers cross-server boards; never block scoring on it */
+      }
+    }
     res.status(200).json({ ok: true, score: game.score, solved: game.status === 'won' });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : 'error' });

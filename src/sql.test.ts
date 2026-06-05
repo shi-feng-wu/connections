@@ -9,7 +9,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 const fnBlocks = [
   ...schema.matchAll(
-    /create or replace function public\.(?:current_streak|room_board|room_self|day_results|room_recap_stats)[\s\S]*?\$\$;/g,
+    /create or replace function public\.(?:current_streak|user_streak|room_board|room_self|day_results|room_recap_stats)[\s\S]*?\$\$;/g,
   ),
 ].map((m) => m[0]);
 
@@ -57,8 +57,13 @@ beforeAll(async () => {
       solved boolean not null default false, groups_solved smallint not null default 0,
       duration_ms int, puzzle_date date, created_at timestamptz not null default now()
     );
+    create table public.guild_members (
+      guild_id text not null, user_id text not null,
+      updated_at timestamptz not null default now(),
+      primary key (guild_id, user_id)
+    );
   `);
-  expect(fnBlocks).toHaveLength(5); // current_streak, room_board, room_self, day_results, room_recap_stats
+  expect(fnBlocks).toHaveLength(6); // current_streak, user_streak, room_board, room_self, day_results, room_recap_stats
   for (const block of fnBlocks) await db.exec(block);
   for (const [scope, user, name, score, mistakes, solved, date] of SEED) {
     await db.query(
@@ -282,5 +287,64 @@ describe("p_channel scoping", () => {
     ).rows[0].r;
     const self = typeof selfRaw === "string" ? JSON.parse(selfRaw) : selfRaw;
     expect(self).toMatchObject({ rank: 1, total_players: 1, total: 1000, plays: 2 });
+  });
+});
+
+// Server view of a real guild scope (g:<id>) aggregates over guild MEMBERS (guild_members),
+// so a score earned in one server shows on every server the player belongs to — the
+// cross-server fix. Channel views and non-g: scopes stay scope-bound (covered above).
+describe("membership (g: server view)", () => {
+  beforeAll(async () => {
+    // zoe belongs to servers 111 and 222; max only to 111.
+    await db.exec(`
+      insert into public.guild_members (guild_id, user_id) values
+        ('111','zoe'), ('222','zoe'), ('111','max');
+    `);
+    // Both played ONLY in server 111 (scope g:111). zoe solved two straight days.
+    const rows: [string, string, string, number, boolean, string][] = [
+      ["g:111", "zoe", "Zoe", 1000, true, "2026-06-04"],
+      ["g:111", "zoe", "Zoe", 900, true, "2026-06-05"],
+      ["g:111", "max", "Max", 700, true, "2026-06-05"],
+    ];
+    for (const [scope, user, name, score, solved, date] of rows) {
+      await db.query(
+        `insert into public.scores (scope_id, user_id, name, score, solved, puzzle_date)
+         values ($1,$2,$3,$4,$5,$6)`,
+        [scope, user, name, score, solved, date],
+      );
+    }
+  });
+
+  const members = async (scope: string): Promise<string[]> =>
+    (await db.query<{ user_id: string }>(`select user_id from public.room_board($1, null, 50)`, [scope])).rows.map(
+      (r) => r.user_id,
+    );
+
+  it("shows a player on a server they belong to, even one they never played in", async () => {
+    // server 222: zoe is a member and has a score (earned in g:111) → she appears; max is
+    // not a member of 222 → excluded, despite having a score row in the same table.
+    expect(await members("g:222")).toEqual(["zoe"]);
+  });
+
+  it("ranks both members on a server they did play in", async () => {
+    expect(await members("g:111")).toEqual(["zoe", "max"]); // zoe 1900 > max 700
+  });
+
+  it("uses the player's personal (scope-agnostic) streak on the membership board", async () => {
+    const { rows } = await db.query<{ user_id: string; streak: number }>(
+      `select user_id, streak from public.room_board('g:222', null, 50)`,
+    );
+    expect(Number(rows.find((r) => r.user_id === "zoe")!.streak)).toBe(2); // 06-04 + 06-05
+  });
+
+  it("room_self ranks the member by their global total", async () => {
+    const raw = (await db.query<{ r: unknown }>(`select public.room_self('g:222', null, 'zoe') as r`)).rows[0].r;
+    const self = typeof raw === "string" ? JSON.parse(raw) : raw;
+    expect(self).toMatchObject({ rank: 1, total_players: 1, total: 1900, plays: 2, streak: 2 });
+  });
+
+  it("user_streak counts a player's solves across all rooms", async () => {
+    const s = Number((await db.query<{ s: number }>(`select public.user_streak('zoe') as s`)).rows[0].s);
+    expect(s).toBe(2);
   });
 });

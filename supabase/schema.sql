@@ -57,6 +57,32 @@ create index if not exists scores_puzzle_idx on public.scores (puzzle_id, score 
 create index if not exists scores_season_idx on public.scores (scope_id, puzzle_date);
 create index if not exists scores_channel_season_idx on public.scores (scope_id, channel_id, puzzle_date);
 
+-- Cross-server membership: which Discord guilds each player belongs to, so a player's
+-- daily score shows on EVERY server they're in the first time they finish anywhere — not
+-- only the room they launched the Activity in. Written by /api/score from the player's
+-- Discord guild list (/users/@me/guilds). The server-view leaderboard (room_board /
+-- room_self in membership mode) ranks a guild's members from here instead of by the scope a
+-- score was earned in. Holds a player's full guild list, so it is NOT anon-readable (RLS,
+-- no policy, like progress); the board RPCs read it via security definer.
+create table if not exists public.guild_members (
+  guild_id   text        not null,
+  user_id    text        not null,
+  updated_at timestamptz not null default now(),
+  primary key (guild_id, user_id)
+);
+create index if not exists guild_members_guild_idx on public.guild_members (guild_id);
+alter table public.guild_members enable row level security;
+
+-- Backfill from existing scores so no current board regresses to empty before players
+-- replay: everyone who has already finished in a g: room is a known member of that guild.
+-- Cross-server propagation (a player's OTHER guilds) begins on their next finish, when
+-- /api/score captures their full guild list.
+insert into public.guild_members (guild_id, user_id)
+select distinct substring(s.scope_id from 3), s.user_id
+from public.scores s
+where s.scope_id like 'g:%'
+on conflict (guild_id, user_id) do nothing;
+
 -- Cumulative per-player totals for one room since a date, highest first.
 -- Latest name/avatar (by puzzle date) represents each player.
 drop function if exists public.season_standings(text, date, int);
@@ -134,6 +160,42 @@ $$;
 
 grant execute on function public.current_streak(text, text, text) to anon, authenticated;
 
+-- A player's personal solve streak across ALL their daily results (every room), for the
+-- membership-mode server board where a score counts wherever it was earned. Mirrors
+-- current_streak's islands trick but scope-agnostic — a player has at most one score per
+-- date (unique (puzzle_id, user_id)), so their day sequence is unambiguous.
+drop function if exists public.user_streak(text);
+create or replace function public.user_streak(p_user text)
+returns int
+language sql
+stable
+as $$
+  with wins as (
+    select distinct puzzle_date as d
+    from public.scores
+    where user_id = p_user and solved and puzzle_date is not null
+  ),
+  grouped as (
+    select d, d - (row_number() over (order by d))::int as grp
+    from wins
+  ),
+  last_played as (
+    select max(puzzle_date) as d
+    from public.scores
+    where user_id = p_user and puzzle_date is not null
+  )
+  select coalesce(case
+    when (select d from last_played) is null then 0
+    when not exists (select 1 from wins where d = (select d from last_played)) then 0
+    else (
+      select count(*)::int from grouped
+      where grp = (select grp from grouped order by d desc limit 1)
+    )
+  end, 0);
+$$;
+
+grant execute on function public.user_streak(text) to anon, authenticated;
+
 -- Leaderboard rows for a window: one per player, richest-first, with every
 -- column the end screen shows. p_since NULL = all-time.
 drop function if exists public.room_board(text, date, int);
@@ -150,8 +212,19 @@ returns table (
 )
 language sql
 stable
+security definer
+set search_path = public
 as $$
-  with agg as (
+  -- Server view of a guild (g: scope, no channel filter) ranks the guild's MEMBERS by
+  -- their daily results earned in ANY room, so a score follows a player to every server
+  -- they're in. Channel views and c: (DM/group) scopes stay scoped to the room a score was
+  -- earned in. SECURITY DEFINER so the membership lookup can read guild_members (otherwise
+  -- not anon-readable); set search_path pins it for safety.
+  with mode as (
+    select (p_scope like 'g:%' and p_channel is null) as by_member,
+           substring(p_scope from 3)                  as gid
+  ),
+  agg as (
     select s.user_id,
            (array_agg(s.name   order by s.puzzle_date desc nulls last, s.created_at desc))[1] as name,
            (array_agg(s.avatar order by s.puzzle_date desc nulls last, s.created_at desc))[1] as avatar,
@@ -159,16 +232,21 @@ as $$
            count(*)::int                              as plays,
            count(*) filter (where s.solved)::int      as wins,
            round(avg(s.mistakes)::numeric, 1)::float8 as avg_mistakes
-    from public.scores s
-    where s.scope_id = p_scope
-      and (p_channel is null or s.channel_id = p_channel)
-      and (p_since is null or s.puzzle_date >= p_since)
+    from public.scores s, mode m
+    where (p_since is null or s.puzzle_date >= p_since)
+      and case when m.by_member
+        then s.user_id in (select gm.user_id from public.guild_members gm where gm.guild_id = m.gid)
+        else s.scope_id = p_scope and (p_channel is null or s.channel_id = p_channel)
+      end
     group by s.user_id
   )
   select a.user_id, a.name, a.avatar, a.total, a.plays, a.wins,
          case when a.plays > 0 then round(100.0 * a.wins / a.plays)::int else 0 end as win_pct,
          a.avg_mistakes,
-         public.current_streak(p_scope, a.user_id, p_channel) as streak
+         case when (p_scope like 'g:%' and p_channel is null)
+              then public.user_streak(a.user_id)
+              else public.current_streak(p_scope, a.user_id, p_channel)
+         end as streak
   from agg a
   order by a.total desc, a.plays asc
   limit p_limit;
@@ -188,18 +266,28 @@ create or replace function public.room_self(
 returns json
 language sql
 stable
+security definer
+set search_path = public
 as $$
-  with board as (
-    select user_id,
-           sum(score)::int                          as total,
-           count(*)::int                            as plays,
-           count(*) filter (where solved)::int      as wins,
-           round(avg(mistakes)::numeric, 1)::float8 as avg_mistakes
-    from public.scores
-    where scope_id = p_scope
-      and (p_channel is null or channel_id = p_channel)
-      and (p_since is null or puzzle_date >= p_since)
-    group by user_id
+  -- Mirrors room_board's scoping: the guild server view (g: scope, no channel) ranks over
+  -- the guild's members (a score counts wherever earned); channel/DM views stay scope-bound.
+  with mode as (
+    select (p_scope like 'g:%' and p_channel is null) as by_member,
+           substring(p_scope from 3)                  as gid
+  ),
+  board as (
+    select s.user_id,
+           sum(s.score)::int                          as total,
+           count(*)::int                              as plays,
+           count(*) filter (where s.solved)::int      as wins,
+           round(avg(s.mistakes)::numeric, 1)::float8 as avg_mistakes
+    from public.scores s, mode m
+    where (p_since is null or s.puzzle_date >= p_since)
+      and case when m.by_member
+        then s.user_id in (select gm.user_id from public.guild_members gm where gm.guild_id = m.gid)
+        else s.scope_id = p_scope and (p_channel is null or s.channel_id = p_channel)
+      end
+    group by s.user_id
   ),
   ranked as (
     select user_id, total, plays, wins, avg_mistakes,
@@ -215,7 +303,10 @@ as $$
     'win_pct',       coalesce((select case when plays > 0 then round(100.0 * wins / plays)::int else 0 end
                         from ranked where user_id = p_user), 0),
     'avg_mistakes',  coalesce((select avg_mistakes from ranked where user_id = p_user), 0),
-    'streak',        public.current_streak(p_scope, p_user, p_channel)
+    'streak',        case when (p_scope like 'g:%' and p_channel is null)
+                          then public.user_streak(p_user)
+                          else public.current_streak(p_scope, p_user, p_channel)
+                     end
   );
 $$;
 

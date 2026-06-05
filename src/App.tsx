@@ -44,6 +44,17 @@ function writeScopeMode(mode: RosterScope): void {
 
 const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
 
+// Today's ET calendar date (YYYY-MM-DD), matching the server's todayET so the client can
+// detect the midnight-ET daily reset and reload the new day's puzzle.
+function etDate(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 // What /api/start hands back: the signed session, the pinned start time, the last
 // write time, and the committed guess list to rehydrate the board from.
 type StartInfo = {
@@ -633,6 +644,21 @@ export function App({
   useEffect(() => {
     if (!isEmbedded) return;
     const id = setInterval(() => {
+      // Daily reset: if a client is left open across midnight ET, the board is pinned to the
+      // old day. When the ET date crosses past the loaded daily's date, reload the new day's
+      // puzzle (loadPuzzle pulls today's and refetches the roster). Don't yank a player who's
+      // actively mid-game — a finished or untouched board reloads now; an in-progress one
+      // waits until they finish (a later tick sees status != "playing" and reloads).
+      const g = gameRef.current;
+      if (
+        isDailyRef.current &&
+        g &&
+        etDate() !== g.puzzle.date &&
+        (g.status !== "playing" || g.history.length === 0)
+      ) {
+        void loadPuzzle();
+        return;
+      }
       void fetchServerRoster();
       // Keep the season/all-time boards live too — a steady poll catches scores from
       // players we never saw in presence (joined + left between syncs). Near-real-time

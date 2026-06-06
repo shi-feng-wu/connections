@@ -334,7 +334,7 @@ describe("membership (g: server view)", () => {
     expect(self).toMatchObject({ rank: 1, total_players: 1, total: 2400, plays: 3, streak: 3 });
   });
 
-  it("uses the player's personal (scope-agnostic) streak on the server board", async () => {
+  it("shows the streak windowed to the player's join date for the scope", async () => {
     const { rows } = await db.query<{ user_id: string; streak: number }>(
       `select user_id, streak from public.room_board('g:222', null, 50)`,
     );
@@ -344,5 +344,63 @@ describe("membership (g: server view)", () => {
   it("user_streak counts a player's solves across all rooms", async () => {
     const s = Number((await db.query<{ s: number }>(`select public.user_streak('zoe') as s`)).rows[0].s);
     expect(s).toBe(3);
+  });
+});
+
+// Per-scope join cutoff: a member's total in a scope counts only from their FIRST game there
+// (their "join"), so history earned before they joined doesn't retroactively land on that
+// board — no newcomer instantly topping it. ben plays g:444 on 06-01/02, first plays g:333 on
+// 06-03 (his join there), then g:444 again 06-04.
+describe("join-date cutoff (per scope)", () => {
+  beforeAll(async () => {
+    const rows: [string, string, string, number, boolean, string][] = [
+      ["g:444", "ben", "Ben", 300, true, "2026-06-01"],
+      ["g:444", "ben", "Ben", 400, true, "2026-06-02"],
+      ["g:333", "ben", "Ben", 500, true, "2026-06-03"], // joins g:333 here
+      ["g:444", "ben", "Ben", 600, true, "2026-06-04"],
+    ];
+    for (const [scope, user, name, score, solved, date] of rows) {
+      await db.query(
+        `insert into public.scores (scope_id, user_id, name, score, solved, puzzle_date)
+         values ($1,$2,$3,$4,$5,$6)`,
+        [scope, user, name, score, solved, date],
+      );
+    }
+  });
+
+  const total = async (scope: string): Promise<number> => {
+    const raw = (await db.query<{ r: unknown }>(`select public.room_self($1, null, 'ben') as r`, [scope])).rows[0].r;
+    const self = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return self.total;
+  };
+
+  it("excludes scores earned before the player joined that scope", async () => {
+    // joined g:333 on 06-03, so 06-01/02 (earned in g:444, before) don't count: 500+600 = 1100.
+    expect(await total("g:333")).toBe(1100);
+  });
+
+  it("counts every later play from the join date of the scope joined first", async () => {
+    // g:444 was ben's first room (06-01), so all four days count, incl. the g:333 one: 1800.
+    expect(await total("g:444")).toBe(1800);
+  });
+
+  const boardStreak = async (scope: string): Promise<number> => {
+    const { rows } = await db.query<{ user_id: string; streak: number }>(
+      `select user_id, streak from public.room_board($1, null, 50)`,
+      [scope],
+    );
+    return Number(rows.find((r) => r.user_id === "ben")!.streak);
+  };
+
+  it("windows the streak to the join date too", async () => {
+    // ben solved 06-01..06-04 (global streak 4). On g:333 (joined 06-03) the board streak counts
+    // only from his join: 06-03 + 06-04 = 2. On g:444 (joined 06-01) it's the full 4.
+    expect(await boardStreak("g:333")).toBe(2);
+    expect(await boardStreak("g:444")).toBe(4);
+  });
+
+  it("user_streak stays global when called without a cutoff (for a future profile page)", async () => {
+    const s = Number((await db.query<{ s: number }>(`select public.user_streak('ben') as s`)).rows[0].s);
+    expect(s).toBe(4);
   });
 });

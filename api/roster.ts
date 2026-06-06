@@ -159,45 +159,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   const date = todayET();
-  // View: channel (default) narrows to the channel the player is in; server aggregates the
-  // whole guild. scope_id stays the guild either way — channel view adds a channel_id filter.
+  // Both views are MEMBERSHIP-based (mirrors the leaderboard): the member set is everyone who
+  // has ever played in this scope — narrowed to this channel for the Channel view, the whole
+  // guild for Server. A member's one daily game then surfaces here wherever they launched it
+  // today; members who didn't play today are dropped by assembleRoster.
   const wantChannel = req.body?.scopeMode !== 'server';
 
-  // Identity sources: who joined the room's card(s), and who finished (scores). Either alone
-  // can be the whole roster (e.g. everyone played without a clean join), so union them.
+  // Members (ever played here) for identity + the set to pull today's state for; plus today's
+  // card openers in this channel (first-timers with no prior score, and "opened not finished").
+  let memberQ = db.from('scores').select('user_id, name, avatar, created_at').eq('scope_id', scope);
   let cardQ = db.from('live_cards').select('players').eq('scope_id', scope).eq('puzzle_date', date);
-  let scoreQ = db
-    .from('scores')
-    .select('user_id, name, avatar, solved, mistakes, groups_solved, duration_ms')
-    .eq('scope_id', scope)
-    .eq('puzzle_date', date);
   if (wantChannel && channelId) {
+    memberQ = memberQ.eq('channel_id', channelId);
     cardQ = cardQ.eq('channel_id', channelId);
-    scoreQ = scoreQ.eq('channel_id', channelId);
   }
-  const [{ data: cardRows }, { data: scoreData }] = await Promise.all([cardQ, scoreQ]);
+  const [{ data: memberData }, { data: cardRows }] = await Promise.all([memberQ, cardQ]);
 
-  // Server view: a guild scope has one card row per channel — flatten all their players.
-  // Channel view: at most one row. assembleRoster dedupes by id either way.
-  const joined: CardPlayer[] = ((cardRows as { players: unknown }[] | null) ?? []).flatMap((c) =>
-    Array.isArray(c.players) ? (c.players as CardPlayer[]) : [],
-  );
-  const scoreRows = (scoreData as ScoreRow[] | null) ?? [];
+  // Identity per id: a member's most-recent score name/avatar, then today's card openers
+  // override (freshest join-time identity). assembleRoster keeps only those who played today.
+  const identity = new Map<string, CardPlayer>();
+  for (const r of ((memberData as { user_id: string; name: string; avatar: string | null; created_at: string }[] | null) ?? [])
+    .slice()
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))) {
+    if (!identity.has(r.user_id)) identity.set(r.user_id, { id: r.user_id, name: r.name, avatar: r.avatar });
+  }
+  for (const c of (cardRows as { players: unknown }[] | null) ?? []) {
+    if (Array.isArray(c.players)) for (const p of c.players as CardPlayer[]) identity.set(p.id, p);
+  }
+  const joined = [...identity.values()];
 
-  const allIds = [...new Set([...joined.map((p) => p.id), ...scoreRows.map((s) => s.user_id)])];
-  if (!allIds.length) {
+  const ids = joined.map((p) => p.id);
+  if (!ids.length) {
     res.status(200).json({ players: [] });
     return;
   }
 
-  const puzzle = await fetchPuzzle(date).catch(() => null);
-
-  // One query for the whole identity set's committed progress; replay each to derive state.
-  const { data: progData } = await db
-    .from('progress')
-    .select('user_id, guesses, started_at, updated_at')
-    .in('user_id', allIds)
-    .eq('puzzle_date', date);
+  // Today's finishes + committed progress for the member/opener set — ANY scope, so a member's
+  // single daily game follows them into every room they belong to.
+  const [puzzle, { data: scoreData }, { data: progData }] = await Promise.all([
+    fetchPuzzle(date).catch(() => null),
+    db
+      .from('scores')
+      .select('user_id, name, avatar, solved, mistakes, groups_solved, duration_ms')
+      .in('user_id', ids)
+      .eq('puzzle_date', date),
+    db
+      .from('progress')
+      .select('user_id, guesses, started_at, updated_at')
+      .in('user_id', ids)
+      .eq('puzzle_date', date),
+  ]);
+  const scoreRows = (scoreData as ScoreRow[] | null) ?? [];
   const progressRows = (progData as ProgressRow[] | null) ?? [];
 
   const players = assembleRoster(joined, scoreRows, progressRows, puzzle, Date.now());

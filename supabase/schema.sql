@@ -56,6 +56,9 @@ alter table public.scores add column if not exists channel_id text;
 create index if not exists scores_puzzle_idx on public.scores (puzzle_id, score desc);
 create index if not exists scores_season_idx on public.scores (scope_id, puzzle_date);
 create index if not exists scores_channel_season_idx on public.scores (scope_id, channel_id, puzzle_date);
+-- The membership model looks up a user's scores across all rooms by user_id (+ join-date
+-- cutoff), so index that path.
+create index if not exists scores_user_idx on public.scores (user_id, puzzle_date);
 
 -- guild_members (a player's full Discord guild list, used to pre-populate the board of
 -- every server they belong to) was removed: the server-view board now ranks ONLY players
@@ -145,9 +148,13 @@ grant execute on function public.current_streak(text, text, text) to anon, authe
 -- A player's personal solve streak across ALL their daily results (every room), for the
 -- membership-mode server board where a score counts wherever it was earned. Mirrors
 -- current_streak's islands trick but scope-agnostic — a player has at most one score per
--- date (unique (puzzle_id, user_id)), so their day sequence is unambiguous.
+-- date (unique (puzzle_id, user_id)), so their day sequence is unambiguous. p_since windows
+-- it to a join date: the board passes each member's per-scope join so the streak shown there
+-- counts only from when they joined that room (consistent with the join-date total cutoff);
+-- null = the player's true global streak (e.g. a future profile page).
 drop function if exists public.user_streak(text);
-create or replace function public.user_streak(p_user text)
+drop function if exists public.user_streak(text, date);
+create or replace function public.user_streak(p_user text, p_since date default null)
 returns int
 language sql
 stable
@@ -156,6 +163,7 @@ as $$
     select distinct puzzle_date as d
     from public.scores
     where user_id = p_user and solved and puzzle_date is not null
+      and (p_since is null or puzzle_date >= p_since)
   ),
   grouped as (
     select d, d - (row_number() over (order by d))::int as grp
@@ -165,6 +173,7 @@ as $$
     select max(puzzle_date) as d
     from public.scores
     where user_id = p_user and puzzle_date is not null
+      and (p_since is null or puzzle_date >= p_since)
   )
   select coalesce(case
     when (select d from last_played) is null then 0
@@ -176,7 +185,7 @@ as $$
   end, 0);
 $$;
 
-grant execute on function public.user_streak(text) to anon, authenticated;
+grant execute on function public.user_streak(text, date) to anon, authenticated;
 
 -- Leaderboard rows for a window: one per player, richest-first, with every
 -- column the end screen shows. p_since NULL = all-time.
@@ -197,14 +206,18 @@ stable
 security definer
 set search_path = public
 as $$
-  -- Server view of a guild (g: scope, no channel filter) ranks everyone who has FINISHED a
-  -- puzzle in that server (membership derived from scores.scope_id) by their daily results
-  -- earned in ANY room — so the roster is play-gated (no one shows on a server they never
-  -- played in) while a listed player's total still follows them across every server.
-  -- Channel views and c: (DM/group) scopes stay scoped to the room a score was earned in.
-  -- set search_path pins the (security definer) function for safety.
-  with mode as (
-    select (p_scope like 'g:%' and p_channel is null) as by_member
+  -- Guild views (g: scope) — Channel OR Server — list everyone who has played in the room
+  -- (membership: a score with this scope_id, plus this channel_id for the Channel tab) and
+  -- rank them by their total earned in ANY room. So a player's numbers are IDENTICAL on both
+  -- tabs; the toggle only changes WHO is listed (this channel's players vs the whole guild's),
+  -- never the scores. No one shows on a server/channel they never played in. c: (DM/group)
+  -- scopes stay bound to the room a score was earned in. set search_path pins the (security
+  -- definer) function for safety.
+  with mj as (
+    select user_id, min(puzzle_date) as joined
+    from public.scores
+    where scope_id = p_scope and (p_channel is null or channel_id = p_channel)
+    group by user_id
   ),
   agg as (
     select s.user_id,
@@ -213,11 +226,13 @@ as $$
            sum(s.score)::int                          as total,
            count(*)::int                              as plays,
            count(*) filter (where s.solved)::int      as wins,
-           round(avg(s.mistakes)::numeric, 1)::float8 as avg_mistakes
-    from public.scores s, mode m
+           round(avg(s.mistakes)::numeric, 1)::float8 as avg_mistakes,
+           min(mj.joined)                             as joined
+    from public.scores s
+    left join mj on mj.user_id = s.user_id
     where (p_since is null or s.puzzle_date >= p_since)
-      and case when m.by_member
-        then s.user_id in (select s2.user_id from public.scores s2 where s2.scope_id = p_scope)
+      and case when p_scope like 'g:%'
+        then mj.user_id is not null and s.puzzle_date >= mj.joined
         else s.scope_id = p_scope and (p_channel is null or s.channel_id = p_channel)
       end
     group by s.user_id
@@ -225,8 +240,8 @@ as $$
   select a.user_id, a.name, a.avatar, a.total, a.plays, a.wins,
          case when a.plays > 0 then round(100.0 * a.wins / a.plays)::int else 0 end as win_pct,
          a.avg_mistakes,
-         case when (p_scope like 'g:%' and p_channel is null)
-              then public.user_streak(a.user_id)
+         case when (p_scope like 'g:%')
+              then public.user_streak(a.user_id, a.joined)
               else public.current_streak(p_scope, a.user_id, p_channel)
          end as streak
   from agg a
@@ -251,11 +266,14 @@ stable
 security definer
 set search_path = public
 as $$
-  -- Mirrors room_board's scoping: the guild server view (g: scope, no channel) ranks over
-  -- everyone who has finished a puzzle in that server (membership from scores.scope_id; a
-  -- listed player's total still counts wherever earned); channel/DM views stay scope-bound.
-  with mode as (
-    select (p_scope like 'g:%' and p_channel is null) as by_member
+  -- Mirrors room_board: guild views (Channel or Server) rank the room's members (played here,
+  -- plus this channel for the Channel tab) by their total earned in ANY room — identical
+  -- numbers across the toggle. c: (DM/group) views stay scope-bound.
+  with mj as (
+    select user_id, min(puzzle_date) as joined
+    from public.scores
+    where scope_id = p_scope and (p_channel is null or channel_id = p_channel)
+    group by user_id
   ),
   board as (
     select s.user_id,
@@ -263,10 +281,11 @@ as $$
            count(*)::int                              as plays,
            count(*) filter (where s.solved)::int      as wins,
            round(avg(s.mistakes)::numeric, 1)::float8 as avg_mistakes
-    from public.scores s, mode m
+    from public.scores s
+    left join mj on mj.user_id = s.user_id
     where (p_since is null or s.puzzle_date >= p_since)
-      and case when m.by_member
-        then s.user_id in (select s2.user_id from public.scores s2 where s2.scope_id = p_scope)
+      and case when p_scope like 'g:%'
+        then mj.user_id is not null and s.puzzle_date >= mj.joined
         else s.scope_id = p_scope and (p_channel is null or s.channel_id = p_channel)
       end
     group by s.user_id
@@ -285,8 +304,8 @@ as $$
     'win_pct',       coalesce((select case when plays > 0 then round(100.0 * wins / plays)::int else 0 end
                         from ranked where user_id = p_user), 0),
     'avg_mistakes',  coalesce((select avg_mistakes from ranked where user_id = p_user), 0),
-    'streak',        case when (p_scope like 'g:%' and p_channel is null)
-                          then public.user_streak(p_user)
+    'streak',        case when (p_scope like 'g:%')
+                          then public.user_streak(p_user, (select joined from mj where user_id = p_user))
                           else public.current_streak(p_scope, p_user, p_channel)
                      end
   );
@@ -382,31 +401,44 @@ returns table (
 language sql
 stable
 as $$
+  -- Membership-based, like room_board: a guild recap lists this room's MEMBERS (everyone who
+  -- has played in this scope, + this channel for a channel recap) who played on p_date, with
+  -- each member's one daily game wherever they launched it. c: scopes stay scope-bound.
+  with mj as (
+    select user_id, min(puzzle_date) as joined
+    from public.scores
+    where scope_id = p_scope and (p_channel is null or channel_id = p_channel)
+    group by user_id
+  )
   select s.user_id, s.name, s.avatar, s.score, s.mistakes,
          s.solved, s.groups_solved, s.duration_ms
   from public.scores s
-  where s.scope_id = p_scope and s.puzzle_date = p_date
-    and (p_channel is null or s.channel_id = p_channel)
+  left join mj on mj.user_id = s.user_id
+  where s.puzzle_date = p_date
+    and case when p_scope like 'g:%'
+      then mj.user_id is not null and s.puzzle_date >= mj.joined
+      else s.scope_id = p_scope and (p_channel is null or s.channel_id = p_channel)
+    end
   order by s.solved desc, s.score desc, s.mistakes asc, s.duration_ms asc nulls last;
 $$;
 
 grant execute on function public.day_results(text, date, text) to anon, authenticated;
 
--- Every (guild, channel) that has ever had a finisher — the set of channels the daily recap
--- posts to. The recap fires for ALL of these every day, not just channels that played
--- yesterday: a channel with an established habit still gets a card ("nobody got it… new day")
--- on a day no one solved. Truly inactive channels (never played) are absent; a channel the
--- bot was removed from just 403s at post time and is skipped for that day. g: scopes only —
--- the bot posts in guild channels; c: DM/group scopes are excluded.
+-- Every (guild, channel) where the bot is installed and has posted a card — the set the daily
+-- recap fires to, every day. Sourced from live_cards, which only exists where the bot is a
+-- guild install (message_id not null = it has actually posted there) — NOT from scores, which
+-- also include user-install servers with no bot: those 403 at post time (the vast majority)
+-- and spam the run. So a channel with an established habit still gets a card ("nobody got it…
+-- new day") on a quiet day, but only where the bot can actually post. g: scopes only.
 drop function if exists public.recap_channels();
 create or replace function public.recap_channels()
 returns table (scope_id text, channel_id text)
 language sql
 stable
 as $$
-  select distinct s.scope_id, s.channel_id
-  from public.scores s
-  where s.scope_id like 'g:%' and s.channel_id is not null;
+  select distinct l.scope_id, l.channel_id
+  from public.live_cards l
+  where l.scope_id like 'g:%' and l.channel_id is not null and l.message_id is not null;
 $$;
 
 grant execute on function public.recap_channels() to anon, authenticated;
@@ -429,13 +461,24 @@ returns table (streak int, win_pct int, max_streak int)
 language sql
 stable
 as $$
-  with days as (
+  with mj as (
+    select user_id, min(puzzle_date) as joined
+    from public.scores
+    where scope_id = p_scope and (p_channel is null or channel_id = p_channel)
+    group by user_id
+  ),
+  days as (
+    -- "room day" = any MEMBER solved that day, counted only from that member's join date
+    -- (point-in-time: a new member can't retroactively heal a day before they joined).
     select s.puzzle_date as d, bool_or(s.solved) as solved
     from public.scores s
-    where s.scope_id = p_scope
-      and (p_channel is null or s.channel_id = p_channel)
-      and s.puzzle_date is not null
+    left join mj on mj.user_id = s.user_id
+    where s.puzzle_date is not null
       and (p_date is null or s.puzzle_date <= p_date)
+      and case when p_scope like 'g:%'
+        then mj.user_id is not null and s.puzzle_date >= mj.joined
+        else s.scope_id = p_scope and (p_channel is null or s.channel_id = p_channel)
+      end
     group by s.puzzle_date
   ),
   wins as (select d from days where solved),

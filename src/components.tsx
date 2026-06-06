@@ -161,7 +161,7 @@ function Header({
           alt=""
           className="h-[27px] w-[27px] flex-none object-contain"
         />
-        <span className="font-display text-[27px] font-bold leading-none tracking-[-0.025em] text-[#efefe6]">
+        <span className="font-display text-[27px] font-bold leading-none tracking-[-0.025em] text-[#efefe6] [text-box:trim-both_cap_alphabetic]">
           Connections
         </span>
         <span className="flex-none rounded-full border border-white/[0.13] px-2 py-[3px] font-sans text-[10px] font-bold uppercase leading-none tracking-[0.08em] tabular-nums text-zinc-400">
@@ -173,7 +173,7 @@ function Header({
       <span className="relative inline-flex items-baseline justify-end whitespace-nowrap text-right">
         <span
           className={
-            "font-display text-[14px] font-semibold leading-none text-zinc-500 transition-opacity duration-300 " +
+            "font-display text-[14px] font-semibold leading-none text-zinc-500 [text-box:trim-both_cap_alphabetic] transition-opacity duration-300 " +
             (feedbackOn ? "opacity-0" : "opacity-100")
           }
         >

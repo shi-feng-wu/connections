@@ -290,6 +290,32 @@ export function App({
     }
   }
 
+  // Mint (or re-mint) the Realtime JWT and authorize the presence client so it can join the
+  // private channel. Used at handshake and again as the room's `reauth` callback — a long
+  // session whose token expires re-mints here and stays private instead of dropping to public.
+  // Returns true once a token is held; false (no token / network error) keeps the public fallback.
+  async function mintRealtimeToken(): Promise<boolean> {
+    const accessToken = accessTokenRef.current;
+    if (!accessToken) return false;
+    try {
+      const r = await fetch("/api/realtime-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // Token scoped to this room only (see realtime.messages RLS).
+        body: JSON.stringify({ accessToken, room: roomRef.current }),
+      });
+      const token = r.ok ? ((await r.json()) as { token?: string }).token : null;
+      if (token) {
+        setRealtimeAuth(token);
+        realtimeAuthedRef.current = true;
+        return true;
+      }
+    } catch {
+      /* presence stays on the public fallback channel */
+    }
+    return false;
+  }
+
   function onFinish(): void {
     const g = gameRef.current;
     if (!g) return;
@@ -467,8 +493,12 @@ export function App({
       const s = selfState();
       setSelf(s);
       if (!joinedRef.current) {
-        joinRoom(roomRef.current, s, handlePresenceSync, {
+        joinRoom(roomRef.current, handlePresenceSync, {
           private: realtimeAuthedRef.current,
+          // getSelf lets the supervisor's rejoin/heartbeat broadcast CURRENT progress, not a
+          // stale snapshot; reauth re-mints the JWT so a token expiry recovers private (above).
+          getSelf: selfState,
+          reauth: mintRealtimeToken,
         });
         joinedRef.current = true;
       } else {
@@ -597,21 +627,7 @@ export function App({
 
       // Realtime JWT so presence joins the private channel (only verified users
       // can broadcast). Falls back to a public channel if unavailable.
-      try {
-        const r = await fetch("/api/realtime-token", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          // Token scoped to this room only (see realtime.messages RLS).
-          body: JSON.stringify({ accessToken: access_token, room: roomRef.current }),
-        });
-        const token = r.ok ? ((await r.json()) as { token?: string }).token : null;
-        if (token) {
-          setRealtimeAuth(token);
-          realtimeAuthedRef.current = true;
-        }
-      } catch {
-        /* presence stays on the public fallback channel */
-      }
+      await mintRealtimeToken();
 
       // Add this player to the channel's "who's playing today" card (append-only; the
       // server edits the room's live card — the launcher's /connections message — via the

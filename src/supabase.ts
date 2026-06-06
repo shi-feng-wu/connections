@@ -26,7 +26,10 @@ export const supabase: SupabaseClient | null =
   url && key
     ? createClient(url, key, {
         realtime: {
-          params: { eventsPerSecond: 5 },
+          // Library default (10), up from 5: per-tap presence track() bursts (select tiles +
+          // submit) plus the ~12s heartbeat stay well under the ceiling, so a player's own
+          // live updates aren't rate-limited/delayed.
+          params: { eventsPerSecond: 10 },
           transport: ProxiedWebSocket as unknown as typeof WebSocket,
         },
       })

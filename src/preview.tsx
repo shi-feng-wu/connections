@@ -460,6 +460,45 @@ function State({
   );
 }
 
+// A true device-width frame. An <iframe> loading the harness at a fixed CSS width gives
+// its content a REAL narrow viewport, so width media queries (min-[820px]:) and 100dvh
+// resolve against the phone size — unlike a plain width-capped <div>, which still sees
+// the desktop viewport and would mis-switch to the 50/50 layout. Lets us eyeball 320px
+// (the small-Android floor; Android's Display-Size accessibility setting shrinks the CSS
+// viewport further, so a 360px phone can land here) right in the page, no CDP needed. The
+// iframe loads an isolated #state, which never re-renders device frames, so no recursion.
+function DeviceFrame({ width, hash, note }: { width: number; hash: string; note: string }) {
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <iframe
+        src={`/preview.html#${hash}`}
+        title={`${width}px · ${hash}`}
+        style={{ width, height: 720 }}
+        className="rounded-[26px] border-[7px] border-zinc-800 bg-black shadow-2xl"
+      />
+      <div className="text-[11px] tabular-nums text-zinc-500">
+        {width}px · {note}
+      </div>
+    </div>
+  );
+}
+
+// The end screen at Android's narrow widths — the layout most prone to horizontal
+// overflow (the "Out of guesses" footer is the widest). 320px is the small-device floor.
+function DeviceFrames() {
+  return (
+    <section className="w-full max-w-[940px] px-4">
+      <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
+        Narrow device widths · end screen (Android floor)
+      </div>
+      <div className="flex flex-wrap items-start justify-center gap-6">
+        <DeviceFrame width={320} hash="lost" note="small Android · Display-Size scaled" />
+        <DeviceFrame width={360} hash="lost" note="most common Android" />
+      </div>
+    </section>
+  );
+}
+
 // The collapsed picture-in-picture thumbnail (src/pip.tsx). Rendered in a fixed box
 // at the minimized window's ~16:10 ratio (≈976×608) — the size Discord gives it — to
 // check the centered board mini at a glance. A couple of sizes confirm it scales.
@@ -543,7 +582,7 @@ const STATES = [
   <State key="l" label="Results · lost" game={lost} revealed={[2, 3]} />,
 ];
 const pick = decodeURIComponent(location.hash.slice(1)).toLowerCase();
-const known = ["progress", "perfect", "won", "lost", "loading", "error", "blocked", "simulate", "feedback", "card", "pip", "scope", "recap", "turnover"];
+const known = ["progress", "perfect", "won", "lost", "loading", "error", "blocked", "simulate", "feedback", "card", "pip", "scope", "recap", "turnover", "device"];
 // #simulate and #feedback both isolate the Simulate playground (#feedback also
 // auto-fires a one-away guess to surface the header feedback pill); #card isolates the
 // Discord "who's playing" card; #pip isolates the collapsed PIP thumbnail.
@@ -569,10 +608,13 @@ const showSim = pick === "" || onlySim;
 const showCards = pick === "" || onlyCard;
 const showPips = pick === "" || onlyPip;
 const showTurnover = pick === "" || onlyTurnover;
+// #device isolates the narrow-width device frames (320/360px iframes of the end screen).
+const showDevice = pick === "" || pick === "device";
 
 createRoot(document.getElementById("preview")!).render(
   <div className="flex flex-col items-center gap-16 py-10">
     {showTurnover && <TurnoverState />}
+    {showDevice && <DeviceFrames />}
     {showSim && <Simulate />}
     {!onlySim && shown}
     {showPips && (

@@ -695,7 +695,7 @@ export function Board({
     const perfect = won && game.mistakesLeft === MAX_MISTAKES;
     const label = perfect ? "Perfect" : won ? "Solved" : "Out of guesses";
     return (
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 max-[360px]:gap-2">
         <span
           className="inline-flex flex-none items-center gap-1.75"
           aria-label="Mistakes remaining"
@@ -718,11 +718,15 @@ export function Board({
           </div>
           <ResetCountdown className="text-[11px] tabular-nums text-zinc-500" />
         </div>
-        <div className="flex flex-none items-center gap-3.5">
-          <div className="flex flex-col items-end gap-0.75">
+        <div className="flex flex-none items-center gap-3.5 max-[360px]:gap-2.5">
+          <div className="flex min-w-0 flex-col items-end gap-0.75">
+            {/* At the narrow-Android floor (<=360px) the longest label, "Out of
+                guesses", would push the score + jump button off the right edge. Cap
+                it so it wraps to two right-aligned lines there; "Solved"/"Perfect"
+                are short enough to never reach the cap, so they stay one line. */}
             <span
               className={
-                "text-[10px] font-semibold uppercase tracking-[0.16em] " +
+                "text-right text-[10px] font-semibold uppercase leading-tight tracking-[0.16em] max-[360px]:max-w-[4.5rem] " +
                 (won ? "text-emerald-400" : "text-zinc-400")
               }
             >

@@ -71,7 +71,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  const date = yesterdayET();
+  // Test override (secret-gated, same bearer): ?scope=g:..&channel=..[&date=YYYY-MM-DD][&force=1]
+  // fires the recap for a SINGLE channel instead of every one — for eyeballing the card in a
+  // test server without spamming every room. force=1 clears that channel's ledger row first so
+  // it re-posts. With no params it's the normal cron (all channels, yesterday). See
+  // scripts/test-recap.mjs.
+  const q = req.query;
+  const onlyScope = typeof q.scope === 'string' && q.scope ? q.scope : undefined;
+  const onlyChannel = typeof q.channel === 'string' && q.channel ? q.channel : undefined;
+  const force = q.force === '1';
+  if (!!onlyScope !== !!onlyChannel) {
+    res.status(400).json({ error: 'scope and channel must be provided together' });
+    return;
+  }
+
+  const date = typeof q.date === 'string' && q.date ? q.date : yesterdayET();
   const since = `${date.slice(0, 8)}01`; // month start of the puzzle's day (avoids a month-boundary skew)
 
   // Day before yesterday, for the "was a streak broken?" check below (noon-UTC anchor so the
@@ -87,7 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   // no one solved ("nobody got it… new day"). Only g: scopes (the bot posts in guild
   // channels); a channel the bot was since removed from just 403s at post time and is skipped.
   const { data: chanRows } = await db.rpc('recap_channels'); // every channel that ever played
-  const pairs = [
+  const allPairs = [
     ...new Map(
       ((chanRows ?? []) as ScopeRow[])
         .filter((r) => r.scope_id?.startsWith('g:') && !!r.channel_id)
@@ -97,6 +111,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         ]),
     ).values(),
   ];
+  // Single-channel test override, else every channel that has ever played.
+  const pairs = onlyScope && onlyChannel ? [{ scope: onlyScope, channel: onlyChannel }] : allPairs;
 
   if (pairs.length === 0) {
     res.status(200).json({ date, posted: 0, skipped: 0, failed: 0 });
@@ -116,6 +132,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   // failure (429 / 5xx / thrown) releases the ledger claim so a later run retries; a permanent
   // failure (403 can't post, 404 gone, malformed) keeps the claim so we don't loop on it.
   const postOne = async ({ scope, channel }: { scope: string; channel: string }): Promise<Outcome> => {
+    // Test re-runs (force): clear any prior claim for this (scope, date, channel) so it re-posts.
+    if (force) await db.from('recap_posts').delete().match({ scope_id: scope, puzzle_date: date, channel_id: channel });
     // Claim the (scope, date, channel) slot before posting; a unique violation means a prior
     // run already handled this channel.
     const claim = await db.from('recap_posts').insert({ scope_id: scope, puzzle_date: date, channel_id: channel });

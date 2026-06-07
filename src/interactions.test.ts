@@ -60,6 +60,32 @@ describe("routeInteraction", () => {
     const r = routeInteraction({ type: 2, data: { name: "nope" } }) as { type: number };
     expect(r.type).not.toBe(12);
   });
+
+  it("/enable-posts offers a one-click Add-to-Server button in a bot-less server", () => {
+    const r = routeInteraction({
+      type: 2,
+      data: { name: "enable-posts" },
+      application_id: "app123",
+      authorizing_integration_owners: { "1": "user123" }, // user-install only
+    }) as { type: number; data: { flags?: number; components?: { components: { style?: number; url?: string }[] }[] } };
+    expect(r.type).toBe(4); // CHANNEL_MESSAGE_WITH_SOURCE
+    expect(r.data.flags).toBe(64); // ephemeral
+    const btn = r.data.components?.[0].components[0];
+    expect(btn?.style).toBe(5); // link button
+    expect(btn?.url).toContain("client_id=app123");
+    expect(btn?.url).toContain("integration_type=0");
+  });
+
+  it("/enable-posts says recaps are already on when the bot is guild-installed", () => {
+    const r = routeInteraction({
+      type: 2,
+      data: { name: "enable-posts" },
+      authorizing_integration_owners: { "0": "guild123" }, // guild install present
+    }) as { type: number; data: { components?: unknown[]; content?: string } };
+    expect(r.type).toBe(4);
+    expect(r.data.components).toBeUndefined(); // no button
+    expect(r.data.content).toContain("already");
+  });
 });
 
 // The card is a bot message, so it's skipped when the launch is a user install in a server

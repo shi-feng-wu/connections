@@ -40,6 +40,22 @@ const EPHEMERAL = 64; // message flag
 // name at registration time.
 const LAUNCH_COMMANDS = new Set(['connections', 'play']);
 
+// The "/enable-posts" command: in a server without the bot it replies (privately) with a
+// one-click "Add to Server" button — the only way recaps and the live card can post there.
+const ENABLE_POSTS_COMMAND = 'enable-posts';
+// Guild-install permissions for that button's URL — KEEP IN SYNC with scripts/configure-install.mjs
+// (View Channel | Send Messages | Embed Links | Attach Files | Read Message History).
+const INSTALL_PERMISSIONS = '117760';
+
+// Guild-install ("Add to Server") link: bot + commands scopes with the recap permissions.
+// integration_type=0 opens the server picker directly instead of the two-option chooser.
+function installUrl(appId: string): string {
+  return (
+    `https://discord.com/oauth2/authorize?client_id=${appId}` +
+    `&integration_type=0&scope=bot+applications.commands&permissions=${INSTALL_PERMISSIONS}`
+  );
+}
+
 // 32-byte raw Ed25519 public key -> a KeyObject, via the fixed SPKI DER prefix.
 // crypto can't ingest the bare key, but wrapping it in the standard Ed25519 SPKI
 // header is exact and avoids pulling in a dependency.
@@ -65,7 +81,12 @@ export function verifyDiscordSig(
   }
 }
 
-type Interaction = { type?: number; data?: { custom_id?: string; name?: string } };
+type Interaction = {
+  type?: number;
+  data?: { custom_id?: string; name?: string };
+  application_id?: string;
+  authorizing_integration_owners?: Record<string, string>;
+};
 
 // Whether this interaction is a launch command (slash or Entry Point) — launches AND posts
 // the card as an interaction followup.
@@ -88,6 +109,41 @@ export function routeInteraction(body: Interaction): object {
   // The card/recap "Play now!" button launches the Activity.
   if (body.type === MESSAGE_COMPONENT && body.data?.custom_id === PLAY_CUSTOM_ID) {
     return { type: LAUNCH_ACTIVITY };
+  }
+  // "/enable-posts": help the user add the bot so recaps + the live card can post in this server.
+  if (body.type === APPLICATION_COMMAND && body.data?.name === ENABLE_POSTS_COMMAND) {
+    // Positively guild-installed ("0" present) → the bot is already here. Otherwise (user-install
+    // only, or unknown) show the button — so we never wrongly tell a bot-less server it's all set.
+    const owners = body.authorizing_integration_owners;
+    if (owners && '0' in owners) {
+      return {
+        type: CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          content:
+            '### You’re all set\n' +
+            'The bot’s already in this server, so the **daily recap** posts here every morning after the puzzle resets.',
+          flags: EPHEMERAL,
+        },
+      };
+    }
+    const appId = body.application_id ?? process.env.VITE_DISCORD_CLIENT_ID ?? '';
+    return {
+      type: CHANNEL_MESSAGE_WITH_SOURCE,
+      data: {
+        content:
+          '### Enable daily recaps for this server\n' +
+          'Add the bot and it’ll post a **daily recap** — yesterday’s results plus the season leaderboard — ' +
+          'and a live **“who’s playing”** card, right in this channel.\n\n' +
+          '**Two ways to add it:**\n' +
+          '- **In the activity:** Activities → **Connections** → **⋯** (top-right) → **Add App** → **Add to Server**\n' +
+          '- **Or** tap the button below\n\n' +
+          '-# Adding the bot needs the **Manage Server** permission. No access? Ask a server admin to run `/enable-posts`.',
+        flags: EPHEMERAL,
+        components: [
+          { type: 1, components: [{ type: 2, style: 5, label: 'Add to Server', url: installUrl(appId) }] },
+        ],
+      },
+    };
   }
   return { type: CHANNEL_MESSAGE_WITH_SOURCE, data: { content: 'Unsupported interaction.', flags: EPHEMERAL } };
 }

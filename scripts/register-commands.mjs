@@ -131,3 +131,33 @@ if (chat) {
       `(via the Interactions Endpoint — make sure it's set to <host>/api/interactions).`,
   );
 }
+
+// --- 3) enable-posts chat-input command -------------------------------------------
+// In a server without the bot, /enable-posts replies (privately) with a one-click "Add to
+// Server" button — the only way the daily recap + live card can post there. Same contexts and
+// integration types as the launch command so it's available in bot-less (user-install) servers.
+// The response is built in api/interactions.ts (routeInteraction); this only registers the name.
+const ENABLE_POSTS = 'enable-posts';
+const ENABLE_POSTS_DESCRIPTION = 'Add the bot to this server to unlock the daily recap and live card';
+const enable = commands.find((c) => c.type === CHAT_INPUT && c.name === ENABLE_POSTS);
+if (enable) {
+  console.log(`Chat command /${ENABLE_POSTS} already registered (id ${enable.id}).`);
+} else {
+  const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({
+      name: ENABLE_POSTS,
+      description: ENABLE_POSTS_DESCRIPTION,
+      type: CHAT_INPUT,
+      contexts: CONTEXTS,
+      integration_types: INTEGRATION_TYPES,
+    }),
+  });
+  if (!createRes.ok) {
+    console.error(`Failed to register /${ENABLE_POSTS}: ${createRes.status} ${await createRes.text()}`);
+    process.exit(1);
+  }
+  const cmd = await createRes.json();
+  console.log(`Registered chat command /${cmd.name} (id ${cmd.id}).`);
+}

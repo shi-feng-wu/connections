@@ -544,7 +544,7 @@ function TurnoverState() {
         className="relative h-[440px] w-full overflow-hidden rounded-xl ring-1 ring-zinc-800"
         style={{ transform: "translateZ(0)" }}
       >
-        <DayTurnover active date="2026-06-06" />
+        <DayTurnover active date="2026-06-06" number={1169} />
       </div>
     </section>
   );
@@ -565,7 +565,13 @@ function LoadState({
       <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
         {label}
       </div>
-      <LoadingScreen error={error} blocked={blocked} onRetry={noop} />
+      <LoadingScreen
+        error={error}
+        blocked={blocked}
+        onRetry={noop}
+        date="2026-06-06"
+        number={1169}
+      />
     </section>
   );
 }

@@ -56,6 +56,30 @@ function etDate(): string {
   }).format(new Date());
 }
 
+// The cold-start loader wants the puzzle's number, but NYT ids aren't derivable from the
+// date (they skip — e.g. Jun 6 → Jun 7 jumps by two), so the only source is a loaded
+// puzzle. We stash the last daily {date, id} and read it back when it's still today's, so
+// a reopen later the same day shows the number on the loader. The very first load of a new
+// day has nothing cached yet → the pill is simply omitted until the puzzle lands.
+const LAST_PUZZLE_KEY = "conn-last-daily";
+function rememberPuzzle(date: string, id: number): void {
+  try {
+    localStorage.setItem(LAST_PUZZLE_KEY, JSON.stringify({ date, id }));
+  } catch {
+    /* storage blocked — fine, the loader just won't show a number this session */
+  }
+}
+function cachedPuzzleNo(date: string): number | undefined {
+  try {
+    const raw = localStorage.getItem(LAST_PUZZLE_KEY);
+    if (!raw) return undefined;
+    const v = JSON.parse(raw) as { date?: string; id?: number };
+    return v?.date === date && typeof v.id === "number" ? v.id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const sleep = (ms: number): Promise<void> =>
   new Promise((r) => setTimeout(r, ms));
 
@@ -165,10 +189,12 @@ export function App({
   );
   // Midnight day-rollover veil (src/components.tsx DayTurnover): `resetting` drives the
   // overlay; the ref guards swapToNewDay so the precise timer and the 30s poll can't both
-  // fire a swap; newDayDate is the date we're rolling into, shown on the veil.
+  // fire a swap; newDayDate is the date we're rolling into, shown on the veil; newDayNo is
+  // the new puzzle's number, resolved once it loads mid-veil (before the reveal).
   const [resetting, setResetting] = useState(false);
   const resettingRef = useRef(false);
   const [newDayDate, setNewDayDate] = useState<string | undefined>(undefined);
+  const [newDayNo, setNewDayNo] = useState<number | undefined>(undefined);
   // Discord activity layout: FOCUSED (0) normally, PIP (1) when collapsed. Drives the
   // compact thumbnail swap.
   const [layoutMode, setLayoutMode] = useState<number>(
@@ -493,6 +519,8 @@ export function App({
       }
       gameRef.current = game;
       sessionRef.current = start?.session ?? null;
+      // Cache the daily's number so a reopen later today can show it on the loader.
+      if (isDailyRef.current) rememberPuzzle(puzzle.date, puzzle.id);
 
       const s = selfState();
       setSelf(s);
@@ -530,9 +558,16 @@ export function App({
     }
     resettingRef.current = true;
     setNewDayDate(etDate());
+    setNewDayNo(undefined); // clear last turnover's number; the new one resolves post-load
     setResetting(true);
     await sleep(540); // let the veil fade fully opaque (500ms) over the old board first
     await loadPuzzle();
+    // The new puzzle is now in hand (behind the still-opaque veil); surface its number so
+    // the lockup shows the next day's No. before the veil lifts to reveal the board. Guard
+    // on the loaded date so a failed swap (gameRef still on yesterday) can't show a number
+    // that mismatches the new date — the pill just stays omitted instead.
+    const loaded = gameRef.current;
+    if (loaded && loaded.puzzle.date === etDate()) setNewDayNo(loaded.puzzle.id);
     await sleep(620); // hold the "new puzzle" beat so a cached load still registers
     setResetting(false);
     resettingRef.current = false;
@@ -806,6 +841,8 @@ export function App({
         error={phase === "error"}
         blocked={phase === "blocked"}
         onRetry={retry}
+        date={etDate()}
+        number={cachedPuzzleNo(etDate())}
       />
     ) : (
       <GameView
@@ -830,7 +867,7 @@ export function App({
   return (
     <>
       {content}
-      <DayTurnover active={resetting} date={newDayDate} />
+      <DayTurnover active={resetting} date={newDayDate} number={newDayNo} />
     </>
   );
 }

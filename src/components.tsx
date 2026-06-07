@@ -7,18 +7,97 @@ import type { PlayerState } from "./realtime";
 import { Roster, type RosterScope, type RosterView } from "./roster";
 import { type Standings } from "./season";
 
-// Loading / error / blocked screen, centered on the page. The in-progress state is
-// deliberately minimal: just the four category squares pulsing in sequence. Once the
-// puzzle lands the game fades in (GameView's animate-fade-in), so the loader simply
-// dissolves into the page rather than swapping a full skeleton board out.
+// The four category squares doing the bounce+spin drop — the hero mark shared by the
+// cold-start loader and the midnight turnover (redesign "Loading Animations"). Each
+// square whips a full turn mid-air (direction alternates per square) and lands square;
+// the launch is staggered by index so the row ripples. `delayBase` shifts the whole
+// row's start so the turnover can hold a beat before the mark kicks in.
+function BounceSpinMark({ delayBase = 0 }: { delayBase?: number }) {
+  return (
+    <div className="flex gap-4">
+      {LEVELS.map((l, i) => (
+        <span
+          key={l.key}
+          className={
+            "h-[30px] w-[30px] rounded-[5px] " +
+            (i % 2 ? "animate-bounce-spin-ccw" : "animate-bounce-spin-cw")
+          }
+          style={{
+            background: l.color,
+            willChange: "transform",
+            animationDelay: `${delayBase + i * 0.13}s`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// The shared loading lockup: a tracked all-caps eyebrow with animated dots, the
+// bounce+spin mark, then the puzzle's date and number. The cold-start loader and the
+// midnight turnover render the same lockup and differ only in copy, so they read as one
+// family. The number isn't always known before the puzzle lands (NYT ids aren't
+// derivable from the date), so the pill only appears once a number is supplied.
+function LoadLockup({
+  caption,
+  date,
+  number,
+  delayBase = 0,
+}: {
+  caption: string;
+  date?: string;
+  number?: number;
+  delayBase?: number;
+}) {
+  const label = date
+    ? new Date(`${date}T00:00:00`).toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      })
+    : "";
+  return (
+    <div className="relative flex flex-col items-center gap-[26px]">
+      <span className="font-sans text-[11px] font-semibold uppercase tracking-[0.26em] whitespace-nowrap text-zinc-500 after:animate-dots after:content-['']">
+        {caption}
+      </span>
+      <BounceSpinMark delayBase={delayBase} />
+      {(label || number != null) && (
+        <div className="mt-1 flex flex-col items-center gap-[13px]">
+          {label && (
+            <span className="font-display text-[22px] font-semibold leading-none tracking-[-0.01em] whitespace-nowrap text-zinc-300">
+              {label}
+            </span>
+          )}
+          {number != null && (
+            <span className="rounded-full border border-white/[0.14] px-2.5 py-[3px] font-sans text-[10px] font-bold uppercase tracking-[0.09em] whitespace-nowrap tabular-nums text-zinc-400">
+              No. {number}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Loading / error / blocked screen, centered on the page. The in-progress state is the
+// designed cold-start lockup — "Loading today's puzzle…", the bounce+spin mark, and the
+// day's date + number — over a faint center glow. Once the puzzle lands the game fades in
+// (GameView's animate-fade-in), so the loader dissolves into the page rather than swapping
+// a full skeleton board out. `number` is best-effort (the puzzle hasn't loaded yet, so it
+// comes from the last cached daily); when absent the pill is simply omitted.
 export function LoadingScreen({
   error = false,
   blocked = false,
   onRetry,
+  date,
+  number,
 }: {
   error?: boolean;
   blocked?: boolean;
   onRetry: () => void;
+  date?: string;
+  number?: number;
 }) {
   const inner = blocked ? (
     <>
@@ -41,15 +120,14 @@ export function LoadingScreen({
       </HoverButton>
     </>
   ) : (
-    <div className="flex gap-2">
-      {LEVELS.map((l, i) => (
-        <span
-          key={l.key}
-          className="h-5 w-5 animate-qpulse rounded"
-          style={{ background: l.color, animationDelay: `${i * 0.16}s` }}
-        />
-      ))}
-    </div>
+    <>
+      {/* faint center glow so the flat near-black has depth behind the lockup */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-0 bg-[radial-gradient(56%_44%_at_50%_44%,rgba(255,255,255,0.05),transparent_70%)]"
+      />
+      <LoadLockup caption="Loading today’s puzzle" date={date} number={number} />
+    </>
   );
 
   return (
@@ -61,12 +139,22 @@ export function LoadingScreen({
 
 // Midnight day-rollover veil. When the ET date crosses, the daily swaps to the new puzzle;
 // rather than the old board hard-cutting to the loader, App fades this veil over the live
-// board, swaps the puzzle underneath (hidden), then drops the veil to reveal the fresh one.
-// It reuses the LoadingScreen's four pulsing category squares — framed by a quiet eyebrow
-// and the new day's date in the wordmark serif — so the turnover reads as a deliberate
-// "new day" beat in the same visual language, not a separate screen. App owns the timing:
-// `active` true → fade in + hold; false → fade out, then this self-unmounts after the fade.
-export function DayTurnover({ active, date }: { active: boolean; date?: string }) {
+// board, swaps the puzzle underneath (hidden behind the opaque veil), then drops the veil
+// to reveal the fresh one. It carries the same lockup as the cold-start loader — only the
+// copy differs ("Loading new puzzle…") and it shows the *new* day's date + number — so the
+// turnover reads as a deliberate "new day" beat in the same visual language. The board
+// ghosts through during the fade in/out. App owns the timing: `active` true → fade in +
+// hold; false → fade out, then this self-unmounts after the fade. `number` is set once the
+// new puzzle has loaded (mid-veil), so the pill resolves in before the reveal.
+export function DayTurnover({
+  active,
+  date,
+  number,
+}: {
+  active: boolean;
+  date?: string;
+  number?: number;
+}) {
   const [mounted, setMounted] = useState(active);
   const [shown, setShown] = useState(false);
   useEffect(() => {
@@ -84,14 +172,6 @@ export function DayTurnover({ active, date }: { active: boolean; date?: string }
 
   if (!mounted) return null;
 
-  const label = date
-    ? new Date(`${date}T00:00:00`).toLocaleDateString("en-US", {
-        weekday: "long",
-        month: "long",
-        day: "numeric",
-      })
-    : "";
-
   return (
     <div
       aria-hidden
@@ -102,24 +182,15 @@ export function DayTurnover({ active, date }: { active: boolean; date?: string }
     >
       {/* faint center glow so the flat black has depth behind the lockup */}
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(58%_46%_at_50%_42%,rgba(255,255,255,0.05),transparent_72%)]" />
-      <div className="relative flex animate-dayrise flex-col items-center gap-5">
-        <span className="font-sans text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-500">
-          A new puzzle
-        </span>
-        <div className="flex gap-2.5">
-          {LEVELS.map((l, i) => (
-            <span
-              key={l.key}
-              className="h-6 w-6 animate-qpulse rounded"
-              style={{ background: l.color, animationDelay: `${i * 0.16}s` }}
-            />
-          ))}
-        </div>
-        {label && (
-          <span className="font-display text-[15px] leading-none text-zinc-400">
-            {label}
-          </span>
-        )}
+      {/* the lockup eases up + unblurs (animate-dayrise); delayBase holds the mark a
+          beat so the rise reads before the squares start bouncing */}
+      <div className="animate-dayrise">
+        <LoadLockup
+          caption="Loading new puzzle"
+          date={date}
+          number={number}
+          delayBase={0.2}
+        />
       </div>
     </div>
   );

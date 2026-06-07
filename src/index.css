@@ -49,6 +49,12 @@
   /* Midnight day-rollover veil: the centered "new puzzle" lockup eases up and unblurs
      as the overlay fades the old board out and the fresh one in. */
   --animate-dayrise: dayrise 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  /* Loading-screen hero mark (redesign "Loading Animations"): the four category
+     squares do a squash-and-stretch drop that whips a full turn mid-air and lands
+     square. Direction alternates per square (cw/ccw) for a little chaos; the squares
+     stay close to square through the bounce. Delay is staggered inline per square. */
+  --animate-bounce-spin-cw: bounceSpinCw 1.3s cubic-bezier(0.3, 0.05, 0.4, 1) infinite;
+  --animate-bounce-spin-ccw: bounceSpinCcw 1.3s cubic-bezier(0.3, 0.05, 0.4, 1) infinite;
 
   @keyframes pickRing {
     0%,
@@ -167,6 +173,61 @@
       opacity: 1;
       transform: none;
       filter: blur(0);
+    }
+  }
+  /* Bounce + spin (cw / ccw mirror). Squash on contact (12%), launch with a 200°
+     whip (34%), complete the turn on the way down (52%), then two tiny settle hops
+     (66% 1px, 92% 4px) before resting. Stretch is kept slight so squares read square. */
+  @keyframes bounceSpinCw {
+    0% {
+      transform: translateY(0) scale(1, 1) rotate(0);
+    }
+    12% {
+      transform: translateY(0) scale(1.07, 0.94) rotate(0);
+    }
+    34% {
+      transform: translateY(-30px) scale(0.96, 1.05) rotate(200deg);
+    }
+    52% {
+      transform: translateY(0) scale(1.08, 0.93) rotate(360deg);
+    }
+    66% {
+      transform: translateY(-1px) scale(0.98, 1.02) rotate(360deg);
+    }
+    80% {
+      transform: translateY(0) scale(1.03, 0.97) rotate(360deg);
+    }
+    92% {
+      transform: translateY(-4px) scale(1, 1) rotate(360deg);
+    }
+    100% {
+      transform: translateY(0) scale(1, 1) rotate(360deg);
+    }
+  }
+  @keyframes bounceSpinCcw {
+    0% {
+      transform: translateY(0) scale(1, 1) rotate(0);
+    }
+    12% {
+      transform: translateY(0) scale(1.07, 0.94) rotate(0);
+    }
+    34% {
+      transform: translateY(-30px) scale(0.96, 1.05) rotate(-200deg);
+    }
+    52% {
+      transform: translateY(0) scale(1.08, 0.93) rotate(-360deg);
+    }
+    66% {
+      transform: translateY(-1px) scale(0.98, 1.02) rotate(-360deg);
+    }
+    80% {
+      transform: translateY(0) scale(1.03, 0.97) rotate(-360deg);
+    }
+    92% {
+      transform: translateY(-4px) scale(1, 1) rotate(-360deg);
+    }
+    100% {
+      transform: translateY(0) scale(1, 1) rotate(-360deg);
     }
   }
 }

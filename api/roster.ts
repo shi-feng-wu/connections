@@ -22,9 +22,10 @@ import { isLocalDev, verifyAuth } from './_session.js';
 // blip, a membership check, or the finished-gate that permanently blocks re-adds): they
 // played, even finished, yet never appeared. Unioning scores recovers every finisher.
 //
-// Guild rooms only in practice: the client only calls this with a guildId, and
-// live_cards.players is written only for g: scopes. Read-gated by the signed auth ticket
-// (same as /api/start); the data is the public "who's playing" card content.
+// Works for any room scope: a guild (g:) or a DM/group (c:). live_cards.players exists only
+// for g: scopes (the bot posts those), so a DM's identity comes from scores alone — which is
+// fine, since assembleRoster unions both sources. Read-gated by the signed auth ticket (same
+// as /api/start); the data is the public "who's playing" card content.
 
 type ScoreRow = {
   user_id: string;
@@ -169,7 +170,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   // card openers in this channel (first-timers with no prior score, and "opened not finished").
   let memberQ = db.from('scores').select('user_id, name, avatar, created_at').eq('scope_id', scope);
   let cardQ = db.from('live_cards').select('players').eq('scope_id', scope).eq('puzzle_date', date);
-  if (wantChannel && channelId) {
+  // Channel narrowing only applies to a guild scope, where one guild spans many channels. A
+  // c: DM/group scope IS a single channel, so narrowing is redundant and would drop legacy
+  // rows written before channel_id existed — skip it (guildId is null for a DM/group).
+  if (wantChannel && channelId && guildId) {
     memberQ = memberQ.eq('channel_id', channelId);
     cardQ = cardQ.eq('channel_id', channelId);
   }

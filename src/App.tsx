@@ -256,7 +256,10 @@ export function App({
     const me = meRef.current.id;
     const monthStart = currentSeasonStart();
     // Channel view narrows to this channel; server view (or no channel) spans the guild.
-    const chan = scopeModeRef.current === "channel" ? channelIdRef.current : null;
+    // No guild → a DM/group is a single-channel scope with no Channel/Server toggle, so
+    // never narrow (it's redundant and would drop legacy rows with a null channel_id).
+    const chan =
+      guildIdRef.current && scopeModeRef.current === "channel" ? channelIdRef.current : null;
     const [sBoard, sSelf, aBoard, aSelf] = await Promise.all([
       roomBoard(scopeId, monthStart, 50, chan),
       roomSelf(scopeId, monthStart, me, chan),
@@ -268,10 +271,11 @@ export function App({
   }
 
   // Pull the room's persistent roster (joiners who came/went, replayed from their
-  // committed guesses) and merge it under live presence. Guild daily only — it self-gates
-  // and the server returns [] otherwise. Best-effort: a failure keeps the last roster.
+  // committed guesses) and merge it under live presence. Any room-scoped daily — a guild
+  // (g:) or a DM/group (c:); it self-gates on the scope and the server returns [] otherwise.
+  // Best-effort: a failure keeps the last roster.
   async function fetchServerRoster(): Promise<void> {
-    if (!isDailyRef.current || !authTicketRef.current || !guildIdRef.current) return;
+    if (!isDailyRef.current || !authTicketRef.current || !scopeRef.current) return;
     try {
       const r = await fetch("/api/roster", {
         method: "POST",
@@ -686,8 +690,8 @@ export function App({
   }, [scopeMode]);
 
   // Keep the persistent room roster fresh while playing: new joiners, and the progress of
-  // players who are offline (not in live presence). Guild daily only — fetchServerRoster
-  // self-gates; cleared on unmount. Live players already update via presence.
+  // players who are offline (not in live presence). Any room-scoped daily (guild or DM) —
+  // fetchServerRoster self-gates; cleared on unmount. Live players already update via presence.
   useEffect(() => {
     if (!isEmbedded) return;
     const id = setInterval(() => {

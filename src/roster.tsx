@@ -161,7 +161,7 @@ function Avatar({
   return (
     <div
       className={
-        "relative grid h-6.5 w-6.5 flex-none place-items-center rounded-full text-[11px] font-extrabold text-[#0c0c0c] select-none min-[820px]:h-8 min-[820px]:w-8 min-[820px]:text-[13px]" +
+        "relative grid h-6.5 w-6.5 flex-none place-items-center rounded-full text-[11px] font-extrabold text-[#0c0c0c] select-none min-[900px]:h-8 min-[900px]:w-8 min-[900px]:text-[13px]" +
         ring
       }
       style={{ background: colorFor(p.userId) }}
@@ -185,19 +185,19 @@ function Avatar({
 function MiniBoard({ p, flash }: { p: PlayerState; flash: boolean }) {
   const solved = p.solvedLevels;
   return (
-    <div className="flex w-5.5 flex-none flex-col gap-[2px] min-[820px]:w-7.5">
+    <div className="flex w-5.5 flex-none flex-col gap-[2px] min-[900px]:w-7.5">
       {solved.map((lvl, i) => (
         <div
           key={`s${lvl}`}
           className={
-            "h-[5px] overflow-hidden rounded-[2px] min-[820px]:h-1.5 " +
+            "h-[5px] overflow-hidden rounded-[2px] min-[900px]:h-1.5 " +
             (flash && i === solved.length - 1 ? "animate-solve-flash" : "")
           }
           style={{ background: LEVELS[lvl].color }}
         />
       ))}
       {Array.from({ length: 4 - solved.length }, (_, r) => (
-        <div className="flex h-[5px] gap-[1.5px] min-[820px]:h-1.5" key={`e${r}`}>
+        <div className="flex h-[5px] gap-[1.5px] min-[900px]:h-1.5" key={`e${r}`}>
           {[0, 1, 2, 3].map((c) => (
             <div className="flex-1 rounded-[1px] bg-zinc-700" key={c} />
           ))}
@@ -226,14 +226,14 @@ function Mistakes({ p }: { p: PlayerState }) {
 // ml-auto pins the time to the box's right edge, leaving the status icon at the
 // left — anchored next to the mistake dots rather than floating with the time.
 const TIME =
-  "ml-auto text-[12px] tabular-nums tracking-[0.01em] min-[820px]:text-[13px]";
+  "ml-auto text-[12px] tabular-nums tracking-[0.01em] min-[900px]:text-[13px]";
 
 function Status({ p, now }: { p: PlayerState; now: number }) {
   const time = fmtElapsed(p, now);
   // Fixed width (not min-w) sized for the widest case — status icon + H:MM:SS —
   // so the time column never changes size as the elapsed time grows past 1h.
   const box =
-    "flex w-[66px] flex-none items-center gap-1.5 min-[820px]:w-[74px]";
+    "flex w-[66px] flex-none items-center gap-1.5 min-[900px]:w-[74px]";
   if (p.done === "lost")
     return (
       <div className={box}>
@@ -264,14 +264,14 @@ function Status({ p, now }: { p: PlayerState; now: number }) {
 function Rank({ rank }: { rank: number }) {
   if (rank === 1)
     return (
-      <div className="mr-1 w-5.5 flex-none text-center text-[13px] tabular-nums min-[820px]:-mr-0.75">
+      <div className="mr-1 w-5.5 flex-none text-center text-[13px] tabular-nums min-[900px]:-mr-0.75">
         <span className="inline-grid h-5 w-5 place-items-center rounded-md bg-zinc-100 text-[12px] font-extrabold text-zinc-900">
           1
         </span>
       </div>
     );
   return (
-    <div className="mr-1 w-5.5 flex-none text-center text-[13px] tabular-nums text-zinc-500 min-[820px]:-mr-0.75">
+    <div className="mr-1 w-5.5 flex-none text-center text-[13px] tabular-nums text-zinc-500 min-[900px]:-mr-0.75">
       {rank}
     </div>
   );
@@ -301,7 +301,7 @@ function RosterRow({
       ref={rowRef}
       data-flip-row={p.userId}
       className={
-        "relative flex flex-none items-center gap-2 rounded-[9px] px-2.5 py-1.5 min-[820px]:gap-2.75 min-[820px]:px-3 min-[820px]:py-2.25 " +
+        "relative flex flex-none items-center gap-2 rounded-[9px] px-2.5 py-1.5 min-[900px]:gap-2.75 min-[900px]:px-3 min-[900px]:py-2.25 " +
         (you ? "bg-zinc-100/10" : "bg-zinc-900/60")
       }
     >
@@ -532,7 +532,7 @@ export function Roster({
           // Own scroller (matches the standings list): flex-1 + min-h-0 lets it fill the
           // rail and overflow-y-auto scrolls internally instead of spilling past the board
           // on desktop when the live room is long (the rail is a fixed-height panel there).
-          className="list-fade flex min-h-0 flex-1 animate-tab-in flex-col gap-1.25 overflow-y-auto scrollbar-thin pb-6 min-[820px]:gap-1.5"
+          className="list-fade flex min-h-0 flex-1 animate-tab-in flex-col gap-1.25 overflow-y-auto scrollbar-thin pb-6 min-[900px]:gap-1.5"
         >
           {sorted.length ? (
             sorted.map((p, i) => {

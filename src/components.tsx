@@ -282,8 +282,10 @@ function Header({
   );
 }
 
-// Responsive game shell. Mobile: a single column — header, board + footer, then the
-// players section (Live / Season / All-time tabs + list). Desktop (≥820px): a 50/50
+// Responsive game shell. Mobile / tablet: a single column — header, board + footer,
+// then the players section (Live / Season / All-time tabs + list) — capped at
+// max-w-480 and centered, so the in-between (tablet) band reads as a roomy phone
+// rather than stretching the board wide. Desktop (≥900px): a 50/50
 // split — board + footer on the left, and a right rail (header, tabs, list) that
 // absolute-fills the column so it matches the board's height and scrolls its list
 // rather than driving the layout taller. Season and All-time share one standings
@@ -301,7 +303,9 @@ function Header({
 // *unscaled* layout box (CSS transforms don't affect them), so measuring the very
 // element we scale is both correct and loop-free — and a ResizeObserver re-measures
 // when the board's height changes (rows collapsing into solved bars).
-const DESKTOP_BP = 820;
+// Keep in sync with the `min-[900px]:` class literals (components/roster/season) —
+// this is the JS mirror of the same wide-layout breakpoint.
+const DESKTOP_BP = 900;
 const MAX_SCALE = 1.5;
 // Only let the board grow into this fraction of the viewport, leaving the rest as
 // breathing room — ~12.5% on every side at 0.75. A fraction (not a fixed px margin)
@@ -423,13 +427,13 @@ export function GameView({
       // stays centered (matching #app's auto-margin centering). scale(1) is omitted
       // so mobile never gets a needless containing block from the transform.
       style={scale !== 1 ? { transform: `scale(${scale})` } : undefined}
-      className="flex min-h-[calc(100dvh-3.5rem)] w-full animate-fade-in flex-col gap-3 min-[820px]:mx-auto min-[820px]:min-h-0 min-[820px]:max-w-[860px] min-[820px]:flex-row min-[820px]:items-stretch min-[820px]:gap-6"
+      className="mx-auto flex min-h-[calc(100dvh-3.5rem)] w-full max-w-[480px] animate-fade-in flex-col gap-3 min-[900px]:min-h-0 min-[900px]:max-w-[860px] min-[900px]:flex-row min-[900px]:items-stretch min-[900px]:gap-6"
     >
       {/* main column — board + footer. No header on mobile: Discord shows its own
           activity header there, so we hide ours and keep some top padding (on top of
           #app's pt-8) to clear it. The header sits atop the players rail on desktop
           instead (below). */}
-      <div className="flex w-full min-w-0 flex-col gap-3 pt-7 min-[820px]:flex-1 min-[820px]:pt-0">
+      <div className="flex w-full min-w-0 flex-col gap-3 pt-7 min-[900px]:flex-1 min-[900px]:pt-0">
         <Board
           key={gameKey}
           game={game}
@@ -449,8 +453,8 @@ export function GameView({
       {/* players column — mobile flex-grows into the freed vertical space (list fills +
           scrolls internally); desktop rail absolute-fills to match the board's height */}
       <div className="relative flex w-full min-w-0 flex-1 flex-col min-h-0">
-        <div className="flex min-h-0 flex-1 flex-col gap-2.5 min-[820px]:absolute min-[820px]:inset-0">
-          {header("hidden min-[820px]:flex")}
+        <div className="flex min-h-0 flex-1 flex-col gap-2.5 min-[900px]:absolute min-[900px]:inset-0">
+          {header("hidden min-[900px]:flex")}
           <Roster
             players={players}
             selfId={selfId}

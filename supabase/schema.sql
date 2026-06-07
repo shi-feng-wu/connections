@@ -1,8 +1,8 @@
 -- Connections leaderboard schema. Idempotent; re-run after scoring changes via
 -- Supabase SQL Editor.
--- Presence needs no table (Realtime Presence is built in). This table backs the
--- per-puzzle board and the season board, scoped to a "room": the Discord guild,
--- or the channel for a DM/group chat (no guild).
+-- The Live-tab roster is poll-based (see the `presence` table below), not Realtime
+-- Presence. This table backs the per-puzzle board and the season board, scoped to a
+-- "room": the Discord guild, or the channel for a DM/group chat (no guild).
 
 create table if not exists public.scores (
   id          bigint generated always as identity primary key,
@@ -554,6 +554,23 @@ create table if not exists public.puzzles (
 alter table public.puzzles enable row level security;
 
 alter table public.progress enable row level security;
+
+-- Live "who's in the Activity right now" heartbeat, one row per player per day. The
+-- Live-tab roster is poll-based (NOT Supabase Realtime presence — that froze when the
+-- Activity backgrounded and the socket silently died): each client polls /api/roster every
+-- few seconds, and that same call upserts the caller's last_seen here. assembleRoster then
+-- marks a player "online" (the green ring) when their last_seen is within the heartbeat TTL.
+-- A backgrounded client just stops polling, so it ages out of "online" on its own — there's
+-- no long-lived socket to wedge. Written only by the service role (/api/roster); RLS with no
+-- policy denies the anon key entirely (same posture as progress/live_cards).
+create table if not exists public.presence (
+  user_id     text        not null,
+  puzzle_date date        not null,
+  last_seen   timestamptz not null default now(),
+  primary key (user_id, puzzle_date)
+);
+
+alter table public.presence enable row level security;
 
 -- "Who's playing today" card, one row per room per puzzle. The card is a BOT message in
 -- the channel, posted as a reply to a /connections launch (so it's attributed to the

@@ -17,7 +17,7 @@ import { PipThumbnail } from "./pip";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import type { Standings } from "./season";
 import { Roster } from "./roster";
-import type { PlayerState } from "./realtime";
+import type { PlayerState } from "./player";
 
 const puzzle: Puzzle = {
   id: 123,

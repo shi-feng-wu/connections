@@ -12,12 +12,7 @@ import {
   roomSelf,
   submitScore,
 } from "./leaderboard";
-import {
-  joinRoom,
-  setRealtimeAuth,
-  updatePresence,
-  type PlayerState,
-} from "./realtime";
+import type { PlayerState } from "./player";
 import { type PresenceInput, presenceSignature, setPresence } from "./presence";
 import { canonicalScope } from "./scope";
 import type { Standings } from "./season";
@@ -133,16 +128,13 @@ export function App({
   const scopeRef = useRef<string | null>(null);
   // Only the daily counts toward the leaderboard. Enforced server-side too.
   const isDailyRef = useRef(true);
-  // Access token proves identity to /api/score & /api/realtime-token (they need
+  // Access token proves identity to /api/score & /api/join (they need
   // live Discord data); the signed auth ticket from /api/token gates the cheap
   // reads (/api/puzzle, /api/start) without a Discord round-trip each call. Signed
   // session from /api/start anchors solve timing server-side.
   const accessTokenRef = useRef<string | null>(null);
   const authTicketRef = useRef<string | null>(null);
   const sessionRef = useRef<string | null>(null);
-  // True once a Realtime JWT is held, so presence joins the private channel.
-  const realtimeAuthedRef = useRef(false);
-  const joinedRef = useRef(false);
   const didInit = useRef(false);
   const loadSeq = useRef(0);
   // Trailing-debounce for the live card refresh (see refreshCard): collapses a burst
@@ -162,17 +154,10 @@ export function App({
   // (first-ever open, used for scoring) — which on a reopen is hours stale.
   const joinedAtRef = useRef<number>(Date.now());
 
-  const [players, setPlayers] = useState<PlayerState[]>([]);
-  // Live presence accumulates: once a player has been seen this session they stay in the
-  // roster even after they leave (state frozen at last-seen). presentIds marks who's
-  // currently in the Activity, which drives the green "online" ring. seenRef is the
-  // keep-everyone store the displayed list is rebuilt from on each sync.
-  const seenRef = useRef<Map<string, PlayerState>>(new Map());
-  const [presentIds, setPresentIds] = useState<Set<string>>(new Set());
-  // The room's persistent roster from /api/roster: everyone who joined this guild's daily
-  // today (even those who left before you opened), state replayed from committed guesses.
-  // Seeds the roster *under* live presence — presence overlays the live ones and adds the
-  // green ring. Empty for non-guild contexts, where presence is the only source.
+  // The room's roster from /api/roster (polled every 5s): everyone who played this room's daily
+  // today, replayed from committed guesses, each carrying the green "online" ring when their
+  // heartbeat is live. Your own row is overlaid from local state (see the `roster` memo) so it
+  // never lags the poll. Empty for non-guild / non-daily contexts, where the roster is just you.
   const [serverRoster, setServerRoster] = useState<PlayerState[]>([]);
   const [self, setSelf] = useState<PlayerState | null>(null);
   // End-screen room leaderboard, two windows; fetched after a finish posts and on load.
@@ -219,17 +204,9 @@ export function App({
     };
   }
 
-  // Presence sync → accumulate. Every player ever seen this session stays in `players`
-  // (left players frozen at their last state); presentIds is just who's here right now, so
-  // a departed player keeps their row but loses the green ring.
-  function handlePresenceSync(current: PlayerState[]): void {
-    for (const p of current) seenRef.current.set(p.userId, p);
-    setPlayers([...seenRef.current.values()]);
-    setPresentIds(new Set(current.map((p) => p.userId)));
-  }
-
-  // Board pushes its snapshot on each change; wrap with identity + timestamps,
-  // broadcast to the room.
+  // Board pushes its snapshot on each change; wrap with identity + timestamps and update the
+  // local "self" row (which overlays the polled roster, so your own progress is instant) plus
+  // Discord Rich Presence.
   function onPresence(snap: BoardSnapshot): void {
     const g = gameRef.current;
     if (!g) return;
@@ -246,7 +223,6 @@ export function App({
       finishedAt: snap.done && g.durationMs != null ? g.startedAt + g.durationMs : null,
     };
     setSelf(player);
-    void updatePresence(player);
     pushPresence();
   }
 
@@ -296,10 +272,10 @@ export function App({
     setAllTime({ board: aBoard, self: aSelf });
   }
 
-  // Pull the room's persistent roster (joiners who came/went, replayed from their
-  // committed guesses) and merge it under live presence. Any room-scoped daily — a guild
-  // (g:) or a DM/group (c:); it self-gates on the scope and the server returns [] otherwise.
-  // Best-effort: a failure keeps the last roster.
+  // Pull the room's roster (everyone who played today, replayed from their committed guesses,
+  // with the live "online" ring) — the polled source of truth for the Live tab. Any room-scoped
+  // daily — a guild (g:) or a DM/group (c:); it self-gates on the scope and the server returns []
+  // otherwise. Best-effort: a failure keeps the last roster.
   async function fetchServerRoster(): Promise<void> {
     if (!isDailyRef.current || !authTicketRef.current || !scopeRef.current) return;
     try {
@@ -318,32 +294,6 @@ export function App({
     } catch {
       /* keep the last roster */
     }
-  }
-
-  // Mint (or re-mint) the Realtime JWT and authorize the presence client so it can join the
-  // private channel. Used at handshake and again as the room's `reauth` callback — a long
-  // session whose token expires re-mints here and stays private instead of dropping to public.
-  // Returns true once a token is held; false (no token / network error) keeps the public fallback.
-  async function mintRealtimeToken(): Promise<boolean> {
-    const accessToken = accessTokenRef.current;
-    if (!accessToken) return false;
-    try {
-      const r = await fetch("/api/realtime-token", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // Token scoped to this room only (see realtime.messages RLS).
-        body: JSON.stringify({ accessToken, room: roomRef.current }),
-      });
-      const token = r.ok ? ((await r.json()) as { token?: string }).token : null;
-      if (token) {
-        setRealtimeAuth(token);
-        realtimeAuthedRef.current = true;
-        return true;
-      }
-    } catch {
-      /* presence stays on the public fallback channel */
-    }
-    return false;
   }
 
   function onFinish(): void {
@@ -493,10 +443,10 @@ export function App({
 
   async function loadPuzzle(opts: { date?: string; random?: boolean } = {}): Promise<void> {
     setPhase("loading");
-    // New board → let the first presence push through (a different puzzle/status).
+    // New board → let the first Rich Presence push through (a different puzzle/status).
     lastPresenceSig.current = "";
     isDailyRef.current = !opts.random && !opts.date;
-    // The persistent room roster is daily-scoped; practice/by-date shows presence only.
+    // The room roster is daily-scoped; practice/by-date shows only you (no poll).
     if (!isDailyRef.current) setServerRoster([]);
     const qs = new URLSearchParams();
     if (opts.date) qs.set("date", opts.date);
@@ -522,20 +472,7 @@ export function App({
       // Cache the daily's number so a reopen later today can show it on the loader.
       if (isDailyRef.current) rememberPuzzle(puzzle.date, puzzle.id);
 
-      const s = selfState();
-      setSelf(s);
-      if (!joinedRef.current) {
-        joinRoom(roomRef.current, handlePresenceSync, {
-          private: realtimeAuthedRef.current,
-          // getSelf lets the supervisor's rejoin/heartbeat broadcast CURRENT progress, not a
-          // stale snapshot; reauth re-mints the JWT so a token expiry recovers private (above).
-          getSelf: selfState,
-          reauth: mintRealtimeToken,
-        });
-        joinedRef.current = true;
-      } else {
-        await updatePresence(s);
-      }
+      setSelf(selfState());
       setGameKey(`${puzzle.id}-${loadSeq.current++}`);
       setPhase("ready");
       pushPresence();
@@ -638,7 +575,7 @@ export function App({
         auth?: string;
       };
       if (!access_token || !auth) return false;
-      // access_token: live identity for /api/score & /api/realtime-token. auth: the
+      // access_token: live identity for /api/score & /api/join. auth: the
       // signed ticket gating the cheap reads. The server resolves the real user
       // from the token, so the client can't claim to be someone else.
       accessTokenRef.current = access_token;
@@ -663,10 +600,6 @@ export function App({
       } catch (e) {
         console.warn("Discord authenticate failed:", e);
       }
-
-      // Realtime JWT so presence joins the private channel (only verified users
-      // can broadcast). Falls back to a public channel if unavailable.
-      await mintRealtimeToken();
 
       // Add this player to the channel's "who's playing today" card (append-only; the
       // server edits the room's live card — the launcher's /connections message — via the
@@ -724,29 +657,33 @@ export function App({
     void refreshLeaderboard();
   }, [scopeMode]);
 
-  // Keep the persistent room roster fresh while playing: new joiners, and the progress of
-  // players who are offline (not in live presence). Any room-scoped daily (guild or DM) —
-  // fetchServerRoster self-gates; cleared on unmount. Live players already update via presence.
+  // The roster is poll-driven (no Realtime): refetch /api/roster every 5s so other players'
+  // progress and the green "online" ring stay live, and that same call heartbeats us as present.
+  // Your own row is instant (local overlay in the `roster` memo); only others lag up to one
+  // interval. Also the daily-reset fallback: a client left open across midnight ET is pinned to
+  // the old day — the precise timer below swaps at the exact reset, but a throttled/backgrounded
+  // tab can miss it, so re-check here too. Once the new puzzle is out the old one is closed (an
+  // unfinished old board ends unscored; a post-midnight finish is rejected by the
+  // session.date !== todayET() gate in api/score.ts).
   useEffect(() => {
     if (!isEmbedded) return;
     const id = setInterval(() => {
-      // Daily reset (fallback): a client left open across midnight ET is pinned to the old
-      // day. The precise timer below swaps at the exact reset, but backgrounded tabs throttle
-      // it — so the poll re-checks every 30s and swaps too, including mid-game. Once the new
-      // puzzle is out the old one is closed, so no one keeps playing it: an unfinished old
-      // board just ends unscored, and a finish after midnight is already rejected server-side
-      // by the session.date !== todayET() gate in api/score.ts.
       const g = gameRef.current;
       if (isDailyRef.current && g && etDate() !== g.puzzle.date) {
         void swapToNewDay();
         return;
       }
       void fetchServerRoster();
-      // Keep the season/all-time boards live too — a steady poll catches scores from
-      // players we never saw in presence (joined + left between syncs). Near-real-time
-      // updates ride on the presence-driven refresh below; this is the safety net.
-      void refreshLeaderboard();
-    }, 30_000);
+    }, 5_000);
+    return () => clearInterval(id);
+  }, [isEmbedded]);
+
+  // The season/all-time boards move only when someone finishes, so a slow 30s poll is plenty —
+  // a fresh finish already fires a targeted refresh (the effect below, and onFinish for your
+  // own). This is just the safety net for finishers we never catch mid-game.
+  useEffect(() => {
+    if (!isEmbedded) return;
+    const id = setInterval(() => void refreshLeaderboard(), 30_000);
     return () => clearInterval(id);
   }, [isEmbedded]);
 
@@ -770,21 +707,17 @@ export function App({
     return () => window.clearTimeout(timer);
   }, [isEmbedded]);
 
-  // Everyone in the room with own latest snapshot overlaid (presence sync can
-  // lag own actions).
+  // The polled roster with your own local state overlaid, so your row never lags the 5s poll.
   const roster = useMemo(() => {
-    // Persistent joiners form the base; live presence overlays the ones currently here
-    // (fresher state), and your own local state wins for you.
     const byId = new Map<string, PlayerState>();
     for (const p of serverRoster) byId.set(p.userId, p);
-    for (const p of players) byId.set(p.userId, p);
     if (self) byId.set(self.userId, self);
-    // Tag presence: you're always here; everyone else is online while in the live set.
+    // You're always online while playing; everyone else's ring comes from their server heartbeat.
     return [...byId.values()].map((p) => ({
       ...p,
-      online: p.userId === meRef.current.id || presentIds.has(p.userId),
+      online: p.userId === meRef.current.id ? true : (p.online ?? false),
     }));
-  }, [serverRoster, players, self, presentIds]);
+  }, [serverRoster, self]);
 
   // Live leaderboard, the near-real-time path: when another player wraps the daily their
   // season/all-time totals change server-side a beat later (once their score write lands),

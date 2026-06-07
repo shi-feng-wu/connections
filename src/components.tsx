@@ -3,7 +3,7 @@ import iconUrl from "./assets/connections-nyt.png";
 import { Board, type BoardSnapshot } from "./board";
 import { HoverButton } from "./hoverbutton";
 import { LEVELS, type Game, type Puzzle } from "./game";
-import type { PlayerState } from "./realtime";
+import type { PlayerState } from "./player";
 import { Roster, type RosterScope, type RosterView } from "./roster";
 import { type Standings } from "./season";
 

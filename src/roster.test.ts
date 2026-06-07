@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { colorFor, initials, rankOf, sortRoster } from "./roster";
-import type { PlayerState } from "./realtime";
+import type { PlayerState } from "./player";
 
 const NOW = 1_000_000;
 

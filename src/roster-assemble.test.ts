@@ -137,4 +137,29 @@ describe("assembleRoster", () => {
     expect(out[0]).toMatchObject({ done: "won", solvedCount: 4 });
     expect(elapsed(out[0])).toBe(70_000);
   });
+
+  it("flags a player online only when their heartbeat is within the TTL", () => {
+    const start = NOW - 30_000;
+    const seen = new Map<string, number>([
+      ["A", NOW - 5_000], // fresh beat → online
+      ["B", NOW - 60_000], // stale beat → offline
+    ]);
+    const out = assembleRoster(
+      [cp("A")],
+      [score({ user_id: "B", duration_ms: 50_000 })],
+      [prog("A", [group(0)], start)],
+      puzzle,
+      NOW,
+      seen,
+    );
+    const byId = Object.fromEntries(out.map((p) => [p.userId, p]));
+    expect(byId.A.online).toBe(true);
+    expect(byId.B.online).toBe(false);
+  });
+
+  it("defaults online to false when no heartbeat map is passed", () => {
+    const start = NOW - 30_000;
+    const out = assembleRoster([cp("A")], [], [prog("A", [group(0)], start)], puzzle, NOW);
+    expect(out[0].online).toBe(false);
+  });
 });

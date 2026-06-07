@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, X } from "lucide-react";
 import { LEVELS, MAX_MISTAKES } from "./game";
-import type { PlayerState } from "./realtime";
+import type { PlayerState } from "./player";
 import { HoverButton } from "./hoverbutton";
 import { FlipList } from "./fliplist";
 import { LedgerBody, StandingsEmpty, type Standings } from "./season";

@@ -51,12 +51,19 @@ type RosterPlayer = {
   done: 'won' | 'lost' | null;
   startedAt: number;
   finishedAt: number | null;
+  // True when this player's heartbeat (last_seen) is within the TTL — drives the green ring.
+  online: boolean;
 };
+
+// A player is "online" (green ring) when their /api/roster heartbeat is within this window.
+// Clients poll ~5s; the TTL spans a missed beat so a brief hiccup doesn't blink the ring,
+// while a backgrounded client (which simply stops polling) ages out of it on its own.
+const ROSTER_ONLINE_TTL_MS = 15_000;
 
 // A finished roster row built from a scores row, for a player whose progress row is
 // missing/unparseable (or who finished without one). A scores row exists only for a
 // finished game, so this is always done.
-function synthFromScore(p: CardPlayer, s: ScoreRow, now: number): RosterPlayer {
+function synthFromScore(p: CardPlayer, s: ScoreRow, now: number, online: boolean): RosterPlayer {
   const dur = typeof s.duration_ms === 'number' && s.duration_ms > 0 ? s.duration_ms : 0;
   const count = Math.max(0, Math.min(4, s.groups_solved ?? 0));
   return {
@@ -75,6 +82,7 @@ function synthFromScore(p: CardPlayer, s: ScoreRow, now: number): RosterPlayer {
     // startedAt must be non-zero (the `|| now` guard), so anchor both at `now`.
     startedAt: now,
     finishedAt: now + dur,
+    online,
   };
 }
 
@@ -90,7 +98,12 @@ export function assembleRoster(
   progressRows: ProgressRow[],
   puzzle: Puzzle | null,
   now: number,
+  lastSeen?: Map<string, number>,
+  onlineTtlMs = ROSTER_ONLINE_TTL_MS,
 ): RosterPlayer[] {
+  // Green-ring test: heartbeat within the TTL. No map (older callers / tests) → all offline.
+  const isOnline = (id: string): boolean =>
+    !!lastSeen && now - (lastSeen.get(id) ?? 0) < onlineTtlMs;
   const ids = new Map<string, CardPlayer>();
   for (const p of joined) ids.set(p.id, p); // live_cards wins on collision (join-time identity)
   for (const s of scoreRows) if (!ids.has(s.user_id)) ids.set(s.user_id, { id: s.user_id, name: s.name, avatar: s.avatar });
@@ -103,7 +116,7 @@ export function assembleRoster(
   if (!puzzle) {
     return [...ids.values()].flatMap((p) => {
       const s = scoreById.get(p.id);
-      return s ? [synthFromScore(p, s, now)] : [];
+      return s ? [synthFromScore(p, s, now, isOnline(p.id))] : [];
     });
   }
 
@@ -128,12 +141,13 @@ export function assembleRoster(
           done,
           startedAt,
           finishedAt: Number.isNaN(finishedAt) ? null : finishedAt,
+          online: isOnline(p.id),
         },
       ];
     }
     // No usable progress: show them if they finished (scores), else drop (joined, not played).
     const s = scoreById.get(p.id);
-    return s ? [synthFromScore(p, s, now)] : [];
+    return s ? [synthFromScore(p, s, now, isOnline(p.id))] : [];
   });
 }
 
@@ -148,6 +162,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     res.status(401).json({ error: 'unauthenticated' });
     return;
   }
+  const uid = auth?.uid ?? null;
 
   const guildId = typeof req.body?.guildId === 'string' ? req.body.guildId : null;
   const channelId = typeof req.body?.channelId === 'string' ? req.body.channelId : null;
@@ -198,9 +213,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  // Today's finishes + committed progress for the member/opener set — ANY scope, so a member's
-  // single daily game follows them into every room they belong to.
-  const [puzzle, { data: scoreData }, { data: progData }] = await Promise.all([
+  // Stamp the caller's heartbeat (they're polling, so they're here right now) concurrently with
+  // the reads — .then() fires the lazy query now; awaited below so the write lands before a
+  // serverless instance can freeze after the response. Soft: a failed beat just costs the ring.
+  const now = Date.now();
+  const heartbeat = uid
+    ? db
+        .from('presence')
+        .upsert({ user_id: uid, puzzle_date: date, last_seen: new Date(now).toISOString() })
+        .then(
+          () => {},
+          () => {},
+        )
+    : Promise.resolve();
+
+  // Today's finishes + committed progress + live heartbeats for the member/opener set — ANY
+  // scope, so a member's single daily game follows them into every room they belong to.
+  const [puzzle, { data: scoreData }, { data: progData }, { data: seenData }] = await Promise.all([
     fetchPuzzle(date).catch(() => null),
     db
       .from('scores')
@@ -212,10 +241,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       .select('user_id, guesses, started_at, updated_at')
       .in('user_id', ids)
       .eq('puzzle_date', date),
+    db.from('presence').select('user_id, last_seen').in('user_id', ids).eq('puzzle_date', date),
   ]);
+  await heartbeat;
   const scoreRows = (scoreData as ScoreRow[] | null) ?? [];
   const progressRows = (progData as ProgressRow[] | null) ?? [];
+  // last_seen per player → the "online" set assembleRoster paints the green ring from.
+  const lastSeen = new Map<string, number>();
+  for (const r of (seenData as { user_id: string; last_seen: string }[] | null) ?? []) {
+    const t = Date.parse(r.last_seen);
+    if (!Number.isNaN(t)) lastSeen.set(r.user_id, t);
+  }
 
-  const players = assembleRoster(joined, scoreRows, progressRows, puzzle, Date.now());
+  const players = assembleRoster(joined, scoreRows, progressRows, puzzle, now, lastSeen);
   res.status(200).json({ players });
 }

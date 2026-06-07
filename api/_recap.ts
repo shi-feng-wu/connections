@@ -15,6 +15,10 @@ export type DayRow = {
   score: number;
   mistakes: number;
   solved: boolean;
+  groups_solved: number; // 0–4; count fallback for the per-row mini-board
+  // Solved groups in solve order (a level 0–3 per bar), replayed from the finisher's guesses
+  // by the recap cron (the RPC has only the count). Absent → the bars fall back to the count.
+  solvedLevels?: number[];
   duration_ms: number | null;
 };
 
@@ -69,6 +73,10 @@ export function toRecapData(opts: {
       solved: r.solved,
       score: r.score,
       mistakes: r.mistakes,
+      // Exact solve order when the cron replayed it; else the count (a win is all four even if
+      // an older row's count lagged), which the card fills easiest-first.
+      solvedLevels: r.solvedLevels,
+      groups: r.solved ? 4 : Math.max(0, Math.min(4, r.groups_solved ?? 0)),
       sec: r.duration_ms != null ? Math.round(r.duration_ms / 1000) : null,
     })),
     standings: opts.season.map((r) => ({

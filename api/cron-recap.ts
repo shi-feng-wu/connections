@@ -5,6 +5,7 @@ import { fetchChannelName, fetchGuildName } from './_discord.js';
 import { sendCard } from './_livecard.js';
 import { fetchPuzzle, todayET, yesterdayET } from './_nyt.js';
 import { type DayRow, recapPayload, recapText, type SeasonRow, toRecapData } from './_recap.js';
+import { Game, type Puzzle } from '../src/game.js';
 
 // Daily recap cron. Posts yesterday's results + season standings, with a Play button, to
 // every CHANNEL that has ever had play (recap_channels) — one card per (guild, channel),
@@ -119,12 +120,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  // Puzzle number for the embed title (best-effort; NYT fetch may fail).
+  // Yesterday's puzzle: its number for the title, and the full puzzle to replay each finisher's
+  // guesses into a solve order for the mini-board (best-effort; NYT fetch may fail → title falls
+  // back to the date, mini-boards fall back to the count). Cached, so this is one fetch.
   let puzzleNo: number | undefined;
+  let puzzle: Puzzle | null = null;
   try {
-    puzzleNo = (await fetchPuzzle(date)).id;
+    puzzle = await fetchPuzzle(date);
+    puzzleNo = puzzle.id;
   } catch {
-    /* title falls back to the date alone */
+    /* title falls back to the date alone; mini-boards to the count */
   }
 
   // One channel's recap, end to end: claim the ledger slot, build the card, post it, and
@@ -155,6 +160,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       const stat = ((stats ?? []) as { streak: number; win_pct: number; max_streak: number }[])[0];
       const dayRows = (results ?? []) as DayRow[];
       const solvedYesterday = dayRows.some((r) => r.solved);
+
+      // Mini-board solve ORDER: the recap reads counts from scores, so mirror the live card /
+      // roster and replay each finisher's committed guesses against yesterday's puzzle. One
+      // daily progress row per user (any scope), so query by (user_id, date). A finisher whose
+      // progress is gone just falls back to the count (easiest-first) — see drawMiniBars.
+      if (puzzle && dayRows.length) {
+        const { data: prog } = await db
+          .from('progress')
+          .select('user_id, guesses')
+          .in('user_id', dayRows.map((r) => r.user_id))
+          .eq('puzzle_date', date);
+        const levelsById = new Map<string, number[]>();
+        for (const row of (prog ?? []) as { user_id: string; guesses: unknown }[]) {
+          const guesses = Array.isArray(row.guesses) ? (row.guesses as string[][]) : [];
+          levelsById.set(row.user_id, Game.fromGuesses(puzzle, guesses).deducedLevels);
+        }
+        for (const r of dayRows) r.solvedLevels = levelsById.get(r.user_id);
+      }
 
       // "Streak broken!" only when an active solve streak actually ended yesterday. The streak
       // the room carried INTO yesterday is its value as of the day before — room_recap_stats

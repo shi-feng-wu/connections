@@ -564,6 +564,11 @@ export type RecapResult = {
   solved: boolean;
   score: number;
   mistakes: number;
+  // Solved groups in SOLVE ORDER (a level 0–3 per bar), like the live card / roster — the recap
+  // replays the finisher's guesses to get it. `groups` is the count-only fallback for a finisher
+  // whose progress is missing (older rows): the bars then fill easiest-first.
+  solvedLevels?: number[];
+  groups?: number;
   sec?: number | null;
 };
 // One season-standings row (from the room_board RPC), shaped for drawing.
@@ -592,10 +597,10 @@ export type RecapData = {
 const RC_PAD_X = 50;
 const RC_PAD_TOP = 46;
 const RC_PAD_BOTTOM = 46;
-const RC_RESULTS_W = 452; // left column (results) width
+const RC_RESULTS_W = 528; // left column (results) width — room for the mini-board + long names
 const RC_STAND_W = 340; // right column (season standings) width
 const RC_COL_GAP = 26;
-const RC_W = RC_PAD_X * 2 + RC_RESULTS_W + RC_COL_GAP + RC_STAND_W; // 878
+const RC_W = RC_PAD_X * 2 + RC_RESULTS_W + RC_COL_GAP + RC_STAND_W; // 994
 
 // header rhythm (baselines from canvas top)
 const RC_MARK = 9; // brand-mark square
@@ -632,6 +637,14 @@ const RC_ROW_R = 10;
 const RC_AV = 30; // recap avatar diameter
 const RC_DOT = 7;
 const RC_DOT_GAP = 5;
+// Per-row mini-board: four stacked bars mirroring the live "who's playing" card / roster — a
+// solid category bar per solved group (easiest-first, see RecapResult.groups), a dim slot for
+// the rest. Sits left of the mistake dots.
+const RC_BAR_W = 26; // mini-board width
+const RC_BAR_H = 5;
+const RC_BAR_GAP = 2.5;
+const RC_BAR_R = 2;
+const RC_BARS_H = 4 * RC_BAR_H + 3 * RC_BAR_GAP; // 27.5
 // No-finisher day: stand in this many dashed "ghost" rows where the results would be, so the
 // column reads as an empty slate (not broken). Reserved in recapLayout too, so the card grows
 // to fit them.
@@ -980,6 +993,33 @@ function drawDots(
   }
 }
 
+// Mini-board for a recap row: four stacked bars, one solid category bar per solved group in
+// `levels` (solve order, a level per bar — exactly the live card's `CAT_COLOR[order[b]]`), the
+// rest a dim empty slot. Vertically centered on `cy`, right edge at rightX.
+function drawMiniBars(
+  ctx: CanvasRenderingContext2D,
+  levels: number[],
+  rightX: number,
+  cy: number,
+): void {
+  const left = rightX - RC_BAR_W;
+  const top = cy - RC_BARS_H / 2;
+  for (let b = 0; b < 4; b++) {
+    const by = top + b * (RC_BAR_H + RC_BAR_GAP);
+    roundRect(ctx, left, by, RC_BAR_W, RC_BAR_H, RC_BAR_R);
+    if (b < levels.length) {
+      ctx.fillStyle = CAT_COLOR[levels[b]];
+      ctx.fill();
+    } else {
+      ctx.fillStyle = BAR_EMPTY;
+      ctx.fill();
+      ctx.strokeStyle = BAR_EMPTY_BORDER;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+}
+
 // A "<n> pts" cluster (big tabular number + small uppercase unit), baseline-aligned
 // and right-justified to `rightX`. Returns the cluster's left edge.
 function drawPts(
@@ -1057,6 +1097,7 @@ export async function drawRecap(
     person: { id: string; name: string },
     img: CanvasImageSource | null,
     nameRight: number,
+    nameInset = 0,
   ): { cy: number } => {
     const cy = rowTop + RC_ROW_H / 2;
     roundRect(ctx, blockX, rowTop, blockW, RC_ROW_H, RC_ROW_R);
@@ -1072,8 +1113,8 @@ export async function drawRecap(
     ctx.fillText(String(rank + 1), contentLeft + 11, cy + 1);
     // avatar (22px rank col + 11 gap, then 34px ring col)
     drawAvatar(ctx, person, img, contentLeft + 22 + 11 + 17, cy, RC_AV);
-    // name
-    const nameLeft = contentLeft + 22 + 11 + 34 + 11;
+    // name (inset past the mini-board in the results column; 0 elsewhere)
+    const nameLeft = contentLeft + 22 + 11 + 34 + 11 + nameInset;
     ctx.fillStyle = ZINC_100;
     ctx.font = `600 14.5px "Libre Franklin"`;
     ctx.textAlign = "left";
@@ -1100,6 +1141,9 @@ export async function drawRecap(
   const ptsRight = rRight - 20 - 11; // status col (20) + gap
   const timeRight = ptsRight - 56 - 11; // pts col (56) + gap
   const dotsRight = timeRight - 46 - 11; // time col (46) + gap
+  // Mini-board beside the avatar (like the live roster): after the rank + avatar ring, before
+  // the name — which drawRowBase insets past it. Right edge of the bars:
+  const barsRight = RC_PAD_X + 8 + 22 + 11 + 34 + 11 + RC_BAR_W;
   results.forEach((r, i) => {
     const rowTop = RC_LIST_TOP + i * (RC_ROW_H + RC_ROW_GAP);
     const { cy } = drawRowBase(
@@ -1109,8 +1153,18 @@ export async function drawRecap(
       i,
       r,
       imgAt(i),
-      dotsRight - 14,
+      dotsRight - (4 * RC_DOT + 3 * RC_DOT_GAP) - 11, // up to the dots' left edge (no overlap)
+      RC_BAR_W + 11, // inset the name past the mini-board
     );
+    // Mini-board (which groups they cracked, in solve order) beside the avatar. Exact when we
+    // have the order; else the count, filled easiest-first.
+    const levels =
+      r.solvedLevels ??
+      Array.from(
+        { length: Math.max(0, Math.min(4, r.groups ?? (r.solved ? 4 : 0))) },
+        (_, i) => i,
+      );
+    drawMiniBars(ctx, levels, barsRight, cy);
     drawDots(ctx, 4 - r.mistakes, dotsRight, cy);
     // time
     ctx.fillStyle = ZINC_400;
@@ -1137,11 +1191,15 @@ export async function drawRecap(
       const rowTop = RC_LIST_TOP + i * (RC_ROW_H + RC_ROW_GAP);
       const cy = rowTop + RC_ROW_H / 2;
       const avCx = RC_PAD_X + 8 + 50; // matches drawRowBase's avatar centre
-      const nameLeft = RC_PAD_X + 8 + 78;
+      const barsLeft = RC_PAD_X + 8 + 78; // matches the mini-board's left edge
+      const nameLeft = barsLeft + RC_BAR_W + 11; // inset past the mini-board, like a real row
       roundRect(ctx, RC_PAD_X, rowTop, RC_RESULTS_W, RC_ROW_H, RC_ROW_R);
       ctx.stroke();
       ctx.beginPath();
       ctx.arc(avCx, cy, RC_AV / 2, 0, Math.PI * 2);
+      ctx.stroke();
+      // dashed mini-board placeholder, in the real row's bar column
+      roundRect(ctx, barsLeft, cy - RC_BARS_H / 2, RC_BAR_W, RC_BARS_H, RC_BAR_R);
       ctx.stroke();
       ctx.beginPath();
       ctx.moveTo(nameLeft, cy);

@@ -8,9 +8,11 @@ import { type DayRow, recapPayload, recapText, type SeasonRow, toRecapData } fro
 import { Game, type Puzzle } from '../src/game.js';
 
 // Daily recap cron. Posts yesterday's results + season standings, with a Play button, to
-// every CHANNEL that has ever had play (recap_channels) — one card per (guild, channel),
-// every day. On a day no one solved — no plays, no finishes, or all losses alike — it still
-// posts a "nobody got it… new day" card; mirrors the Wordle activity's daily per-channel beat.
+// every CHANNEL that has ever had play (recap_channels) AND sits in a guild the bot is actually
+// in (fetchBotGuildIds) — one card per (guild, channel), every day. recap_channels alone also
+// lists user-install servers (live card via interaction webhook, no bot), where a direct recap
+// POST 403s, so the bot-guild filter drops them. On a day no one solved — no plays, no finishes,
+// or all losses alike — it still posts a "nobody got it… new day" card; mirrors the Wordle bot.
 //
 // Triggered by Supabase pg_cron (supabase/recap-cron.sql), which POSTs this endpoint on
 // the exact minute — Vercel Hobby crons only fire "within the hour", so the schedule lives
@@ -43,6 +45,32 @@ const CONCURRENCY = 8;
 
 type ScopeRow = { scope_id: string | null; channel_id: string | null };
 type Outcome = 'posted' | 'skipped' | 'failed';
+
+// The guilds the bot is actually a member of. The recap posts as the bot (a direct channel
+// message), so it can only reach guilds where the bot is installed. recap_channels is sourced
+// from live_cards, which ALSO exist in user-install servers (there the live card posts via an
+// interaction webhook — no bot needed), so without this the cron 403s on ~every bot-less channel
+// nightly. Paginated (200/page) in case the bot grows past one page. Returns null on failure so
+// the caller fails OPEN (attempt all) rather than suppressing every recap on a Discord blip.
+async function fetchBotGuildIds(botToken: string): Promise<Set<string> | null> {
+  try {
+    const ids = new Set<string>();
+    let after = '';
+    for (;;) {
+      const url = `https://discord.com/api/v10/users/@me/guilds?limit=200${after ? `&after=${after}` : ''}`;
+      const r = await fetch(url, { headers: { Authorization: `Bot ${botToken}` } });
+      if (!r.ok) return null;
+      const page = (await r.json()) as { id: string }[];
+      if (!Array.isArray(page) || page.length === 0) break;
+      for (const g of page) ids.add(g.id);
+      if (page.length < 200) break;
+      after = page[page.length - 1].id;
+    }
+    return ids;
+  } catch {
+    return null;
+  }
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
@@ -112,8 +140,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         ]),
     ).values(),
   ];
-  // Single-channel test override, else every channel that has ever played.
-  const pairs = onlyScope && onlyChannel ? [{ scope: onlyScope, channel: onlyChannel }] : allPairs;
+  // Keep only channels in guilds the bot actually belongs to — the rest are user-install servers
+  // (live card via interaction webhook, no bot) where a direct recap POST just 403s. Fail open if
+  // the guild list can't be fetched (attempt all; the ledger still de-dupes). The single-channel
+  // test override bypasses this so a specific channel can always be fired.
+  let scoped = allPairs;
+  if (!onlyScope) {
+    const botGuilds = await fetchBotGuildIds(botToken);
+    if (botGuilds) {
+      const before = scoped.length;
+      scoped = scoped.filter((p) => botGuilds.has(p.scope.slice(2)));
+      console.log(`[recap] bot in ${botGuilds.size} guilds; targeting ${scoped.length} of ${before} channels`);
+    } else {
+      console.warn('[recap] could not fetch bot guild list; attempting all channels');
+    }
+  }
+  // Single-channel test override, else every bot-present channel that has ever played.
+  const pairs = onlyScope && onlyChannel ? [{ scope: onlyScope, channel: onlyChannel }] : scoped;
 
   if (pairs.length === 0) {
     res.status(200).json({ date, posted: 0, skipped: 0, failed: 0 });

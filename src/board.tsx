@@ -115,6 +115,29 @@ export type BoardSnapshot = {
   done: "won" | "lost" | null;
 };
 
+// Spoiler reveals persist per puzzle in localStorage, so a reveal is permanent
+// for the day: once you've uncovered a category it stays uncovered across reopens
+// of the Activity (the finished game rehydrates covered otherwise — see Board).
+// Keyed by puzzle id, so the next day's puzzle starts covered again. Best-effort:
+// any storage failure (private mode, disabled) just falls back to session-only.
+const spoilerKey = (puzzleId: number): string => `conn-spoiler-${puzzleId}`;
+function readSpoilerSeen(puzzleId: number): Set<number> {
+  try {
+    const raw = localStorage.getItem(spoilerKey(puzzleId));
+    const arr: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(arr) ? arr.map(Number) : []);
+  } catch {
+    return new Set();
+  }
+}
+function writeSpoilerSeen(puzzleId: number, seen: Set<number>): void {
+  try {
+    localStorage.setItem(spoilerKey(puzzleId), JSON.stringify([...seen]));
+  } catch {
+    /* storage unavailable — reveal stays session-only */
+  }
+}
+
 // A diagonal-hatch spoiler bar: its four WORDS stay readable but the CATEGORY
 // NAME is redacted under the hatch, so you can still guess the connection before
 // revealing it. Used for two cases: the last group solved on a win (often
@@ -125,19 +148,23 @@ export type BoardSnapshot = {
 // reveal is throttle-proof: the cover unmounts once its exit has had time to
 // play, so the name can never get stranded if CSS animations are throttled
 // (e.g. a hidden preview iframe). Same box/data-flip as a normal bar, so it
-// still morphs into place with the FLIP at game end.
+// still morphs into place with the FLIP at game end. `defaultRevealed` (from a
+// prior session, persisted) mounts it already uncovered — no cover, no animation.
 function SpoilerBar({
   level,
   category,
   members,
   dim = false,
-}: Group & { dim?: boolean }) {
-  const [revealed, setRevealed] = useState(false);
-  const [gone, setGone] = useState(false);
+  defaultRevealed = false,
+  onReveal,
+}: Group & { dim?: boolean; defaultRevealed?: boolean; onReveal?: () => void }) {
+  const [revealed, setRevealed] = useState(defaultRevealed);
+  const [gone, setGone] = useState(defaultRevealed);
   function reveal(): void {
     if (revealed) return;
     setRevealed(true);
     setTimeout(() => setGone(true), 460);
+    onReveal?.();
   }
   return (
     <button
@@ -209,6 +236,11 @@ export function Board({
   const selected = useRef<Set<string>>(new Set(game.selected));
   const solvedLevels = useRef<number[]>(game.solved.map((s) => s.level));
   const revealedLevels = useRef<number[]>(initialRevealed.slice());
+  // spoiler categories the player has already uncovered (persisted per puzzle, so
+  // a reveal stays revealed across reopens). Read once on mount.
+  const spoilerSeen = useRef<Set<number> | null>(null);
+  if (spoilerSeen.current === null)
+    spoilerSeen.current = readSpoilerSeen(game.puzzle.id);
   // dots lag the model one beat: wrong guess plays shake-then-dim.
   const shownMistakes = useRef<number>(game.mistakesLeft);
   const ended = useRef<boolean>(game.status !== "playing");
@@ -642,7 +674,18 @@ export function Board({
               solvedLevels.current.length === 4 &&
               lvl === solvedLevels.current[solvedLevels.current.length - 1];
             if (winLastSolved || autoRevealed) {
-              return <SpoilerBar key={lvl} {...g} dim={autoRevealed} />;
+              return (
+                <SpoilerBar
+                  key={lvl}
+                  {...g}
+                  dim={autoRevealed}
+                  defaultRevealed={spoilerSeen.current!.has(lvl)}
+                  onReveal={() => {
+                    spoilerSeen.current!.add(lvl);
+                    writeSpoilerSeen(game.puzzle.id, spoilerSeen.current!);
+                  }}
+                />
+              );
             }
             return (
               <div

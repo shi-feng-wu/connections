@@ -15,6 +15,7 @@
     "preview": "vite preview",
     "register-commands": "node --env-file=.env scripts/register-commands.mjs",
     "status": "node --env-file=.env scripts/status.mjs",
+    "dashboard": "node --env-file=.env scripts/dashboard.mjs",
     "about-me": "node --env-file=.env scripts/about-me.mjs",
     "discord:entry-point": "node --env-file=.env scripts/ensure-entry-point.mjs",
     "configure-install": "node --env-file=.env scripts/configure-install.mjs",

@@ -1,4 +1,4 @@
-import { Eraser, Navigation, Shuffle as ShuffleIcon } from "lucide-react";
+import { Eraser, EyeOff, Navigation, Shuffle as ShuffleIcon } from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
@@ -114,6 +114,67 @@ export type BoardSnapshot = {
   picking: boolean;
   done: "won" | "lost" | null;
 };
+
+// A diagonal-hatch spoiler bar: its four WORDS stay readable but the CATEGORY
+// NAME is redacted under the hatch, so you can still guess the connection before
+// revealing it. Used for two cases: the last group solved on a win (often
+// completed by elimination, so its theme may be a surprise) and every group
+// auto-revealed on a loss (`dim` — those read dimmer once revealed, matching the
+// loss screen's "you didn't get this" bars). Tapping wipes the hatch off to the
+// right and the name fades up underneath (see .spoiler-* in index.css). The
+// reveal is throttle-proof: the cover unmounts once its exit has had time to
+// play, so the name can never get stranded if CSS animations are throttled
+// (e.g. a hidden preview iframe). Same box/data-flip as a normal bar, so it
+// still morphs into place with the FLIP at game end.
+function SpoilerBar({
+  level,
+  category,
+  members,
+  dim = false,
+}: Group & { dim?: boolean }) {
+  const [revealed, setRevealed] = useState(false);
+  const [gone, setGone] = useState(false);
+  function reveal(): void {
+    if (revealed) return;
+    setRevealed(true);
+    setTimeout(() => setGone(true), 460);
+  }
+  return (
+    <button
+      type="button"
+      data-flip={`bar-${level}`}
+      onClick={reveal}
+      aria-label={revealed ? category : "Reveal the hidden category"}
+      className={
+        "spoiler-bar relative flex h-[var(--tile-h)] w-full cursor-pointer select-none appearance-none flex-col items-center justify-center overflow-hidden rounded-lg border-0 px-2 text-center text-[#121212] transition-opacity duration-300 ease-out active:scale-[0.99]" +
+        (revealed ? " revealed" : "") +
+        // a revealed failed (auto-revealed) bar reads dimmer than a solved one
+        (dim && revealed ? " opacity-56" : "")
+      }
+      style={{ background: LEVELS[level].color }}
+    >
+      {!gone && (
+        <span className="spoiler-cover" aria-hidden>
+          <span className="spoiler-glint" />
+        </span>
+      )}
+      <div className="relative flex min-h-4 items-center justify-center">
+        <div className="spoiler-cat font-extrabold uppercase tracking-tight text-[clamp(12px,3.4vw,18px)] leading-tight">
+          {category}
+        </div>
+        {!gone && (
+          <span className="spoiler-label">
+            <EyeOff size={13} strokeWidth={2.25} aria-hidden />
+            <span>Tap to reveal</span>
+          </span>
+        )}
+      </div>
+      <div className="relative z-[3] uppercase text-[clamp(10px,3vw,16px)] leading-tight">
+        {members.join(", ")}
+      </div>
+    </button>
+  );
+}
 
 export function Board({
   game,
@@ -452,10 +513,12 @@ export function Board({
         const bar = solvedRef.current?.querySelector<HTMLElement>(
           `[data-flip="bar-${lvl}"]`,
         );
+        // pop the bar in at full opacity — it morphs in spoiler-covered
+        // (SpoilerBar), so it only dims once you tap to reveal the category.
         bar?.animate(
           [
-            { transform: "scale(.97)", opacity: 0.1 },
-            { transform: "scale(1)", opacity: 0.56 },
+            { transform: "scale(.97)", opacity: 0.25 },
+            { transform: "scale(1)", opacity: 1 },
           ],
           {
             duration: 260,
@@ -567,16 +630,26 @@ export function Board({
         <div className="flex flex-col gap-2" ref={solvedRef}>
           {solvedLevels.current.map((lvl) => {
             const g = group(lvl);
-            const revealed = revealedLevels.current.includes(lvl);
+            // Spoiler-cover the category for: (a) the final group solved on a
+            // win — hidden until tapped so you can still guess it (gated on
+            // length 4 so the in-flight 3-solved window during the winning
+            // animation doesn't briefly cover the wrong bar), and (b) every
+            // group auto-revealed on a loss, so you can guess the ones you
+            // missed too. Genuinely-solved groups (other than the win's last)
+            // render plainly.
+            const autoRevealed = revealedLevels.current.includes(lvl);
+            const winLastSolved =
+              game.status === "won" &&
+              solvedLevels.current.length === 4 &&
+              lvl === solvedLevels.current[solvedLevels.current.length - 1];
+            if (winLastSolved || autoRevealed) {
+              return <SpoilerBar key={lvl} {...g} dim={autoRevealed} />;
+            }
             return (
               <div
                 key={lvl}
                 data-flip={`bar-${lvl}`}
-                className={
-                  "flex h-[var(--tile-h)] flex-col items-center justify-center rounded-lg px-2 text-center text-[#121212]" +
-                  // loss-revealed bar reads dimmer than a solved one.
-                  (revealed ? " opacity-56" : "")
-                }
+                className="flex h-[var(--tile-h)] flex-col items-center justify-center rounded-lg px-2 text-center text-[#121212]"
                 style={{ background: LEVELS[lvl].color }}
               >
                 <div className="font-extrabold uppercase tracking-tight text-[clamp(12px,3.4vw,18px)] leading-tight">

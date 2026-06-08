@@ -275,3 +275,133 @@ body {
 body {
   overflow-x: hidden;
 }
+
+/* ---- Spoiler cover: the last-solved group on the win screen ----
+   The final group keeps its four WORDS fully readable but redacts only the
+   CATEGORY NAME under a diagonal hatch, so you can still try to guess the
+   connection before revealing it (the last group is often completed by
+   elimination). The hatch sits ABOVE the colored fill but BELOW the words +
+   label, so the words read on top; tapping wipes it away and the name appears
+   underneath. Mirrors the redesign's "Desktop Connections" spoiler.
+   `#121212` is the solved-bar text color (the "on-category" ink). */
+
+/* The category sits UNDER the hatch at opacity 0 and flips to 1 the instant
+   it's revealed — no transition, so a throttled timeline (a hidden iframe
+   pends CSS transitions) can never strand it half-faded. The cover animating
+   away is what visually performs the reveal. */
+.spoiler-cat {
+  position: relative;
+  z-index: 1;
+  opacity: 0;
+}
+.spoiler-bar.revealed .spoiler-cat {
+  opacity: 1;
+}
+
+/* "Tap to reveal" label, centered over where the category name belongs. */
+.spoiler-label {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  pointer-events: none;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  white-space: nowrap;
+  color: color-mix(in srgb, #121212 85%, transparent);
+  transition: opacity 0.2s ease;
+}
+.spoiler-label svg {
+  width: 13px;
+  height: 13px;
+  /* An SVG with a viewBox has 0 min-content width, so as a flex child in the
+     centered label it collapses to 0 (invisible) when the category is short and
+     the row is cramped — pin it so the eye always shows. */
+  flex: none;
+  color: color-mix(in srgb, #121212 78%, transparent);
+}
+.spoiler-bar.revealed .spoiler-label {
+  opacity: 0;
+}
+
+/* The full-card diagonal hatch — above the colored fill, below words + label. */
+.spoiler-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+  clip-path: inset(0 0 0 0);
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(0, 0, 0, 0) 0 7px,
+      rgba(0, 0, 0, 0.17) 7px 14px
+    ),
+    rgba(0, 0, 0, 0.05);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, #121212 22%, transparent);
+  transition: background 0.12s ease;
+}
+/* Hover deepens the hatch a touch. Safe to drive off CSS :hover (unlike the
+   board tiles, which must avoid sticky touch :hover): tapping reveals the bar,
+   which wipes and unmounts the cover, so a stranded :hover has nothing to act
+   on. */
+.spoiler-bar:hover .spoiler-cover {
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(0, 0, 0, 0) 0 7px,
+      rgba(0, 0, 0, 0.22) 7px 14px
+    ),
+    rgba(0, 0, 0, 0.08);
+}
+
+/* Invite shimmer sweeping across the cover. */
+.spoiler-glint {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 36%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    rgba(255, 255, 255, 0.22),
+    transparent
+  );
+  transform: translateX(-220%);
+  animation: spoilerGlint 2.8s ease-in-out infinite;
+}
+
+/* Reveal: the hatch wipes off to the right, the category fades up underneath. */
+.spoiler-bar.revealed .spoiler-cover {
+  animation: spoilerWipe 0.44s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.spoiler-bar.revealed .spoiler-glint {
+  animation: none;
+}
+
+@keyframes spoilerGlint {
+  0% {
+    transform: translateX(-220%);
+  }
+  55%,
+  100% {
+    transform: translateX(420%);
+  }
+}
+@keyframes spoilerWipe {
+  to {
+    clip-path: inset(0 0 0 100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spoiler-glint {
+    animation: none;
+  }
+}

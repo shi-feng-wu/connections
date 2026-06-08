@@ -614,7 +614,6 @@ export function Board({
   const group = (lvl: number): Group =>
     game.puzzle.groups.find((g) => g.level === lvl)!;
 
-  const playing = game.status === "playing";
   const showGrid = !ended.current && remaining.current.length > 0;
 
   return (
@@ -691,8 +690,15 @@ export function Board({
         )}
       </div>
 
+      {/* Gate purely on ended.current, NOT game.status: the winning guess flips
+          status to "won" before the board's end choreography runs, so keying off
+          status would swap the score footer in mid-morph — then endGame's
+          fade-out/fade-in would re-introduce it, a visible double-appearance.
+          ended.current only flips inside endGame, after the controls fade out, so
+          the footer makes exactly one entrance. (Rehydrated finished games seed
+          ended.current = true, so they render the footer immediately, no fade.) */}
       <div ref={tailRef}>
-        {playing && !ended.current ? renderControls() : renderBelowEnd()}
+        {ended.current ? renderBelowEnd() : renderControls()}
       </div>
     </div>
   );

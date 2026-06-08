@@ -277,59 +277,54 @@ body {
 }
 
 /* ---- Spoiler cover: the last-solved group on the win screen ----
-   The final group keeps its four WORDS fully readable but redacts only the
-   CATEGORY NAME under a diagonal hatch, so you can still try to guess the
-   connection before revealing it (the last group is often completed by
-   elimination). The hatch sits ABOVE the colored fill but BELOW the words +
-   label, so the words read on top; tapping wipes it away and the name appears
-   underneath. Mirrors the redesign's "Desktop Connections" spoiler.
-   `#121212` is the solved-bar text color (the "on-category" ink). */
+   The final group keeps its four WORDS fully readable but the CATEGORY NAME is
+   shown BLURRED under a diagonal hatch, so you can still try to guess the
+   connection from the words first — the blur is heavy enough that the word is
+   unreadable but you can tell it's there. Tapping clears the blur as the hatch
+   wipes away. An eye-off icon in the left gutter signals the card is tappable.
+   Mirrors the redesign's "Desktop Connections" spoiler. `#121212` is the
+   solved-bar text color (the "on-category" ink). */
 
-/* The category sits UNDER the hatch at opacity 0 and flips to 1 the instant
-   it's revealed — no transition, so a throttled timeline (a hidden iframe
-   pends CSS transitions) can never strand it half-faded. The cover animating
-   away is what visually performs the reveal. */
+/* The category keeps its REAL name, blurred while covered and clearing to sharp
+   on reveal. It sits ABOVE the hatch (z-3), so the blurred word reads on the
+   texture. The blur transition is fine here (unlike an opacity fade gated on the
+   end-screen animation): the reveal is a user tap, always in a foreground tab,
+   and the revealed end-state is blur(0) regardless of whether the tween ran. */
 .spoiler-cat {
   position: relative;
-  z-index: 1;
-  opacity: 0;
+  z-index: 3;
+  filter: blur(5px);
+  transition: filter 0.42s ease;
 }
 .spoiler-bar.revealed .spoiler-cat {
-  opacity: 1;
+  filter: blur(0);
 }
 
-/* "Tap to reveal" label, centered over where the category name belongs. */
-.spoiler-label {
+/* Reveal-hint eye-off in the left gutter — signals the card is tappable (the
+   blur alone could read as a render glitch) and balances the layout. Fades out
+   as the card is revealed, then unmounts with the cover. */
+.spoiler-eye-hint {
   position: absolute;
-  inset: 0;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  display: grid;
+  place-items: center;
   pointer-events: none;
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.13em;
-  white-space: nowrap;
-  color: color-mix(in srgb, #121212 85%, transparent);
-  transition: opacity 0.2s ease;
+  color: color-mix(in srgb, #121212 68%, transparent);
+  transition: opacity 0.25s ease;
 }
-.spoiler-label svg {
-  width: 13px;
-  height: 13px;
-  /* An SVG with a viewBox has 0 min-content width, so as a flex child in the
-     centered label it collapses to 0 (invisible) when the category is short and
-     the row is cramped — pin it so the eye always shows. */
-  flex: none;
-  color: color-mix(in srgb, #121212 78%, transparent);
+.spoiler-eye-hint svg {
+  width: 17px;
+  height: 17px;
 }
-.spoiler-bar.revealed .spoiler-label {
+.spoiler-bar.revealed .spoiler-eye-hint {
   opacity: 0;
 }
 
-/* The full-card diagonal hatch — above the colored fill, below words + label. */
+/* The full-card diagonal hatch — above the colored fill (z-2), below the text
+   (z-3). Kept light so the blurred title reads through it rather than fighting. */
 .spoiler-cover {
   position: absolute;
   inset: 0;
@@ -341,9 +336,9 @@ body {
     repeating-linear-gradient(
       45deg,
       rgba(0, 0, 0, 0) 0 7px,
-      rgba(0, 0, 0, 0.17) 7px 14px
+      rgba(0, 0, 0, 0.12) 7px 14px
     ),
-    rgba(0, 0, 0, 0.05);
+    rgba(0, 0, 0, 0.02);
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, #121212 22%, transparent);
   transition: background 0.12s ease;
 }
@@ -356,9 +351,9 @@ body {
     repeating-linear-gradient(
       45deg,
       rgba(0, 0, 0, 0) 0 7px,
-      rgba(0, 0, 0, 0.22) 7px 14px
+      rgba(0, 0, 0, 0.17) 7px 14px
     ),
-    rgba(0, 0, 0, 0.08);
+    rgba(0, 0, 0, 0.05);
 }
 
 /* Invite shimmer sweeping across the cover. */

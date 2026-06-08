@@ -173,28 +173,31 @@ function SpoilerBar({
       onClick={reveal}
       aria-label={revealed ? category : "Reveal the hidden category"}
       className={
-        "spoiler-bar relative flex h-[var(--tile-h)] w-full cursor-pointer select-none appearance-none flex-col items-center justify-center overflow-hidden rounded-lg border-0 px-2 text-center text-[#121212] transition-opacity duration-300 ease-out active:scale-[0.99]" +
-        (revealed ? " revealed" : "") +
+        "spoiler-bar relative flex h-[var(--tile-h)] w-full select-none appearance-none flex-col items-center justify-center overflow-hidden rounded-lg border-0 px-2 text-center text-[#121212] transition-opacity duration-300 ease-out" +
+        // once revealed the bar does nothing on click — drop the pointer cursor
+        // and the press feedback so it reads as the static solved bar it now is
+        (revealed
+          ? " revealed cursor-default"
+          : " cursor-pointer active:scale-[0.99]") +
         // a revealed failed (auto-revealed) bar reads dimmer than a solved one
         (dim && revealed ? " opacity-56" : "")
       }
       style={{ background: LEVELS[level].color }}
     >
+      {/* eye-off hint in the left gutter — signals the card is tappable */}
+      {!gone && (
+        <span className="spoiler-eye-hint">
+          <EyeOff strokeWidth={2.25} aria-hidden />
+        </span>
+      )}
       {!gone && (
         <span className="spoiler-cover" aria-hidden>
           <span className="spoiler-glint" />
         </span>
       )}
-      <div className="relative flex min-h-4 items-center justify-center">
-        <div className="spoiler-cat font-extrabold uppercase tracking-tight text-[clamp(12px,3.4vw,18px)] leading-tight">
-          {category}
-        </div>
-        {!gone && (
-          <span className="spoiler-label">
-            <EyeOff size={13} strokeWidth={2.25} aria-hidden />
-            <span>Tap to reveal</span>
-          </span>
-        )}
+      {/* the REAL category name, shown blurred until tapped (see .spoiler-cat) */}
+      <div className="spoiler-cat font-extrabold uppercase tracking-tight text-[clamp(12px,3.4vw,18px)] leading-tight">
+        {category}
       </div>
       <div className="relative z-[3] uppercase text-[clamp(10px,3vw,16px)] leading-tight">
         {members.join(", ")}

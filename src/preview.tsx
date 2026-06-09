@@ -125,9 +125,6 @@ const ROSTER: PlayerState[] = seeds.map((s) => ({
 }));
 
 // mock room leaderboard (both end-screen tabs)
-const SELF_NAME = "Mara Okafor";
-const SELF_AVATAR = pfp("#b06bd6");
-
 // "This season": self is rank 9, below this top 5.
 const SEASON: Standings = {
   board: [
@@ -417,8 +414,6 @@ function Simulate() {
           gameKey={`sim-${key}`}
           players={ROSTER}
           selfId={SELF_ID}
-          selfName={SELF_NAME}
-          selfAvatar={SELF_AVATAR}
           season={SEASON}
           allTime={ALLTIME}
           onPresence={noop}
@@ -448,8 +443,6 @@ function State({
         gameKey={label}
         players={ROSTER}
         selfId={SELF_ID}
-        selfName={SELF_NAME}
-        selfAvatar={SELF_AVATAR}
         season={SEASON}
         allTime={ALLTIME}
         initialRevealed={revealed}
@@ -653,8 +646,6 @@ createRoot(document.getElementById("preview")!).render(
         <Roster
           players={ROSTER}
           selfId={SELF_ID}
-          selfName={SELF_NAME}
-          selfAvatar={SELF_AVATAR}
           season={{ board: [], self: null }}
           allTime={{ board: [], self: null }}
           view="season"
@@ -670,8 +661,6 @@ createRoot(document.getElementById("preview")!).render(
         <Roster
           players={ROSTER}
           selfId={SELF_ID}
-          selfName={SELF_NAME}
-          selfAvatar={SELF_AVATAR}
           season={SEASON}
           allTime={ALLTIME}
           view="season"

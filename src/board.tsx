@@ -1,7 +1,6 @@
-import { Eraser, EyeOff, Navigation, Shuffle as ShuffleIcon } from "lucide-react";
+import { Clock, Eraser, EyeOff, Shuffle as ShuffleIcon } from "lucide-react";
 import {
   useEffect,
-  useId,
   useLayoutEffect,
   useReducer,
   useRef,
@@ -9,7 +8,6 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { flushSync } from "react-dom";
-import { ResetCountdown } from "./countdown";
 import { Game, LEVELS, MAX_MISTAKES, shuffle, type Group } from "./game";
 import { HoverButton } from "./hoverbutton";
 
@@ -27,28 +25,25 @@ const fmtClock = (ms: number | null): string => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
-// One line of the score-breakdown tooltip: label (+ optional faint sub) on the
-// left, signed value on the right. `neg` greys the value for the mistakes row.
-function ScoreRow({
-  label,
-  sub,
+// One additive column of the inline breakdown the end-screen bar reveals on hover: a
+// tiny caption stacked over its signed point value. `neg` greys the mistakes value.
+function BreakItem({
+  caption,
   value,
   neg,
 }: {
-  label: string;
-  sub?: string;
+  caption: string;
   value: string;
   neg?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-2.5 whitespace-nowrap py-[3px] text-[12.5px] text-zinc-300">
-      <span className="flex min-w-0 items-baseline gap-1.75 whitespace-nowrap">
-        <span>{label}</span>
-        {sub && <span className="tabular-nums text-zinc-500">{sub}</span>}
+    <div className="flex min-w-0 flex-col items-center gap-[3px]">
+      <span className="whitespace-nowrap text-[8.5px] font-semibold uppercase leading-none tracking-[0.07em] text-zinc-500 max-[380px]:text-[7.5px] max-[360px]:tracking-[0.02em]">
+        {caption}
       </span>
       <span
         className={
-          "flex-none font-bold tabular-nums " +
+          "text-[15px] font-bold leading-none tabular-nums " +
           (neg ? "text-zinc-400" : "text-emerald-400")
         }
       >
@@ -58,27 +53,24 @@ function ScoreRow({
   );
 }
 
-// End-screen score block: the "Solved/Perfect" label + the serif total. On a win
-// it gains an ⓘ affordance and a hover/tap tooltip that itemizes the score
-// (categories, solve bonus, speed, mistakes). Hover is mouse-only — this ships as
-// a Discord Activity where CSS :hover sticks after a tap (same reason as
-// HoverButton) — so a real mouse opens it on hover, touch toggles it on tap, and a
-// tap/Esc outside closes a pinned-open tip. Losses show the same tooltip: the
-// partial-credit Categories line, a 0 solve bonus, and "failed" speed/mistakes rows.
-function EndScore({
-  game,
-  won,
-  label,
-}: {
-  game: Game;
-  won: boolean;
-  label: string;
-}) {
+// End-screen footer. At rest it's the run summary, two clusters at the far edges with
+// room to breathe: mistake dots (left), then the clock-icon solve-time chip, a hairline
+// divider, and the serif score (right). The next-puzzle countdown lives under the
+// players list (see Roster), not here. Inspecting the score doesn't open a floating
+// tooltip: the dots + time CROSS-FADE in place to the itemized breakdown (categories,
+// bonus, speed, mistakes) while the big +score stays put as the total they sum to.
+// Hover is mouse-only — this ships as a Discord Activity where CSS :hover sticks after
+// a tap (same reason as HoverButton) — so a real mouse reveals it on hover, touch
+// toggles it on tap, and a tap/Esc outside closes a pinned-open one. Losses read the
+// same: partial-credit categories, a 0 bonus/speed.
+function EndSummary({ game }: { game: Game }) {
   const b = game.scoreBreakdown;
+  const won = game.status === "won";
+  const perfect = won && game.mistakesLeft === MAX_MISTAKES;
+  const label = perfect ? "Perfect" : won ? "Solved" : "Out of guesses";
   const [over, setOver] = useState(false);
   const [pinned, setPinned] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const tipId = useId();
   const open = over || pinned;
 
   useEffect(() => {
@@ -97,35 +89,20 @@ function EndScore({
     };
   }, [pinned]);
 
-  const stack = (
-    <div className="flex min-w-0 flex-col items-end gap-0.75">
-      {/* At the narrow-Android floor (<=360px) the longest label, "Out of
-          guesses", would push the score + jump button off the right edge. Cap it
-          so it wraps to two right-aligned lines there; "Solved"/"Perfect" are
-          short enough to never reach the cap, so they stay one line. */}
-      <span
-        className={
-          "text-right text-[10px] font-semibold uppercase leading-tight tracking-[0.16em] max-[360px]:max-w-[4.5rem] " +
-          (won ? "text-emerald-400" : "text-zinc-400")
-        }
-      >
-        {label}
-      </span>
-      <span className="font-display text-[26px] font-bold leading-none tracking-[-0.02em] text-[#efefe6]">
-        +{game.score.toLocaleString()}
-      </span>
-    </div>
-  );
+  // Both faces absolute-fill one box whose height the stationary score column fixes
+  // (so the rest face's hairline divider can stretch the row's full height). They
+  // cross-fade with a small counter-rise; only the visible one is exposed to AT.
+  const face =
+    "transition-[opacity,transform] duration-200 ease-[cubic-bezier(.22,.61,.36,1)]";
 
   return (
     <div
       ref={ref}
-      className="relative flex cursor-help items-center gap-[9px] [-webkit-tap-highlight-color:transparent]"
+      className="relative flex cursor-help items-center gap-3 max-[360px]:gap-2 [-webkit-tap-highlight-color:transparent]"
       role="button"
       tabIndex={0}
       aria-label="Score breakdown"
       aria-expanded={open}
-      aria-describedby={tipId}
       onPointerEnter={(e) => {
         if (e.pointerType === "mouse") setOver(true);
       }}
@@ -140,68 +117,89 @@ function EndScore({
         }
       }}
     >
-      {stack}
-      <span
-        className={
-          "inline-grid h-[15px] w-[15px] place-items-center rounded-full border font-serif text-[10px] font-bold not-italic leading-none transition-colors duration-150 " +
-          (open ? "border-zinc-400 text-[#efefe6]" : "border-zinc-600 text-zinc-500")
-        }
-        aria-hidden
-      >
-        i
-      </span>
-      {/* Always mounted; pops ABOVE the score (the footer sits low in the column)
-          and right-aligns so it never spills off the narrow frame. Only the
-          transform tweens — opacity/visibility flip instantly so a throttled tab
-          can't strand it half-shown. */}
-      <div
-        id={tipId}
-        role="tooltip"
-        onClick={(e) => e.stopPropagation()}
-        className={
-          "absolute bottom-[calc(100%+12px)] right-0 z-30 w-[226px] origin-bottom-right rounded-[10px] bg-zinc-900 px-[13px] pb-[12px] pt-[11px] text-left shadow-[0_14px_34px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.07)] transition-transform duration-150 ease-out " +
-          (open
-            ? "visible translate-y-0 scale-100 opacity-100"
-            : "invisible pointer-events-none translate-y-[5px] scale-[0.97] opacity-0")
-        }
-      >
-        <div className="mb-[7px] text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
-          Score breakdown
+      {/* left + centre: the run summary at rest, swapped on inspect for the makeup */}
+      <div className="relative min-w-0 flex-1 self-stretch">
+        {/* REST face — mistake dots far left, clock-icon solve-time chip far right,
+            closed off by a hairline divider against the (stationary) score */}
+        <div
+          aria-hidden={open}
+          className={
+            face +
+            " absolute inset-0 flex items-center justify-between gap-3 max-[360px]:gap-2 " +
+            (open
+              ? "pointer-events-none -translate-y-[3px] opacity-0"
+              : "translate-y-0 opacity-100")
+          }
+        >
+          <span
+            className="inline-flex flex-none items-center gap-1.75"
+            aria-label="Mistakes remaining"
+          >
+            {Array.from({ length: MAX_MISTAKES }, (_, i) => (
+              <span
+                key={i}
+                className={
+                  "inline-block h-3.5 w-3.5 rounded-full " +
+                  (i < game.mistakesLeft ? "bg-zinc-300" : "bg-zinc-700")
+                }
+              />
+            ))}
+          </span>
+          <div className="flex min-w-0 items-center gap-3.5 self-stretch max-[360px]:gap-2.5">
+            <div className="flex items-center gap-2 text-[15px] font-semibold tabular-nums text-zinc-400">
+              <Clock size={15} strokeWidth={2.25} className="flex-none text-zinc-500" aria-hidden />
+              <span>{fmtClock(game.durationMs)}</span>
+            </div>
+            <span className="my-1 w-px flex-none self-stretch bg-white/10" aria-hidden />
+          </div>
         </div>
-        <ScoreRow
-          label="Categories"
-          sub={String(game.groupsSolved)}
-          value={`+${b.completion}`}
-        />
-        <ScoreRow label="Solve Bonus" value={`+${b.solveBonus}`} />
-        <ScoreRow
-          label="Speed"
-          sub={won ? fmtClock(game.durationMs) : "failed"}
-          value={won ? `+${b.speed}` : "+0"}
-        />
-        {won ? (
-          b.penalty > 0 && (
-            <ScoreRow
-              label="Mistakes"
-              sub={String(b.mistakes)}
-              value={`−${b.penalty}`}
-              neg
-            />
-          )
-        ) : (
-          <ScoreRow label="Mistakes" sub="failed" value="−0" neg />
-        )}
-        <div className="mt-[6px] flex items-center justify-between gap-2.5 whitespace-nowrap border-t border-white/[0.09] pt-[8px] text-[12.5px]">
-          <span className="font-semibold text-zinc-100">Total</span>
-          <span className="font-bold tabular-nums text-[14px] text-[#efefe6]">
-            {game.score.toLocaleString()}
+
+        {/* BREAKDOWN face — the additive components, summing to the score at right */}
+        <div
+          aria-hidden={!open}
+          className={
+            face +
+            " absolute inset-0 flex items-center justify-between gap-1.5 px-1 max-[360px]:gap-1 max-[360px]:px-0 " +
+            (open
+              ? "translate-y-0 opacity-100"
+              : "pointer-events-none translate-y-[3px] opacity-0")
+          }
+        >
+          <BreakItem caption="Categories" value={`+${b.completion}`} />
+          <BreakItem caption="Bonus" value={`+${b.solveBonus}`} />
+          <BreakItem caption="Speed" value={won ? `+${b.speed}` : "+0"} />
+          <BreakItem caption="Mistakes" value={won ? `−${b.penalty}` : "−0"} neg />
+        </div>
+      </div>
+
+      {/* right: the score — the total the components sum to. It holds its place across
+          the swap so the number never jumps; the ⓘ is the affordance + open-state cue. */}
+      <div className="flex flex-none items-center gap-[9px]">
+        <div className="flex min-w-0 flex-col items-end gap-0.75">
+          {/* At the narrow-Android floor (<=360px) "Out of guesses" would widen the
+              stack and push it off the right edge — cap it so it wraps to two lines
+              there; "Solved"/"Perfect" never reach the cap, so they stay one line. */}
+          <span
+            className={
+              "text-right text-[10px] font-semibold uppercase leading-tight tracking-[0.16em] max-[360px]:max-w-[4.5rem] " +
+              (won ? "text-emerald-400" : "text-zinc-400")
+            }
+          >
+            {label}
+          </span>
+          <span className="font-display text-[26px] font-bold leading-none tracking-[-0.02em] text-[#efefe6]">
+            +{game.score.toLocaleString()}
           </span>
         </div>
-        {/* arrow */}
         <span
-          className="absolute right-[17px] top-full h-3 w-3 -translate-y-1/2 rotate-45 bg-zinc-900"
+          className={
+            "inline-grid h-[15px] w-[15px] flex-none place-items-center rounded-full border font-serif text-[10px] font-bold not-italic leading-none transition-colors duration-150 " +
+            (open ? "border-zinc-400 text-[#efefe6]" : "border-zinc-600 text-zinc-500")
+          }
           aria-hidden
-        />
+        >
+          i
+        </span>
       </div>
     </div>
   );
@@ -283,8 +281,6 @@ const BTN_ICON =
   "inline-flex h-[42px] w-[42px] flex-none items-center justify-center cursor-pointer rounded-full border border-zinc-600 text-zinc-100 transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
 const BTN_PRIMARY =
   "inline-flex h-[42px] items-center justify-center cursor-pointer rounded-full px-5.5 border border-zinc-100 bg-zinc-100 text-zinc-900 font-semibold text-sm transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
-const BTN_ICON_PRIMARY =
-  "inline-flex h-[42px] w-[42px] flex-none items-center justify-center cursor-pointer rounded-full border border-zinc-100 bg-zinc-100 text-zinc-900 transition-opacity duration-150 ease-out active:scale-[0.97]";
 
 const SPRING = "cubic-bezier(.34,1.56,.64,1)";
 const GLIDE = "cubic-bezier(.22,.61,.36,1)";
@@ -393,8 +389,6 @@ export function Board({
   onCommit,
   onFinish,
   onFeedback,
-  onJumpToSelf,
-  canJump,
   initialRevealed = [],
 }: {
   game: Game;
@@ -408,10 +402,6 @@ export function Board({
   // "couldn’t save that guess" note when a background commit fails after retries
   // (guess results show on the Submit pill instead).
   onFeedback: (msg: string) => void;
-  // jump the roster list to your row and pulse it (end-screen locate arrow).
-  onJumpToSelf: () => void;
-  // whether you have a row in the roster — gates the locate arrow.
-  canJump: boolean;
   // seeds revealed-on-loss bars when rehydrating a finished game (preview harness).
   initialRevealed?: number[];
 }) {
@@ -992,59 +982,10 @@ export function Board({
     );
   }
 
-  // End-screen footer — replaces the controls with the score summary at the same
-  // footprint: mistakes dots pinned left (same spot as in play), the solve time and
-  // groups centered, and the score (right-aligned, serif) with an optional locate
-  // arrow that scrolls the roster to your row and pulses it.
+  // End-screen footer — replaces the controls at the same footprint with the run
+  // summary, which cross-fades in place to the itemized score breakdown on inspect
+  // (hover/tap). See EndSummary.
   function renderBelowEnd() {
-    const won = game.status === "won";
-    const perfect = won && game.mistakesLeft === MAX_MISTAKES;
-    const label = perfect ? "Perfect" : won ? "Solved" : "Out of guesses";
-    return (
-      <div className="flex items-center gap-3 max-[360px]:gap-2">
-        <span
-          className="inline-flex flex-none items-center gap-1.75"
-          aria-label="Mistakes remaining"
-        >
-          {Array.from({ length: MAX_MISTAKES }, (_, i) => (
-            <span
-              key={i}
-              className={
-                "inline-block h-3.5 w-3.5 rounded-full " +
-                (i < game.mistakesLeft ? "bg-zinc-300" : "bg-zinc-700")
-              }
-            />
-          ))}
-        </span>
-        <div className="flex flex-1 flex-col items-center justify-center gap-0.5">
-          <div className="flex items-center gap-1.75 text-[13px] tabular-nums text-zinc-400">
-            <span>{fmtClock(game.durationMs)}</span>
-            <span className="text-zinc-700">·</span>
-            <span>{game.groupsSolved}/4</span>
-          </div>
-          <ResetCountdown className="text-[11px] tabular-nums text-zinc-500" />
-        </div>
-        <div className="flex flex-none items-center gap-3.5 max-[360px]:gap-2.5">
-          <EndScore game={game} won={won} label={label} />
-          {canJump && (
-            <HoverButton
-              className={BTN_ICON_PRIMARY}
-              hover="opacity-85"
-              onClick={onJumpToSelf}
-              aria-label="Jump to your row"
-              title="Jump to your row"
-            >
-              <Navigation
-                size={16}
-                strokeWidth={2}
-                fill="currentColor"
-                className="-translate-x-px"
-                aria-hidden
-              />
-            </HoverButton>
-          )}
-        </div>
-      </div>
-    );
+    return <EndSummary game={game} />;
   }
 }

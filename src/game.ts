@@ -249,3 +249,23 @@ export class Game {
     return this.history.map((row) => row.map((l) => LEVELS[l].emoji).join('')).join('\n');
   }
 }
+
+// Score of a finished run from roster-level facts (deduced groups, mistakes left,
+// duration) — the same arithmetic as Game.scoreBreakdown above, for callers that
+// only have a roster row, not a Game (the Live tab shows finished players' scores).
+// The roster's solvedCount is deduced groups (no loss back-fill), so it matches
+// groupsSolved on both outcomes. Kept beside the class so the two move together.
+export function finishedScore(
+  done: 'won' | 'lost',
+  groupsSolved: number,
+  mistakesLeft: number,
+  durationMs: number,
+): number {
+  const completion = SCORING.completionPerGroupSq * groupsSolved * groupsSolved;
+  if (done === 'lost') return completion;
+  const sec = durationMs / 1000;
+  const t = SCORING.speedTargetSec;
+  const speed = Math.round(SCORING.speedMax * Math.max(0, Math.min(1, (t - sec) / t)));
+  const penalty = SCORING.mistakePenalty * (MAX_MISTAKES - mistakesLeft);
+  return Math.max(0, completion + SCORING.solveBonus + speed - penalty);
+}

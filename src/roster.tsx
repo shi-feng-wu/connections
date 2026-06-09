@@ -1,36 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, X } from "lucide-react";
-import { LEVELS, MAX_MISTAKES } from "./game";
+import { Check, RotateCw, X } from "lucide-react";
+import { ResetCountdown } from "./countdown";
+import { finishedScore, LEVELS, MAX_MISTAKES } from "./game";
 import type { PlayerState } from "./player";
 import { HoverButton } from "./hoverbutton";
 import { FlipList } from "./fliplist";
 import { LedgerBody, StandingsEmpty, type Standings } from "./season";
 
 const EMPTY_STANDINGS: Standings = { board: [], self: null };
-const GLIDE = "cubic-bezier(0.22,0.61,0.36,1)";
-
-// Inset focus pulse for the located row — a cream ring + inner glow, drawn entirely
-// with inset shadows so it hugs the row's rounded rect (never clipped by the scroll
-// container) and overlays any row tint (live /10, standings /6) without a background
-// change, reverting cleanly when it ends.
-const LOCATE_PULSE: Keyframe[] = [
-  { boxShadow: "inset 0 0 0 0 rgba(244,244,245,0), inset 0 0 0 0 rgba(244,244,245,0)" },
-  {
-    boxShadow:
-      "inset 0 0 0 1.8px rgba(244,244,245,0.95), inset 0 0 18px rgba(244,244,245,0.28)",
-    offset: 0.12,
-  },
-  {
-    boxShadow:
-      "inset 0 0 0 1px rgba(244,244,245,0.45), inset 0 0 11px rgba(244,244,245,0.15)",
-    offset: 0.5,
-  },
-  { boxShadow: "inset 0 0 0 0 rgba(244,244,245,0), inset 0 0 0 0 rgba(244,244,245,0)" },
-];
 
 // Live room tracker, redesigned as a Live / Leaderboard tab heading over one ranked
-// list (rank, avatar, mini-board, name, mistake dots, time + ✓/✗), with a bottom
-// fade and an optional pinned "Your standing" (desktop rail only).
+// list (rank, avatar, mini-board, name, mistake dots — or the score once a run is
+// done — time + ✓/✗), with a bottom fade.
 // Avatars stand in for Discord photos. Category colors only mean "solved";
 // emerald is reserved for live presence (a steady ring on players currently in the
 // Activity). Everyone who has joined stays listed; the ring just marks who's still here.
@@ -223,6 +204,49 @@ function Mistakes({ p }: { p: PlayerState }) {
   );
 }
 
+const scoreOf = (p: PlayerState, now: number): number =>
+  p.done ? finishedScore(p.done, p.solvedCount, p.mistakesLeft, elapsedMs(p, now)) : 0;
+
+// Desktop only: once a run is done the mistake dots' story is over (the score
+// prices them in), so the slot shows what the player earned instead — styled like
+// the leaderboard's score cell so the two tabs rhyme. Dimmed on a loss, matching
+// the row's ✗/time. On mobile the score rides in the Status box instead (replacing
+// the ✓/✗), leaving this slot to the compressed mistake count below.
+function FinalScore({ p, now }: { p: PlayerState; now: number }) {
+  return (
+    <span
+      className={
+        "hidden flex-none text-[13px] font-extrabold tabular-nums tracking-[-0.01em] min-[900px]:inline " +
+        (p.done === "won" ? "text-[#efefe6]" : "text-zinc-500")
+      }
+    >
+      {scoreOf(p, now)}
+      <span className="ml-0.5 text-[0.62em] font-semibold tracking-[0.02em] text-zinc-500">
+        pts
+      </span>
+    </span>
+  );
+}
+
+// Mobile only: mistakes *made*, compressed to the leaderboard's Avg ✗ idiom — the
+// full dots plus the score wouldn't both fit a finished row at phone widths.
+function MissCount({ p }: { p: PlayerState }) {
+  const n = MAX_MISTAKES - p.mistakesLeft;
+  return (
+    <span className="inline-flex flex-none items-center gap-[3px] min-[900px]:hidden">
+      <X className="text-zinc-600" size={11} strokeWidth={2.8} aria-hidden />
+      <span
+        className={
+          "text-[12px] font-bold tabular-nums " +
+          (n ? "text-zinc-300" : "text-zinc-600")
+        }
+      >
+        {n}
+      </span>
+    </span>
+  );
+}
+
 // ml-auto pins the time to the box's right edge, leaving the status icon at the
 // left — anchored next to the mistake dots rather than floating with the time.
 const TIME =
@@ -231,20 +255,36 @@ const TIME =
 function Status({ p, now }: { p: PlayerState; now: number }) {
   const time = fmtElapsed(p, now);
   // Fixed width (not min-w) sized for the widest case — status icon + H:MM:SS —
-  // so the time column never changes size as the elapsed time grows past 1h.
+  // so the time column never changes size as the elapsed time grows past 1h. A
+  // finished mobile box is a touch wider: the score stands in for the ✓/✗ there
+  // (the icons are desktop-only) and three digits outsize the glyph.
   const box =
-    "flex w-[66px] flex-none items-center gap-1.5 min-[900px]:w-[74px]";
+    (p.done ? "flex w-[72px]" : "flex w-[66px]") +
+    " flex-none items-center gap-1.5 min-[900px]:w-[74px]";
+  // mobile stand-in for the ✓/✗: the run's score, bright on a win, dim on a loss
+  const pts = p.done && (
+    <span
+      className={
+        "flex-none text-[12.5px] font-extrabold tabular-nums min-[900px]:hidden " +
+        (p.done === "won" ? "text-[#efefe6]" : "text-zinc-500")
+      }
+    >
+      {scoreOf(p, now)}
+    </span>
+  );
   if (p.done === "lost")
     return (
       <div className={box}>
-        <X className="flex-none text-zinc-500" size={15} strokeWidth={2.6} aria-label="Out" />
+        <X className="hidden flex-none text-zinc-500 min-[900px]:block" size={15} strokeWidth={2.6} aria-label="Out" />
+        {pts}
         <span className={TIME + " text-zinc-600"}>{time}</span>
       </div>
     );
   if (p.done === "won")
     return (
       <div className={box}>
-        <Check className="flex-none text-zinc-100" size={15} strokeWidth={2.8} aria-label="Solved" />
+        <Check className="hidden flex-none text-zinc-100 min-[900px]:block" size={15} strokeWidth={2.8} aria-label="Solved" />
+        {pts}
         <span className={TIME + " text-zinc-200"}>{time}</span>
       </div>
     );
@@ -257,21 +297,21 @@ function Status({ p, now }: { p: PlayerState; now: number }) {
 
 // w-5.5 matches the leaderboard's 22px rank column (season.tsx LGRID) so the rank number
 // sits at the same x in both tabs. The rank→avatar gap is then tuned per breakpoint to
-// match the leaderboard's (its grid gap-2 + the player cell's pl-1/pl-0): mr-1 supplies
-// the mobile pl-1, and on desktop the row's wider gap-2.75 overshoots the leaderboard's
-// gap-2 by 3px, so -mr-0.75 trims it back. Net: switching Live ↔ Season/All-time never
-// nudges the row.
+// match the leaderboard's (its grid gap + the player cell's pl-1/pl-0): on mobile the
+// leaderboard's gap-1.5 + pl-1 totals 10px, so mr-0.5 tops up this row's gap-2; on
+// desktop the row's wider gap-2.75 overshoots the leaderboard's gap-2 by 3px, so
+// -mr-0.75 trims it back. Net: switching Live ↔ Season/All-time never nudges the row.
 function Rank({ rank }: { rank: number }) {
   if (rank === 1)
     return (
-      <div className="mr-1 w-5.5 flex-none text-center text-[13px] tabular-nums min-[900px]:-mr-0.75">
+      <div className="mr-0.5 w-5.5 flex-none text-center text-[13px] tabular-nums min-[900px]:-mr-0.75">
         <span className="inline-grid h-5 w-5 place-items-center rounded-md bg-zinc-100 text-[12px] font-extrabold text-zinc-900">
           1
         </span>
       </div>
     );
   return (
-    <div className="mr-1 w-5.5 flex-none text-center text-[13px] tabular-nums text-zinc-500 min-[900px]:-mr-0.75">
+    <div className="mr-0.5 w-5.5 flex-none text-center text-[13px] tabular-nums text-zinc-500 min-[900px]:-mr-0.75">
       {rank}
     </div>
   );
@@ -301,7 +341,7 @@ function RosterRow({
       ref={rowRef}
       data-flip-row={p.userId}
       className={
-        "relative flex flex-none items-center gap-2 rounded-[9px] px-2.5 py-1.5 min-[900px]:gap-2.75 min-[900px]:px-3 min-[900px]:py-2.25 " +
+        "relative flex flex-none items-center gap-2 rounded-[9px] px-2.5 py-2 min-[900px]:gap-2.75 min-[900px]:px-3 min-[900px]:py-2.25 " +
         (you ? "bg-zinc-100/10" : "bg-zinc-900/60")
       }
     >
@@ -317,7 +357,14 @@ function RosterRow({
         {p.name}
         {you ? " (you)" : ""}
       </span>
-      <Mistakes p={p} />
+      {p.done ? (
+        <>
+          <MissCount p={p} />
+          <FinalScore p={p} now={now} />
+        </>
+      ) : (
+        <Mistakes p={p} />
+      )}
       <Status p={p} now={now} />
     </div>
   );
@@ -409,20 +456,16 @@ function Tabs({
 export function Roster({
   players,
   selfId,
-  selfName,
-  selfAvatar,
   view: viewProp,
   onViewChange,
   scope,
   onScopeChange,
   season,
   allTime,
-  jumpSignal,
+  nextPuzzle,
 }: {
   players: PlayerState[];
   selfId: string;
-  selfName?: string;
-  selfAvatar?: string;
   // controlled by GameView; uncontrolled (own state) when omitted (preview panel).
   view?: RosterView;
   onViewChange?: (v: RosterView) => void;
@@ -432,8 +475,9 @@ export function Roster({
   // cumulative standings behind the Season / All-time tabs; tabs hidden when absent.
   season?: Standings;
   allTime?: Standings;
-  // bump (from the end-screen locate arrow) to scroll your row in + pulse it.
-  jumpSignal?: number;
+  // your run is over → pin the next-puzzle countdown under the list (the footer's
+  // score summary stays clean; this is the quiet "rail footer" slot of the redesign).
+  nextPuzzle?: boolean;
 }) {
   const [viewState, setViewState] = useState<RosterView>("live");
   const view = viewProp ?? viewState;
@@ -452,50 +496,26 @@ export function Roster({
   const flashing = useFlash(players);
   const sorted = useMemo(() => sortRoster(players, now), [players, now]);
 
-  // Locate arrow. Clicking it (jumpSignal bumps) scrolls to + pulses your row in the
-  // tab you're on, WITHOUT switching tabs; then for whichever other tab you open next
-  // it repositions to your row once (no pulse) so it's already in view. selfRowRef
-  // tracks whichever tab's "you" row is currently mounted. `repositioned` remembers,
-  // per tab, the last jump it handled — so a tab repositions at most once per jump.
+  // Switching tabs scrolls your row into view in the list you just opened, so you
+  // never have to hunt for yourself. The active panel remounts per tab (panelKey),
+  // so by the time this effect runs selfRowRef already points at the new tab's "you"
+  // row. Skip the first run (the initial mount is not a tab switch); if you have no
+  // row of your own, selfRowRef stays null and the scroll is simply a no-op.
   const selfRowRef = useRef<HTMLDivElement>(null);
-  const lastJump = useRef(0);
-  const repositioned = useRef<Record<RosterView, number>>({
-    live: 0,
-    season: 0,
-    all: 0,
-  });
-  const armed = useRef(false);
+  const mounted = useRef(false);
 
-  const positionSelf = (pulse: boolean): void => {
-    const row = selfRowRef.current;
-    if (!row) return;
-    row.scrollIntoView({
-      behavior: pulse ? "smooth" : "auto",
-      // the live list owns its scroller (safe to center); the standings table keeps
-      // your row pinned/visible, so only nudge it in to avoid scrolling the page.
-      block: view === "live" ? "center" : "nearest",
-    });
-    if (pulse) row.animate(LOCATE_PULSE, { duration: 1700, easing: GLIDE });
-  };
-
-  // The click itself: pulse + scroll the current tab, and mark it handled for this
-  // jump so re-opening it later doesn't re-reposition. Skip the initial mount.
   useEffect(() => {
-    if (!armed.current) {
-      armed.current = true;
+    if (!mounted.current) {
+      mounted.current = true;
       return;
     }
-    if (!jumpSignal) return;
-    lastJump.current = jumpSignal;
-    repositioned.current[view] = jumpSignal;
-    positionSelf(true);
-  }, [jumpSignal]);
-
-  // Opening a different tab after a jump: reposition to your row once (no pulse).
-  useEffect(() => {
-    if (!lastJump.current || repositioned.current[view] === lastJump.current) return;
-    repositioned.current[view] = lastJump.current;
-    positionSelf(false);
+    selfRowRef.current?.scrollIntoView({
+      behavior: "smooth",
+      // the live list owns its scroller (safe to center); in the standings table —
+      // where you only have a row if you place — just nudge it in to avoid
+      // scrolling the page.
+      block: view === "live" ? "center" : "nearest",
+    });
   }, [view]);
 
   return (
@@ -516,8 +536,6 @@ export function Roster({
             <LedgerBody
               data={standingsData}
               selfId={selfId}
-              name={selfName ?? "You"}
-              avatar={selfAvatar}
               selfRowRef={selfRowRef}
               fill
             />
@@ -532,7 +550,7 @@ export function Roster({
           // Own scroller (matches the standings list): flex-1 + min-h-0 lets it fill the
           // rail and overflow-y-auto scrolls internally instead of spilling past the board
           // on desktop when the live room is long (the rail is a fixed-height panel there).
-          className="list-fade flex min-h-0 flex-1 animate-tab-in flex-col gap-1.25 overflow-y-auto scrollbar-thin pb-6 min-[900px]:gap-1.5"
+          className="list-fade flex min-h-0 flex-1 animate-tab-in flex-col gap-1.5 overflow-y-auto scrollbar-thin pb-6"
         >
           {sorted.length ? (
             sorted.map((p, i) => {
@@ -556,6 +574,18 @@ export function Roster({
             </div>
           )}
         </FlipList>
+      )}
+      {/* once your run is over, when today's board resets becomes relevant — a quiet
+          countdown row pinned under whichever list is open (the live list's bottom
+          fade dissolves into it) */}
+      {nextPuzzle && (
+        <div className="flex flex-none items-center gap-2.25 border-t border-white/[0.07] px-1 pt-2.75">
+          <RotateCw size={15} strokeWidth={2.25} className="flex-none text-zinc-500" aria-hidden />
+          <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-zinc-500">
+            Next puzzle
+          </span>
+          <ResetCountdown className="ml-auto text-[14px] font-semibold tabular-nums text-zinc-300" />
+        </div>
       )}
     </>
   );

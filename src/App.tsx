@@ -783,8 +783,6 @@ export function App({
         gameKey={gameKey}
         players={roster}
         selfId={meRef.current.id}
-        selfName={meRef.current.name}
-        selfAvatar={meRef.current.avatar}
         season={season}
         allTime={allTime}
         // Channel/Server toggle only in a guild — a DM/group (c: scope) has no distinction.

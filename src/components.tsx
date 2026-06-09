@@ -340,8 +340,6 @@ export function GameView({
   gameKey,
   players,
   selfId,
-  selfName,
-  selfAvatar,
   season,
   allTime,
   scope,
@@ -355,8 +353,6 @@ export function GameView({
   gameKey: string;
   players: PlayerState[];
   selfId: string;
-  selfName: string;
-  selfAvatar?: string;
   season: Standings;
   allTime: Standings;
   // shared Channel/Server toggle (guild launches only); omitted → no toggle.
@@ -376,10 +372,10 @@ export function GameView({
   // which list the rail/section shows: the live room, or the cumulative season /
   // all-time table (same table, different window).
   const [view, setView] = useState<RosterView>("live");
-  // bumping this asks the Roster to scroll to + pulse your row in the current tab
-  // (end-screen locate arrow) without changing tabs.
-  const [jumpNonce, setJumpNonce] = useState(0);
-  const jumpToSelf = (): void => setJumpNonce((n) => n + 1);
+  // whether today's run is over — drives the next-puzzle countdown under the roster.
+  // Mirrored into state (not read off game.status at render) so the Board finishing
+  // mid-session re-renders this view even when nothing else changes.
+  const [done, setDone] = useState(game.status !== "playing");
 
   function showFeedback(msg: string): void {
     setFeedbackText(msg);
@@ -391,9 +387,8 @@ export function GameView({
   useEffect(() => {
     setFeedbackOn(false);
     setView("live");
+    setDone(game.status !== "playing");
   }, [game]);
-
-  const canJump = players.some((p) => p.userId === selfId);
 
   // Grow the whole board to fill large desktop windows (mobile is untouched).
   const scaleRef = useRef<HTMLDivElement>(null);
@@ -435,10 +430,9 @@ export function GameView({
           onFeedback={showFeedback}
           onFinish={() => {
             setView("live");
+            setDone(true);
             onFinish();
           }}
-          onJumpToSelf={jumpToSelf}
-          canJump={canJump}
           initialRevealed={initialRevealed}
         />
       </div>
@@ -451,15 +445,13 @@ export function GameView({
           <Roster
             players={players}
             selfId={selfId}
-            selfName={selfName}
-            selfAvatar={selfAvatar}
             view={view}
             onViewChange={setView}
             scope={scope}
             onScopeChange={onScopeChange}
             season={season}
             allTime={allTime}
-            jumpSignal={jumpNonce}
+            nextPuzzle={done}
           />
         </div>
       </div>

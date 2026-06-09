@@ -41,11 +41,12 @@ export function fmtCountdown(ms: number): string {
 // Self-contained 1s ticker: keeps re-renders local to the label (not the App tree) and
 // re-reads Intl each tick, so a mid-session clock/timezone change self-corrects. Cleared on
 // unmount — the across-midnight puzzle reload remounts it and re-seeds from the fresh value.
+// Renders just the bare "Xh Ym" value; the caller supplies its own "Next puzzle" label.
 export function ResetCountdown({ className = "" }: { className?: string }) {
   const [ms, setMs] = useState(() => msUntilNextEtMidnight());
   useEffect(() => {
     const id = setInterval(() => setMs(msUntilNextEtMidnight()), 1000);
     return () => clearInterval(id);
   }, []);
-  return <span className={className}>Next puzzle in {fmtCountdown(ms)}</span>;
+  return <span className={className}>{fmtCountdown(ms)}</span>;
 }

@@ -193,8 +193,6 @@ export function DayTurnover({
         (shown ? "opacity-100" : "opacity-0")
       }
     >
-      {/* faint center glow so the flat black has depth behind the lockup */}
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(58%_46%_at_50%_42%,rgba(255,255,255,0.05),transparent_72%)]" />
       {/* the lockup eases up + unblurs (animate-dayrise); delayBase holds the mark a
           beat so the rise reads before the squares start bouncing */}
       <div className="animate-dayrise">

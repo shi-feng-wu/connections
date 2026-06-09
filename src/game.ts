@@ -15,6 +15,17 @@ export type SubmitResult =
   | { type: 'noop' | 'duplicate' | 'oneaway' | 'incorrect' | 'win' | 'lose' }
   | { type: 'correct'; level: number };
 
+// Itemized end-screen score (see Game.scoreBreakdown). All point fields are
+// non-negative; `penalty` is the amount mistakes subtract. `total` === Game.score.
+export type ScoreBreakdown = {
+  completion: number; // "Categories" — full-clear on a win, convex partial credit on a loss
+  solveBonus: number; // flat reward for clearing all four (wins only)
+  speed: number; // time bonus, 0–speedMax (wins only)
+  penalty: number; // points lost to mistakes (wins only)
+  mistakes: number; // mistake count, for the tooltip's sub-label
+  total: number;
+};
+
 // small enough to broadcast to everyone in the activity.
 export type Progress = {
   mistakesLeft: number;
@@ -204,21 +215,35 @@ export class Game {
     return levels;
   }
 
-  // 0 while playing. Wins reward fewer mistakes + speed; losses get convex
-  // partial credit for groups reached.
-  get score(): number {
-    if (this.status === 'playing') return 0;
-    if (this.status === 'lost') {
-      const g = this.groupsSolved;
-      return SCORING.completionPerGroupSq * g * g;
+  // Itemized score, the single source of truth the `score` total is summed from —
+  // also fed to the end-screen breakdown tooltip. `completion` is the "Categories"
+  // line: full-clear credit on a win, convex partial credit on a loss. Wins add a
+  // flat solveBonus + a speed term and subtract a mistake `penalty`; losses carry
+  // none of those (a loss always spends MAX_MISTAKES, so a penalty would
+  // double-count — see the SCORING note above). `total` clamps at 0 and equals
+  // `score`.
+  get scoreBreakdown(): ScoreBreakdown {
+    const mistakes = MAX_MISTAKES - this.mistakesLeft;
+    if (this.status !== 'won') {
+      // playing → 0; lost → convex partial credit for groups reached.
+      const g = this.status === 'lost' ? this.groupsSolved : 0;
+      const completion = SCORING.completionPerGroupSq * g * g;
+      return { completion, solveBonus: 0, speed: 0, penalty: 0, mistakes, total: completion };
     }
     const totalGroups = this.puzzle.groups.length;
-    const mistakes = MAX_MISTAKES - this.mistakesLeft;
     const sec = (this.durationMs ?? 0) / 1000;
     const t = SCORING.speedTargetSec;
     const speed = Math.round(SCORING.speedMax * Math.max(0, Math.min(1, (t - sec) / t)));
-    const base = SCORING.completionPerGroupSq * totalGroups * totalGroups + SCORING.solveBonus;
-    return Math.max(0, base - SCORING.mistakePenalty * mistakes + speed);
+    const completion = SCORING.completionPerGroupSq * totalGroups * totalGroups;
+    const penalty = SCORING.mistakePenalty * mistakes;
+    const total = Math.max(0, completion + SCORING.solveBonus + speed - penalty);
+    return { completion, solveBonus: SCORING.solveBonus, speed, penalty, mistakes, total };
+  }
+
+  // 0 while playing. Wins reward fewer mistakes + speed; losses get convex
+  // partial credit for groups reached.
+  get score(): number {
+    return this.scoreBreakdown.total;
   }
 
   shareGrid(): string {

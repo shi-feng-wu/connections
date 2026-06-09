@@ -1,6 +1,7 @@
 import { Eraser, EyeOff, Navigation, Shuffle as ShuffleIcon } from "lucide-react";
 import {
   useEffect,
+  useId,
   useLayoutEffect,
   useReducer,
   useRef,
@@ -25,6 +26,184 @@ const fmtClock = (ms: number | null): string => {
   const s = Math.max(1, Math.round((ms ?? 0) / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
+
+// One line of the score-breakdown tooltip: label (+ optional faint sub) on the
+// left, signed value on the right. `neg` greys the value for the mistakes row.
+function ScoreRow({
+  label,
+  sub,
+  value,
+  neg,
+}: {
+  label: string;
+  sub?: string;
+  value: string;
+  neg?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2.5 whitespace-nowrap py-[3px] text-[12.5px] text-zinc-300">
+      <span className="flex min-w-0 items-baseline gap-1.75 whitespace-nowrap">
+        <span>{label}</span>
+        {sub && <span className="tabular-nums text-zinc-500">{sub}</span>}
+      </span>
+      <span
+        className={
+          "flex-none font-bold tabular-nums " +
+          (neg ? "text-zinc-400" : "text-emerald-400")
+        }
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+// End-screen score block: the "Solved/Perfect" label + the serif total. On a win
+// it gains an ⓘ affordance and a hover/tap tooltip that itemizes the score
+// (categories, solve bonus, speed, mistakes). Hover is mouse-only — this ships as
+// a Discord Activity where CSS :hover sticks after a tap (same reason as
+// HoverButton) — so a real mouse opens it on hover, touch toggles it on tap, and a
+// tap/Esc outside closes a pinned-open tip. Losses show the plain total (their
+// breakdown is just the one partial-credit line, so a tooltip adds nothing).
+function EndScore({
+  game,
+  won,
+  label,
+}: {
+  game: Game;
+  won: boolean;
+  label: string;
+}) {
+  const b = game.scoreBreakdown;
+  const [over, setOver] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const tipId = useId();
+  const open = over || pinned;
+
+  useEffect(() => {
+    if (!pinned) return;
+    const onDown = (e: PointerEvent): void => {
+      if (!ref.current?.contains(e.target as Node)) setPinned(false);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setPinned(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [pinned]);
+
+  const stack = (
+    <div className="flex min-w-0 flex-col items-end gap-0.75">
+      {/* At the narrow-Android floor (<=360px) the longest label, "Out of
+          guesses", would push the score + jump button off the right edge. Cap it
+          so it wraps to two right-aligned lines there; "Solved"/"Perfect" are
+          short enough to never reach the cap, so they stay one line. */}
+      <span
+        className={
+          "text-right text-[10px] font-semibold uppercase leading-tight tracking-[0.16em] max-[360px]:max-w-[4.5rem] " +
+          (won ? "text-emerald-400" : "text-zinc-400")
+        }
+      >
+        {label}
+      </span>
+      <span className="font-display text-[26px] font-bold leading-none tracking-[-0.02em] text-[#efefe6]">
+        +{game.score.toLocaleString()}
+      </span>
+    </div>
+  );
+
+  if (!won) return stack;
+
+  return (
+    <div
+      ref={ref}
+      className="relative flex cursor-help items-center gap-[9px] [-webkit-tap-highlight-color:transparent]"
+      role="button"
+      tabIndex={0}
+      aria-label="Score breakdown"
+      aria-expanded={open}
+      aria-describedby={tipId}
+      onPointerEnter={(e) => {
+        if (e.pointerType === "mouse") setOver(true);
+      }}
+      onPointerLeave={(e) => {
+        if (e.pointerType === "mouse") setOver(false);
+      }}
+      onClick={() => setPinned((p) => !p)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setPinned((p) => !p);
+        }
+      }}
+    >
+      {stack}
+      <span
+        className={
+          "inline-grid h-[15px] w-[15px] place-items-center rounded-full border font-serif text-[10px] font-bold not-italic leading-none transition-colors duration-150 " +
+          (open ? "border-zinc-400 text-[#efefe6]" : "border-zinc-600 text-zinc-500")
+        }
+        aria-hidden
+      >
+        i
+      </span>
+      {/* Always mounted; pops ABOVE the score (the footer sits low in the column)
+          and right-aligns so it never spills off the narrow frame. Only the
+          transform tweens — opacity/visibility flip instantly so a throttled tab
+          can't strand it half-shown. */}
+      <div
+        id={tipId}
+        role="tooltip"
+        onClick={(e) => e.stopPropagation()}
+        className={
+          "absolute bottom-[calc(100%+12px)] right-0 z-30 w-[226px] origin-bottom-right rounded-[10px] bg-zinc-900 px-[13px] pb-[12px] pt-[11px] text-left shadow-[0_14px_34px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.07)] transition-transform duration-150 ease-out " +
+          (open
+            ? "visible translate-y-0 scale-100 opacity-100"
+            : "invisible pointer-events-none translate-y-[5px] scale-[0.97] opacity-0")
+        }
+      >
+        <div className="mb-[7px] text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+          Score breakdown
+        </div>
+        <ScoreRow
+          label="Categories"
+          sub={String(game.groupsSolved)}
+          value={`+${b.completion}`}
+        />
+        <ScoreRow label="Solve Bonus" value={`+${b.solveBonus}`} />
+        <ScoreRow
+          label="Speed"
+          sub={fmtClock(game.durationMs)}
+          value={`+${b.speed}`}
+        />
+        {b.penalty > 0 && (
+          <ScoreRow
+            label="Mistakes"
+            sub={String(b.mistakes)}
+            value={`−${b.penalty}`}
+            neg
+          />
+        )}
+        <div className="mt-[6px] flex items-center justify-between gap-2.5 whitespace-nowrap border-t border-white/[0.09] pt-[8px] text-[12.5px]">
+          <span className="font-semibold text-zinc-100">Total</span>
+          <span className="font-bold tabular-nums text-[14px] text-[#efefe6]">
+            {game.score.toLocaleString()}
+          </span>
+        </div>
+        {/* arrow */}
+        <span
+          className="absolute right-[17px] top-full h-3 w-3 -translate-y-1/2 rotate-45 bg-zinc-900"
+          aria-hidden
+        />
+      </div>
+    </div>
+  );
+}
 
 const TILE =
   "relative h-[var(--tile-h)] min-w-0 rounded-lg font-extrabold uppercase tracking-[0.01em] leading-none px-1.5 flex items-center justify-center cursor-pointer select-none transition duration-150 ease-out";
@@ -844,23 +1023,7 @@ export function Board({
           <ResetCountdown className="text-[11px] tabular-nums text-zinc-500" />
         </div>
         <div className="flex flex-none items-center gap-3.5 max-[360px]:gap-2.5">
-          <div className="flex min-w-0 flex-col items-end gap-0.75">
-            {/* At the narrow-Android floor (<=360px) the longest label, "Out of
-                guesses", would push the score + jump button off the right edge. Cap
-                it so it wraps to two right-aligned lines there; "Solved"/"Perfect"
-                are short enough to never reach the cap, so they stay one line. */}
-            <span
-              className={
-                "text-right text-[10px] font-semibold uppercase leading-tight tracking-[0.16em] max-[360px]:max-w-[4.5rem] " +
-                (won ? "text-emerald-400" : "text-zinc-400")
-              }
-            >
-              {label}
-            </span>
-            <span className="font-display text-[26px] font-bold leading-none tracking-[-0.02em] text-[#efefe6]">
-              +{game.score.toLocaleString()}
-            </span>
-          </div>
+          <EndScore game={game} won={won} label={label} />
           {canJump && (
             <HoverButton
               className={BTN_ICON_PRIMARY}

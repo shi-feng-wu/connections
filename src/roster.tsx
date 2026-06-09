@@ -207,11 +207,10 @@ function Mistakes({ p }: { p: PlayerState }) {
 const scoreOf = (p: PlayerState, now: number): number =>
   p.done ? finishedScore(p.done, p.solvedCount, p.mistakesLeft, elapsedMs(p, now)) : 0;
 
-// Desktop only: once a run is done the mistake dots' story is over (the score
-// prices them in), so the slot shows what the player earned instead — styled like
-// the leaderboard's score cell so the two tabs rhyme. Dimmed on a loss, matching
-// the row's ✗/time. On mobile the score rides in the Status box instead (replacing
-// the ✓/✗), leaving this slot to the compressed mistake count below.
+// Desktop only: a finished row keeps its mistake dots and adds the score beside
+// them — styled like the leaderboard's score cell so the two tabs rhyme, dimmed on
+// a loss to match the row's ✗/time. On mobile the score rides in the Status box
+// instead (replacing the ✓/✗), since dots + score + time won't all fit there.
 function FinalScore({ p, now }: { p: PlayerState; now: number }) {
   return (
     <span
@@ -223,25 +222,6 @@ function FinalScore({ p, now }: { p: PlayerState; now: number }) {
       {scoreOf(p, now)}
       <span className="ml-0.5 text-[0.62em] font-semibold tracking-[0.02em] text-zinc-500">
         pts
-      </span>
-    </span>
-  );
-}
-
-// Mobile only: mistakes *made*, compressed to the leaderboard's Avg ✗ idiom — the
-// full dots plus the score wouldn't both fit a finished row at phone widths.
-function MissCount({ p }: { p: PlayerState }) {
-  const n = MAX_MISTAKES - p.mistakesLeft;
-  return (
-    <span className="inline-flex flex-none items-center gap-[3px] min-[900px]:hidden">
-      <X className="text-zinc-600" size={11} strokeWidth={2.8} aria-hidden />
-      <span
-        className={
-          "text-[12px] font-bold tabular-nums " +
-          (n ? "text-zinc-300" : "text-zinc-600")
-        }
-      >
-        {n}
       </span>
     </span>
   );
@@ -357,14 +337,8 @@ function RosterRow({
         {p.name}
         {you ? " (you)" : ""}
       </span>
-      {p.done ? (
-        <>
-          <MissCount p={p} />
-          <FinalScore p={p} now={now} />
-        </>
-      ) : (
-        <Mistakes p={p} />
-      )}
+      <Mistakes p={p} />
+      {p.done && <FinalScore p={p} now={now} />}
       <Status p={p} now={now} />
     </div>
   );

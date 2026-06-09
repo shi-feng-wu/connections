@@ -28,13 +28,15 @@ describe("presenceSignature", () => {
 });
 
 describe("buildActivity", () => {
-  it("shows puzzle number, progress, a live timer, and the icon while playing", () => {
+  it("shows puzzle number, progress, and a live timer while playing", () => {
     const a = buildActivity({ ...base, solvedCount: 2, mistakesLeft: 3 });
     expect(a.type).toBe(0);
     expect(a.details).toBe("Puzzle #123");
     expect(a.state).toBe("2/4 groups · 3 mistakes left");
     expect(a.timestamps?.start).toBe(Math.floor(base.joinedAt / 1000));
-    expect(a.assets.large_image).toBeTruthy();
+    // the large image rides on VITE_RP_ICON_URL, which is unset here (and in any
+    // deploy that hasn't configured it) — the card then omits assets entirely
+    expect(a.assets).toBeUndefined();
   });
 
   it("singularizes the final mistake", () => {

@@ -8,10 +8,16 @@ The daily NYT Connections puzzle as a Discord Activity (the embedded GUI that op
 - Also runs standalone in a plain browser (skips Discord/Supabase) for UI dev
 
 ```
-src/        client: main.tsx (bootstrap), App.tsx (state/wiring), components.tsx (UI),
-            game.ts (model), realtime.ts, leaderboard.ts, supabase.ts, toast.ts
-api/        Vercel functions: puzzle.ts (NYT), token.ts (OAuth), _nyt.ts (shared)
-supabase/   schema.sql: the leaderboard table (run once)
+src/        client: main.tsx (bootstrap), App.tsx (state/wiring), components.tsx +
+            board.tsx (game UI), game.ts (model), roster.tsx + season.tsx (players
+            panel / standings), presence.ts, leaderboard.ts, card-draw.ts (Discord
+            card renderer), preview.tsx (screenshot harness)
+api/        Vercel functions: puzzle.ts (NYT proxy), token.ts (OAuth), score.ts +
+            guess.ts + start.ts (server-authoritative scoring), roster.ts,
+            cron-recap.ts + interactions.ts (daily recap bot)
+supabase/   schema.sql (tables + leaderboard functions, run once),
+            recap-cron.sql (optional pg_cron trigger)
+scripts/    one-off Discord setup/inspection helpers (npm run register-commands, …)
 index.html  vite.config.ts  tsconfig.json  package.json
 ```
 
@@ -47,7 +53,7 @@ cp .env.example .env
 ```
 
 Fill in `.env`:
-- `VITE_DISCORD_CLIENT_ID`: your app ID (prefilled)
+- `VITE_DISCORD_CLIENT_ID`: your app ID (Developer Portal → General Information)
 - `DISCORD_CLIENT_SECRET`: Developer Portal → OAuth2 → Client Secret
 - `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`: from step 1 (the anon key is
   read-only; it can't write the leaderboard)
@@ -83,7 +89,7 @@ npm run typecheck   # tsc --noEmit
 
 Covers the parts that must be correct: the pure `Game` model (`game.ts`: submit
 outcomes, loss back-fill, the score formula, share grid), roster ranking
-(`roster.ts`), the HMAC session signing (`api/_session.ts`, the anti-cheat that
+(`roster.tsx`), the HMAC session signing (`api/_session.ts`, the anti-cheat that
 binds a score to a server-timed session), and the leaderboard SQL itself.
 `src/sql.test.ts` loads the real `current_streak` / `room_board` / `room_self`
 function bodies out of `supabase/schema.sql` and runs them in an in-process
@@ -93,7 +99,7 @@ screenshot harness (`preview.html` + `src/preview.tsx`).
 
 ## 4. Deploy to Vercel
 
-1. Push to GitHub (already wired: `git push`).
+1. Push the repo to GitHub.
 2. [vercel.com](https://vercel.com) → Add New → Project → import the repo.
    Vercel auto-detects Vite + the `api/` functions, no config needed.
 3. Settings → Environment Variables → add everything from your `.env`
@@ -162,7 +168,19 @@ After deploying section 4 with `DISCORD_BOT_TOKEN`, `DISCORD_PUBLIC_KEY`, and
 Personal/educational. Puzzle data is © The New York Times via their public
 endpoint; don't use commercially or against their
 [Terms](https://www.nytimes.com/content/help/rights/terms/terms-of-service.html).
-Not affiliated with NYT.
+"Connections" and its puzzle artwork are NYT trademarks (the in-app icon in
+`src/assets/` derives from them) — this project is not affiliated with or
+endorsed by The New York Times.
+
+If you fork and deploy your own instance:
+- Replace the contact address in `public/privacy.html` and `public/terms.html`
+  with your own — you are the data controller for your deployment.
+- `DISCORD_SETUP.md` and `supabase/recap-cron.sql` use `your-project.vercel.app`
+  placeholders; substitute your real production host.
+
+Fonts: [Libre Franklin](https://fonts.google.com/specimen/Libre+Franklin) and
+[Newsreader](https://fonts.google.com/specimen/Newsreader) are bundled under the
+[SIL Open Font License 1.1](https://openfontlicense.org).
 
 Leaderboard integrity. Scores are server-authoritative: `/api/score` resolves
 the player's identity from their Discord token (`/users/@me`), replays the
@@ -176,3 +194,15 @@ determined player looking up the answers to post a clean solve; but it's tied to
 their real identity and real (server-measured) time. Closing even that would need
 fully server-authoritative play (validate every guess, never send answers), which
 isn't worth the per-guess latency for a public puzzle.
+
+## Contributing
+
+PRs welcome. Before opening one: `npm test && npm run typecheck` (CI runs both
+plus a build). UI changes can be eyeballed without any backend via the
+screenshot harness — `npx vite`, then open `/preview.html` (hash filters like
+`#won`, `#lost`, `#progress` isolate a state).
+
+## License
+
+[MIT](LICENSE). Bundled fonts are OFL-licensed; NYT trademarks and puzzle
+content remain NYT's (see Notes above).

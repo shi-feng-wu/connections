@@ -10,8 +10,8 @@ import {
 
 describe("resolveRedirectUri", () => {
   it("derives https://<host>/api/discord-callback from the request host", () => {
-    expect(resolveRedirectUri("connections-olive.vercel.app")).toBe(
-      "https://connections-olive.vercel.app/api/discord-callback",
+    expect(resolveRedirectUri("example-app.vercel.app")).toBe(
+      "https://example-app.vercel.app/api/discord-callback",
     );
   });
 

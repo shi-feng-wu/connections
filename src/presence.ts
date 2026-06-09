@@ -8,12 +8,11 @@ import { MAX_MISTAKES, type Game } from "./game";
 
 // The large image. Discord fetches this server-side to proxy it, so it must be the
 // real public host (the in-Activity origin is the *.discordsays.com proxy, which
-// Discord's servers can't reach). Override with VITE_RP_ICON_URL — e.g. point it at
-// a different deploy, or set it to an uploaded Art Asset key from the Developer
-// Portal (Rich Presence -> Art Assets) instead of a URL.
-const ICON_URL =
-  import.meta.env.VITE_RP_ICON_URL ??
-  "https://connections-olive.vercel.app/connections-icon.png";
+// Discord's servers can't reach — so we can't derive it from location.origin here).
+// Set VITE_RP_ICON_URL to your deployment's /connections-icon.png, or to an uploaded
+// Art Asset key from the Developer Portal (Rich Presence -> Art Assets). Unset, the
+// card simply renders without a large image.
+const ICON_URL = import.meta.env.VITE_RP_ICON_URL as string | undefined;
 
 // "M:SS" from a duration. Used in the win line ("Solved in 4:32").
 function fmtDuration(ms: number): string {
@@ -69,10 +68,9 @@ export function buildActivity(p: PresenceInput) {
     // session; undefined when done so the timer freezes.
     timestamps:
       p.status === "playing" ? { start: Math.floor(p.joinedAt / 1000) } : undefined,
-    assets: {
-      large_image: ICON_URL,
-      large_text: "NYT Connections",
-    },
+    assets: ICON_URL
+      ? { large_image: ICON_URL, large_text: "NYT Connections" }
+      : undefined,
   };
 }
 

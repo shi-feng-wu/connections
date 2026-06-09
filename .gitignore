@@ -1,6 +1,9 @@
 node_modules/
 dist/
 .vercel
-.env
 *.log
 .env*
+!.env.example
+# personal tooling config (MCP server pins a specific Supabase project)
+.mcp.json
+.claude/

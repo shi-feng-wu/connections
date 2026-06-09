@@ -14,10 +14,15 @@
 //   --force clears that channel's recap_posts ledger row first, so you can re-run and it
 //           re-posts instead of being skipped as already-done.
 //
-// Needs CRON_SECRET in .env (same value as the Vercel env / Supabase Vault). Override the
-// target with RECAP_URL to hit a preview deployment.
+// Needs CRON_SECRET and RECAP_URL in .env (same secret value as the Vercel env /
+// Supabase Vault; RECAP_URL is your deployment's /api/cron-recap — point it at a
+// preview deployment to test a branch).
 
-const BASE = process.env.RECAP_URL ?? 'https://connections-olive.vercel.app/api/cron-recap';
+const BASE = process.env.RECAP_URL;
+if (!BASE) {
+  console.error('Missing RECAP_URL. Set it in .env, e.g. https://your-project.vercel.app/api/cron-recap');
+  process.exit(1);
+}
 
 const secret = process.env.CRON_SECRET;
 if (!secret) {

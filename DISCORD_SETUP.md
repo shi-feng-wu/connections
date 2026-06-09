@@ -8,14 +8,14 @@ Production host (the deployed Vercel **production alias**, kept public; the per-
 `*-<team>.vercel.app` URLs are behind Vercel Authentication and won't load in Discord):
 
 ```
-https://connections-olive.vercel.app
+https://your-project.vercel.app
 ```
 
 ## 1. OAuth2 → Redirects
 
 ```
 https://127.0.0.1
-https://connections-olive.vercel.app/api/discord-callback
+https://your-project.vercel.app/api/discord-callback
 ```
 
 - `https://127.0.0.1` is a **placeholder**, not a real URL. The embedded SDK uses
@@ -36,7 +36,7 @@ https://connections-olive.vercel.app/api/discord-callback
 
 | Prefix      | Target                                |
 | ----------- | ------------------------------------- |
-| `/`         | `connections-olive.vercel.app`        |
+| `/`         | `your-project.vercel.app`        |
 | `/supabase` | `<your-project>.supabase.co`          |
 
 - Discord Activities sandbox **all** network requests through `*.discordsays.com`. A
@@ -48,7 +48,7 @@ https://connections-olive.vercel.app/api/discord-callback
 ## 3. General Information → Interactions Endpoint URL
 
 ```
-https://connections-olive.vercel.app/api/interactions
+https://your-project.vercel.app/api/interactions
 ```
 
 - Required for the typed `/connections` slash command (Discord POSTs the interaction

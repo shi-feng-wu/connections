@@ -10,6 +10,8 @@
 --
 --   select vault.create_secret('<your CRON_SECRET value>', 'cron_secret');
 --
+-- Replace YOUR-DEPLOYMENT below with your real Vercel host before running.
+--
 -- (To rotate later: select vault.update_secret(id, '<new value>') — find id in vault.secrets.)
 --
 -- SCHEDULE — pg_cron evaluates in UTC and does NOT follow DST, but the Connections reset is
@@ -35,7 +37,7 @@ select cron.schedule(
   '0 4 * * *',
   $$
   select net.http_post(
-    url     => 'https://connections-olive.vercel.app/api/cron-recap',
+    url     => 'https://YOUR-DEPLOYMENT.vercel.app/api/cron-recap',
     headers => jsonb_build_object(
       'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'cron_secret'),
       'Content-Type',  'application/json'
@@ -52,7 +54,7 @@ select cron.schedule(
   '0 5 * * *',
   $$
   select net.http_post(
-    url     => 'https://connections-olive.vercel.app/api/cron-recap',
+    url     => 'https://YOUR-DEPLOYMENT.vercel.app/api/cron-recap',
     headers => jsonb_build_object(
       'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'cron_secret'),
       'Content-Type',  'application/json'

@@ -63,8 +63,8 @@ function ScoreRow({
 // (categories, solve bonus, speed, mistakes). Hover is mouse-only — this ships as
 // a Discord Activity where CSS :hover sticks after a tap (same reason as
 // HoverButton) — so a real mouse opens it on hover, touch toggles it on tap, and a
-// tap/Esc outside closes a pinned-open tip. Losses show the plain total (their
-// breakdown is just the one partial-credit line, so a tooltip adds nothing).
+// tap/Esc outside closes a pinned-open tip. Losses show the same tooltip: the
+// partial-credit Categories line, a 0 solve bonus, and "failed" speed/mistakes rows.
 function EndScore({
   game,
   won,
@@ -116,8 +116,6 @@ function EndScore({
       </span>
     </div>
   );
-
-  if (!won) return stack;
 
   return (
     <div
@@ -178,16 +176,20 @@ function EndScore({
         <ScoreRow label="Solve Bonus" value={`+${b.solveBonus}`} />
         <ScoreRow
           label="Speed"
-          sub={fmtClock(game.durationMs)}
-          value={`+${b.speed}`}
+          sub={won ? fmtClock(game.durationMs) : "failed"}
+          value={won ? `+${b.speed}` : "+0"}
         />
-        {b.penalty > 0 && (
-          <ScoreRow
-            label="Mistakes"
-            sub={String(b.mistakes)}
-            value={`−${b.penalty}`}
-            neg
-          />
+        {won ? (
+          b.penalty > 0 && (
+            <ScoreRow
+              label="Mistakes"
+              sub={String(b.mistakes)}
+              value={`−${b.penalty}`}
+              neg
+            />
+          )
+        ) : (
+          <ScoreRow label="Mistakes" sub="failed" value="−0" neg />
         )}
         <div className="mt-[6px] flex items-center justify-between gap-2.5 whitespace-nowrap border-t border-white/[0.09] pt-[8px] text-[12.5px]">
           <span className="font-semibold text-zinc-100">Total</span>

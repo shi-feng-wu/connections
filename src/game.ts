@@ -177,7 +177,6 @@ export class Game {
           this.solved.push({ level: g.level, category: g.category, members: g.members });
         }
       }
-      this.solved.sort((a, b) => a.level - b.level);
       this.board = [];
       this.selected.clear();
       this.finish('lost');

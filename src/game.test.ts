@@ -148,7 +148,7 @@ describe("Game · submit outcomes", () => {
     expect(g.progress()).toEqual({ mistakesLeft: 4, solvedCount: 4, done: "won" });
   });
 
-  it("loses on the fourth mistake and back-fills every group, sorted by level", () => {
+  it("loses on the fourth mistake and back-fills every unsolved group", () => {
     const g = newGame();
     const results = FOUR_WRONG.map((w) => guess(g, w));
     expect(results.at(-1)).toEqual({ type: "lose" });

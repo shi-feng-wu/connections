@@ -121,11 +121,6 @@ export function LoadingScreen({
     </>
   ) : (
     <>
-      {/* faint center glow so the flat near-black has depth behind the lockup */}
-      <div
-        aria-hidden
-        className="pointer-events-none fixed inset-0 bg-[radial-gradient(56%_44%_at_50%_44%,rgba(255,255,255,0.05),transparent_70%)]"
-      />
       <LoadLockup caption="Loading today’s puzzle" date={date} number={number} />
       {/* Game-style loading tip (redesign "Loading Animations" · BotNotice): a borderless
           line at the foot of the cold-start screen nudging the room to add the bot so it gets

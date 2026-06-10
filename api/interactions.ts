@@ -85,6 +85,7 @@ type Interaction = {
   type?: number;
   data?: { custom_id?: string; name?: string };
   application_id?: string;
+  guild_id?: string;
   authorizing_integration_owners?: Record<string, string>;
 };
 
@@ -112,6 +113,24 @@ export function routeInteraction(body: Interaction): object {
   }
   // "/enable-posts": help the user add the bot so recaps + the live card can post in this server.
   if (body.type === APPLICATION_COMMAND && body.data?.name === ENABLE_POSTS_COMMAND) {
+    // In a DM there's no server channel to post to (no guild_id — a user-install launch in a
+    // bot-less server still has one), so the server-flavoured copy would be nonsense here.
+    if (!body.guild_id) {
+      const appId = body.application_id ?? process.env.VITE_DISCORD_CLIENT_ID ?? '';
+      return {
+        type: CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          content:
+            '### Recaps live in servers\n' +
+            'This command doesn’t do anything in a DM — the **daily recap** and the live **“who’s playing”** card post to a server channel.\n\n' +
+            'Play in a server and add the bot there to enable them. The button below opens the server picker (adding it needs **Manage Server**).',
+          flags: EPHEMERAL,
+          components: [
+            { type: 1, components: [{ type: 2, style: 5, label: 'Add to Server', url: installUrl(appId) }] },
+          ],
+        },
+      };
+    }
     // Positively guild-installed ("0" present) → the bot is already here. Otherwise (user-install
     // only, or unknown) show the button — so we never wrongly tell a bot-less server it's all set.
     const owners = body.authorizing_integration_owners;

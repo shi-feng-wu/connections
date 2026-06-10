@@ -66,20 +66,40 @@ describe("routeInteraction", () => {
       type: 2,
       data: { name: "enable-posts" },
       application_id: "app123",
+      guild_id: "guild123", // run in a server (just one the bot isn't installed in)
       authorizing_integration_owners: { "1": "user123" }, // user-install only
-    }) as { type: number; data: { flags?: number; components?: { components: { style?: number; url?: string }[] }[] } };
+    }) as { type: number; data: { flags?: number; content?: string; components?: { components: { style?: number; url?: string }[] }[] } };
     expect(r.type).toBe(4); // CHANNEL_MESSAGE_WITH_SOURCE
     expect(r.data.flags).toBe(64); // ephemeral
+    expect(r.data.content).toContain("this server");
     const btn = r.data.components?.[0].components[0];
     expect(btn?.style).toBe(5); // link button
     expect(btn?.url).toContain("client_id=app123");
     expect(btn?.url).toContain("integration_type=0");
   });
 
+  it("/enable-posts in a DM says to play in a server instead of the server copy", () => {
+    const r = routeInteraction({
+      type: 2,
+      data: { name: "enable-posts" },
+      application_id: "app123",
+      // No guild_id: DMs aren't in a guild.
+      authorizing_integration_owners: { "1": "user123" },
+    }) as { type: number; data: { flags?: number; content?: string; components?: { components: { style?: number; url?: string }[] }[] } };
+    expect(r.type).toBe(4);
+    expect(r.data.flags).toBe(64);
+    expect(r.data.content).not.toContain("this server"); // no "this channel"/"this server" framing in a DM
+    expect(r.data.content).toContain("Play in a server");
+    const btn = r.data.components?.[0].components[0];
+    expect(btn?.style).toBe(5);
+    expect(btn?.url).toContain("client_id=app123");
+  });
+
   it("/enable-posts says recaps are already on when the bot is guild-installed", () => {
     const r = routeInteraction({
       type: 2,
       data: { name: "enable-posts" },
+      guild_id: "guild123",
       authorizing_integration_owners: { "0": "guild123" }, // guild install present
     }) as { type: number; data: { components?: unknown[]; content?: string } };
     expect(r.type).toBe(4);

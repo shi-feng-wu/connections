@@ -2,6 +2,8 @@
 
 The daily NYT Connections puzzle as a Discord Activity (the embedded GUI that opens on Play, like the Wordle activity). Shows live progress of everyone in your session and a persistent leaderboard (this season + all-time) on the end screen.
 
+![Mid-game: the board beside the live player roster](docs/screenshot.png)
+
 - Client: Vite + React + TypeScript + Tailwind v4
 - API: Vercel serverless functions for OAuth token exchange and the NYT puzzle proxy
 - Realtime + storage: Supabase Presence for live progress, Postgres for the leaderboard
@@ -108,7 +110,10 @@ screenshot harness (`preview.html` + `src/preview.tsx`).
    `SESSION_SECRET`, and — if you want section 5 — `DISCORD_BOT_TOKEN`,
    `DISCORD_PUBLIC_KEY`, `CRON_SECRET`). The `VITE_*` ones are needed at build
    time; the rest are server-only secrets (no `VITE_` prefix, so they never reach
-   the browser). `vercel.json` registers the daily recap cron automatically.
+   the browser). Optionally set `VITE_RP_ICON_URL` to
+   `https://<project>.vercel.app/connections-icon.png` so the Rich Presence
+   profile card gets its large image. `vercel.json` registers the daily recap
+   cron automatically.
 4. Deploy → copy your `https://<project>.vercel.app` URL.
 5. Discord Portal → Activities → URL Mappings → `/` → that host (no `https://`).
    Set once.
@@ -155,8 +160,8 @@ After deploying section 4 with `DISCORD_BOT_TOKEN`, `DISCORD_PUBLIC_KEY`, and
   the server writes one row to `scores` (first finish per puzzle wins, so replays
   can't farm it). The end screen then shows where you stand in the room: a
   leaderboard with two tabs, This season (the month) and All-time, each
-  ranking players by cumulative score with streak / games / win% / avg-mistakes,
-  and your own row pinned. Both come off the same table via the `room_board` /
+  ranking players by cumulative score with streak / won-of-played / avg-mistakes,
+  your own row highlighted when it places. Both come off the same table via the `room_board` /
   `room_self` Postgres functions (windowed by a `since` date; `null` = all-time).
   A "room" is the Discord guild in a server, or the channel in a DM / group chat
   (which have no guild), so the standing persists across activity launches. Only

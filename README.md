@@ -8,6 +8,8 @@ The daily NYT Connections puzzle as a Discord Activity (the embedded GUI that op
 - API: Vercel serverless functions for OAuth token exchange and the NYT puzzle proxy
 - Realtime + storage: Supabase Presence for live progress, Postgres for the leaderboard
 - Also runs standalone in a plain browser (skips Discord/Supabase) for UI dev
+- In production, a plain browser visit gets a landing page with a self-playing
+  demo board (`src/landing.tsx`) — the game itself stays Discord-only
 
 ```
 src/        client: main.tsx (bootstrap), App.tsx (state/wiring), components.tsx +
@@ -114,7 +116,8 @@ shows every state stacked; a URL hash isolates one — `#progress`, `#won`,
 live driver that plays a guess through the real board (so the solve
 choreography runs), `#card` / `#recap` for the Discord "who's playing" and
 daily-recap cards, `#pip` for the collapsed picture-in-picture thumbnail, and
-`#device` for narrow-Android frames of the end screen. Hash changes don't
+`#device` for narrow-Android frames of the end screen, and `#landing` for the
+public landing page a plain browser visit gets in production. Hash changes don't
 re-render — reload after switching. It's dev-only: Vite bundles `index.html`
 for production, so none of this ships.
 

@@ -13,6 +13,7 @@ import {
   submitScore,
 } from "./leaderboard";
 import type { PlayerState } from "./player";
+import { Landing } from "./landing";
 import { type PresenceInput, presenceSignature, setPresence } from "./presence";
 import { canonicalScope } from "./scope";
 import type { Standings } from "./season";
@@ -757,6 +758,14 @@ export function App({
         />
       </div>
     );
+  }
+
+  // Opened in a plain browser (the README links here): the game stays
+  // Discord-only, so show the project's landing page instead of the bare
+  // blocked loader. Embedded-but-blocked (a failed/forged handshake inside
+  // Discord) keeps the small "Open in Discord" message below.
+  if (phase === "blocked" && !isEmbedded) {
+    return <Landing />;
   }
 
   const retry = (): void => {

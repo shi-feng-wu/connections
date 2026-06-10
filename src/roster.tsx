@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Check, RotateCw, X } from "lucide-react";
 import { ResetCountdown } from "./countdown";
 import { finishedScore, LEVELS, MAX_MISTAKES } from "./game";
@@ -78,14 +85,33 @@ export function rankOf(
   return i < 0 ? null : i + 1;
 }
 
+// One page-wide 1Hz heartbeat shared by every live clock (and the roster's re-sort),
+// so each second costs a single batched render of the few components that subscribe —
+// not one interval per consumer firing at scattered offsets. The interval only runs
+// while someone subscribes; `lastTick` mutates only inside it (a stable
+// useSyncExternalStore snapshot).
+let lastTick = Date.now();
+const tickSubs = new Set<() => void>();
+let tickId: ReturnType<typeof setInterval> | null = null;
+function subscribeTick(cb: () => void): () => void {
+  tickSubs.add(cb);
+  tickId ??= setInterval(() => {
+    lastTick = Date.now();
+    tickSubs.forEach((f) => f());
+  }, 1000);
+  return () => {
+    tickSubs.delete(cb);
+    if (tickSubs.size === 0 && tickId != null) {
+      clearInterval(tickId);
+      tickId = null;
+    }
+  };
+}
+const noSub = (): (() => void) => () => {};
+const readTick = (): number => lastTick;
+
 function useNow(active: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [active]);
-  return now;
+  return useSyncExternalStore(active ? subscribeTick : noSub, readTick);
 }
 
 // One-shot flash on a row when a new group lands (not a looping ambient flash).
@@ -204,14 +230,15 @@ function Mistakes({ p }: { p: PlayerState }) {
   );
 }
 
-const scoreOf = (p: PlayerState, now: number): number =>
-  p.done ? finishedScore(p.done, p.solvedCount, p.mistakesLeft, elapsedMs(p, now)) : 0;
+// Finished runs only — their elapsed is frozen (finishedAt − startedAt), so no `now`.
+const scoreOf = (p: PlayerState): number =>
+  p.done ? finishedScore(p.done, p.solvedCount, p.mistakesLeft, elapsedMs(p, 0)) : 0;
 
 // Desktop only: a finished row keeps its mistake dots and adds the score beside
 // them — styled like the leaderboard's score cell so the two tabs rhyme, dimmed on
 // a loss to match the row's ✗/time. On mobile the score rides in the Status box
 // instead (replacing the ✓/✗), since dots + score + time won't all fit there.
-function FinalScore({ p, now }: { p: PlayerState; now: number }) {
+function FinalScore({ p }: { p: PlayerState }) {
   return (
     <span
       className={
@@ -219,7 +246,7 @@ function FinalScore({ p, now }: { p: PlayerState; now: number }) {
         (p.done === "won" ? "text-[#efefe6]" : "text-zinc-500")
       }
     >
-      {scoreOf(p, now)}
+      {scoreOf(p)}
       <span className="ml-0.5 text-[0.62em] font-semibold tracking-[0.02em] text-zinc-500">
         pts
       </span>
@@ -232,8 +259,17 @@ function FinalScore({ p, now }: { p: PlayerState; now: number }) {
 const TIME =
   "ml-auto text-[12px] tabular-nums tracking-[0.01em] min-[900px]:text-[13px]";
 
-function Status({ p, now }: { p: PlayerState; now: number }) {
-  const time = fmtElapsed(p, now);
+// An in-progress row's running clock. The 1Hz subscription lives HERE — in a leaf
+// that renders one span — so a second ticking over re-renders only these clocks, not
+// every row of every roster. (That full-list tick was a per-second main-thread stall
+// that visibly hitched whatever animation it landed on, e.g. the end bar's breakdown
+// cross-fade.)
+function LiveTime({ p }: { p: PlayerState }) {
+  const now = useNow(true);
+  return <span className={TIME + " text-zinc-400"}>{fmtElapsed(p, now)}</span>;
+}
+
+function Status({ p }: { p: PlayerState }) {
   // Fixed width (not min-w) sized for the widest case — status icon + H:MM:SS —
   // so the time column never changes size as the elapsed time grows past 1h. A
   // finished mobile box is a touch wider: the score stands in for the ✓/✗ there
@@ -249,7 +285,7 @@ function Status({ p, now }: { p: PlayerState; now: number }) {
         (p.done === "won" ? "text-[#efefe6]" : "text-zinc-500")
       }
     >
-      {scoreOf(p, now)}
+      {scoreOf(p)}
     </span>
   );
   if (p.done === "lost")
@@ -257,7 +293,7 @@ function Status({ p, now }: { p: PlayerState; now: number }) {
       <div className={box}>
         <X className="hidden flex-none text-zinc-500 min-[900px]:block" size={15} strokeWidth={2.6} aria-label="Out" />
         {pts}
-        <span className={TIME + " text-zinc-600"}>{time}</span>
+        <span className={TIME + " text-zinc-600"}>{fmtElapsed(p, 0)}</span>
       </div>
     );
   if (p.done === "won")
@@ -265,12 +301,12 @@ function Status({ p, now }: { p: PlayerState; now: number }) {
       <div className={box}>
         <Check className="hidden flex-none text-zinc-100 min-[900px]:block" size={15} strokeWidth={2.8} aria-label="Solved" />
         {pts}
-        <span className={TIME + " text-zinc-200"}>{time}</span>
+        <span className={TIME + " text-zinc-200"}>{fmtElapsed(p, 0)}</span>
       </div>
     );
   return (
     <div className={box}>
-      <span className={TIME + " text-zinc-400"}>{time}</span>
+      <LiveTime p={p} />
     </div>
   );
 }
@@ -297,11 +333,13 @@ function Rank({ rank }: { rank: number }) {
   );
 }
 
-function RosterRow({
+// memo: the roster re-renders every second while anyone is mid-solve (the re-sort
+// tick); every prop here is tick-stable, so finished rows bail out and only each
+// in-progress row's LiveTime leaf actually updates.
+const RosterRow = memo(function RosterRow({
   p,
   rank,
   selfId,
-  now,
   flash,
   online,
   rowRef,
@@ -309,7 +347,6 @@ function RosterRow({
   p: PlayerState;
   rank: number;
   selfId: string;
-  now: number;
   flash: boolean;
   online: boolean;
   // attached only to your row, so the locate arrow can scroll + pulse it.
@@ -338,11 +375,11 @@ function RosterRow({
         {you ? " (you)" : ""}
       </span>
       <Mistakes p={p} />
-      {p.done && <FinalScore p={p} now={now} />}
-      <Status p={p} now={now} />
+      {p.done && <FinalScore p={p} />}
+      <Status p={p} />
     </div>
   );
-}
+});
 
 export type RosterView = "live" | "season" | "all";
 // Which room the roster + leaderboard show: the channel you're playing in, or the whole
@@ -535,7 +572,6 @@ export function Roster({
                   p={p}
                   rank={i + 1}
                   selfId={selfId}
-                  now={now}
                   flash={flashing.has(p.userId)}
                   online={live && !!p.online}
                   rowRef={you ? selfRowRef : undefined}

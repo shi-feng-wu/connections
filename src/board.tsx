@@ -93,13 +93,12 @@ function EndSummary({ game }: { game: Game }) {
 
   // Both faces absolute-fill one box whose height the stationary score column fixes
   // (so the rest face's hairline divider can stretch the row's full height). They
-  // cross-fade with a small counter-rise; only the visible one is exposed to AT.
-  // transform-gpu + will-change promote both faces to compositor layers — without
-  // that, Discord's webview repaints the text every frame and the fade stutters.
+  // swap on a plain opacity cross-fade — the same one the header's date↔feedback
+  // slot uses; the earlier counter-rise translate read as jank (subpixel text
+  // shimmer), so the faces stay put. Only the visible one is exposed to AT.
   // Closing waits 200ms (the delay-200 on the closed-state classes) so grazing off
   // the score doesn't yank the breakdown away; opening stays immediate.
-  const face =
-    "transform-gpu will-change-[opacity,transform] transition-[opacity,transform] duration-300 ease-[cubic-bezier(.32,.72,.24,1)]";
+  const face = "transition-opacity duration-300 ease-out";
 
   return (
     <div
@@ -115,9 +114,7 @@ function EndSummary({ game }: { game: Game }) {
           className={
             face +
             " absolute inset-0 flex items-center justify-between gap-3 max-[360px]:gap-2 " +
-            (open
-              ? "pointer-events-none -translate-y-[3px] opacity-0"
-              : "translate-y-0 opacity-100 delay-200")
+            (open ? "pointer-events-none opacity-0" : "opacity-100 delay-200")
           }
         >
           <span
@@ -149,9 +146,7 @@ function EndSummary({ game }: { game: Game }) {
           className={
             face +
             " absolute inset-0 flex items-center justify-between gap-1.5 px-1 max-[360px]:gap-1 max-[360px]:px-0 " +
-            (open
-              ? "translate-y-0 opacity-100"
-              : "pointer-events-none translate-y-[3px] opacity-0 delay-200")
+            (open ? "opacity-100" : "pointer-events-none opacity-0 delay-200")
           }
         >
           <BreakItem caption="Categories" value={`+${b.completion}`} />

@@ -238,8 +238,12 @@ export function LedgerBody({
     <>
       <FlipList
         className={
-          (fill ? "min-h-0 flex-1" : "max-h-[46vh]") +
-          " list-fade flex flex-col gap-1.5 overflow-y-auto scrollbar-thin pb-6"
+          // fill mode only scrolls internally on desktop (the fixed-height rail);
+          // on mobile the column grows and the page scrolls, so the bottom fade
+          // would falsely imply more rows — desktop-only there. The capped
+          // (46vh) variant always scrolls internally, so it keeps the fade.
+          (fill ? "min-h-0 flex-1 min-[900px]:list-fade" : "max-h-[46vh] list-fade") +
+          " flex flex-col gap-1.5 overflow-y-auto scrollbar-thin pb-6"
         }
       >
         {rows.length ? (

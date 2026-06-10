@@ -170,13 +170,7 @@ function DemoBoard() {
       data-demo-board
       className="pointer-events-none select-none"
     >
-      <Board
-        key={key}
-        game={game}
-        onPresence={noop}
-        onFinish={noop}
-        onFeedback={noop}
-      />
+      <Board key={key} game={game} onPresence={noop} onFinish={noop} />
     </div>
   );
 }

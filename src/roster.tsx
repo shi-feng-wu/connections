@@ -386,8 +386,13 @@ export type RosterView = "live" | "season" | "all";
 // server. Shared across all three tabs (a launch in a guild only — DMs have no distinction).
 export type RosterScope = "channel" | "server";
 
+// The visible tab is only ~26px tall (11px text + slim padding) — well under the
+// ~44px touch minimum, and this is a touch app (Discord Activity). The ::before
+// pseudo extends the HIT AREA to ~44px without moving a pixel of the layout: it's
+// part of the button, so taps on it land. ±8px horizontally stays inside the gap-4
+// between tabs, so neighbouring targets touch but never overlap.
 const TAB =
-  "relative inline-flex cursor-pointer items-center gap-1.5 bg-transparent px-0 pt-0.5 pb-1.75 font-sans text-[11px] font-bold uppercase tracking-[0.07em] transition-opacity duration-150 ease-out";
+  "relative inline-flex cursor-pointer items-center gap-1.5 bg-transparent px-0 pt-0.5 pb-1.75 font-sans text-[11px] font-bold uppercase tracking-[0.07em] transition-opacity duration-150 ease-out before:absolute before:-inset-x-2 before:-inset-y-[9px] before:content-['']";
 const TAB_ON =
   " text-zinc-100 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-zinc-300 after:content-['']";
 const TAB_OFF = " text-zinc-600";
@@ -522,10 +527,12 @@ export function Roster({
     }
     selfRowRef.current?.scrollIntoView({
       behavior: "smooth",
-      // the live list owns its scroller (safe to center); in the standings table —
-      // where you only have a row if you place — just nudge it in to avoid
-      // scrolling the page.
-      block: view === "live" ? "center" : "nearest",
+      // Desktop live list owns its scroller, so centering is contained. Everywhere
+      // else — the standings table, and ALL lists on mobile (where the page is the
+      // scroller, so centering would yank the whole view and drag the board
+      // offscreen) — just nudge the row into view. 900 mirrors DESKTOP_BP.
+      block:
+        view === "live" && window.innerWidth >= 900 ? "center" : "nearest",
     });
   }, [view]);
 
@@ -561,7 +568,10 @@ export function Roster({
           // Own scroller (matches the standings list): flex-1 + min-h-0 lets it fill the
           // rail and overflow-y-auto scrolls internally instead of spilling past the board
           // on desktop when the live room is long (the rail is a fixed-height panel there).
-          className="list-fade flex min-h-0 flex-1 animate-tab-in flex-col gap-1.5 overflow-y-auto scrollbar-thin pb-6"
+          // The bottom fade is desktop-only: on mobile the column grows with its content
+          // (the PAGE scrolls, this list never does), so a fade would dim the last row
+          // while falsely implying more rows inside the box.
+          className="flex min-h-0 flex-1 animate-tab-in flex-col gap-1.5 overflow-y-auto scrollbar-thin pb-6 min-[900px]:list-fade"
         >
           {sorted.length ? (
             sorted.map((p, i) => {

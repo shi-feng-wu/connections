@@ -65,7 +65,12 @@ function BreakItem({
 // HoverButton) — so a real mouse reveals it on hover, touch toggles it on tap, and a
 // tap/Esc outside closes a pinned-open one. Losses read the same: partial-credit
 // categories, a 0 bonus/speed.
-function EndSummary({ game }: { game: Game }) {
+// `note` is the transient "Couldn’t save that guess" warning for a commit that fails
+// after the game ends (the final guess's commit usually resolves mid-end-choreography):
+// it rides a third cross-fade face here because the playing-state Submit pill — the
+// note's home during play — is gone, and the old slot (the desktop header's date) is
+// hidden on mobile, which made the warning invisible exactly where scores matter.
+function EndSummary({ game, note }: { game: Game; note?: string | null }) {
   const b = game.scoreBreakdown;
   const won = game.status === "won";
   const perfect = won && game.mistakesLeft === MAX_MISTAKES;
@@ -73,7 +78,12 @@ function EndSummary({ game }: { game: Game }) {
   const [over, setOver] = useState(false);
   const [pinned, setPinned] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const open = over || pinned;
+  const showNote = note != null;
+  const open = (over || pinned) && !showNote;
+  // hold the last note text through the face's fade-out, so the words don't vanish
+  // a beat before the opacity does.
+  const lastNote = useRef("");
+  if (note) lastNote.current = note;
 
   useEffect(() => {
     if (!pinned) return;
@@ -110,11 +120,13 @@ function EndSummary({ game }: { game: Game }) {
         {/* REST face — mistake dots far left, clock-icon solve-time chip far right,
             closed off by a hairline divider against the (stationary) score */}
         <div
-          aria-hidden={open}
+          aria-hidden={open || showNote}
           className={
             face +
             " absolute inset-0 flex items-center justify-between gap-3 max-[360px]:gap-2 " +
-            (open ? "pointer-events-none opacity-0" : "opacity-100 delay-200")
+            (open || showNote
+              ? "pointer-events-none opacity-0"
+              : "opacity-100 delay-200")
           }
         >
           <span
@@ -153,6 +165,21 @@ function EndSummary({ game }: { game: Game }) {
           <BreakItem caption="Bonus" value={`+${b.solveBonus}`} />
           <BreakItem caption="Speed" value={won ? `+${b.speed}` : "+0"} />
           <BreakItem caption="Mistakes" value={won ? `−${b.penalty}` : "−0"} neg />
+        </div>
+
+        {/* NOTE face — the rare post-game "couldn’t save" warning; outranks both
+            other faces while it shows, then the rest face fades back. role=status
+            announces it (the playing-state pill's aria-live is gone by now). */}
+        <div
+          role="status"
+          aria-hidden={!showNote}
+          className={
+            face +
+            " absolute inset-0 flex items-center justify-center text-[12.5px] font-bold text-zinc-100 " +
+            (showNote ? "opacity-100" : "pointer-events-none opacity-0")
+          }
+        >
+          {note ?? lastNote.current}
         </div>
       </div>
 
@@ -393,7 +420,6 @@ export function Board({
   onPresence,
   onCommit,
   onFinish,
-  onFeedback,
   initialRevealed = [],
 }: {
   game: Game;
@@ -403,10 +429,6 @@ export function Board({
   // the game is purely in-memory. See commit-then-reveal in submit().
   onCommit?: (guess: string[]) => Promise<boolean>;
   onFinish: () => void;
-  // transient submission feedback for the header date slot — now only the rare
-  // "couldn’t save that guess" note when a background commit fails after retries
-  // (guess results show on the Submit pill instead).
-  onFeedback: (msg: string) => void;
   // seeds revealed-on-loss bars when rehydrating a finished game (preview harness).
   initialRevealed?: number[];
 }) {
@@ -427,19 +449,22 @@ export function Board({
   // word under the mouse, for the hover dim (mouse-only — see TILE_HOVER).
   const [hover, setHover] = useState<string | null>(null);
   // Transient label on the Submit pill ("One away…", "Already guessed"). This guess
-  // feedback used to live in the header meta line (top-right, 12px — easy to miss);
-  // the Submit button is where you're already looking, so it owns the message now and
-  // carries aria-live for the announcement. Reverts after 1.6s.
+  // feedback used to live in the header meta line (top-right, 12px — easy to miss,
+  // and hidden entirely on mobile); the Submit button is where you're already
+  // looking, so it owns the message now and carries aria-live for the announcement.
+  // Once the game has ended the pill is gone, so the end footer shows the hint
+  // instead (EndSummary's note face — the "couldn’t save" warning can land there).
+  // Reverts after `ms` (default 1.6s).
   const [hint, setHint] = useState<string | null>(null);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const [, bump] = useReducer((n: number) => n + 1, 0);
   const rerender = () => bump();
   const rerenderSync = () => flushSync(() => bump());
-  function flashHint(msg: string): void {
+  function flashHint(msg: string, ms = 1600): void {
     setHint(msg);
     clearTimeout(hintTimer.current);
-    hintTimer.current = setTimeout(() => setHint(null), 1600);
+    hintTimer.current = setTimeout(() => setHint(null), ms);
   }
   useEffect(() => () => clearTimeout(hintTimer.current), []);
 
@@ -785,11 +810,14 @@ export function Board({
     // show it immediately instead of waiting on the /api/guess round-trip (which made
     // every guess feel laggy once a real network was in play). onCommit records the
     // guess in the background (keepalive + ordered queue, see commitGuess); a guess that
-    // still can't be saved after retries surfaces a quiet header note rather than
-    // blocking play. Duplicates/noops aren't recorded server-side, so we skip them.
+    // still can't be saved after retries surfaces a quiet warning — on the Submit pill
+    // mid-game, or the end footer's note face if the game has ended by the time the
+    // retries exhaust — rather than blocking play. Held longer than a guess hint: it's
+    // the only signal the score may not record. Duplicates/noops aren't recorded
+    // server-side, so we skip them.
     if (onCommit && result.type !== "duplicate" && result.type !== "noop") {
       void onCommit(words).then((ok) => {
-        if (!ok) onFeedback("Couldn’t save that guess");
+        if (!ok) flashHint("Couldn’t save that guess", 4000);
       });
     }
 
@@ -989,8 +1017,9 @@ export function Board({
 
   // End-screen footer — replaces the controls at the same footprint with the run
   // summary, which cross-fades in place to the itemized score breakdown on inspect
-  // (hover/tap). See EndSummary.
+  // (hover/tap). The live hint flows in as the note face so a "couldn’t save"
+  // warning arriving after the end swap still surfaces. See EndSummary.
   function renderBelowEnd() {
-    return <EndSummary game={game} />;
+    return <EndSummary game={game} note={hint} />;
   }
 }

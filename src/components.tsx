@@ -210,19 +210,15 @@ export function DayTurnover({
 // Brand lockup for the desktop players-rail header (per the "Desktop Connections"
 // redesign): the kept brick logo · the "Connections" serif wordmark · a bordered "No. 642"
 // pill, grouped on the left, with the serif date riding the right edge and a hairline
-// divider beneath. During play the date slot cross-fades to transient guess feedback
-// ("One away…" / the rare "couldn’t save that guess" note) and back — guess results show
-// on the Submit pill. Sits atop the players rail on desktop only; hidden on mobile, where
-// Discord shows its own activity header above the board.
+// divider beneath. Sits atop the players rail on desktop only; hidden on mobile, where
+// Discord shows its own activity header above the board — which is why no transient
+// feedback routes through here anymore: everything lives on the Submit pill / end
+// footer (visible at every width) instead.
 function Header({
   puzzle,
-  feedbackText,
-  feedbackOn,
   className = "",
 }: {
   puzzle: Puzzle;
-  feedbackText: string;
-  feedbackOn: boolean;
   className?: string;
 }) {
   const dateLabel = new Date(`${puzzle.date}T00:00:00`).toLocaleDateString(
@@ -250,26 +246,9 @@ function Header({
           No. {puzzle.id}
         </span>
       </div>
-      {/* serif date riding the right edge; cross-fades to transient guess feedback
-          ("One away…") during play, then back. */}
-      <span className="relative inline-flex items-baseline justify-end whitespace-nowrap text-right">
-        <span
-          className={
-            "font-display text-[14px] font-semibold leading-none text-zinc-500 [text-box:trim-both_cap_alphabetic] transition-opacity duration-300 " +
-            (feedbackOn ? "opacity-0" : "opacity-100")
-          }
-        >
-          {dateLabel}
-        </span>
-        <span
-          aria-live="polite"
-          className={
-            "pointer-events-none absolute right-0 font-sans text-[12px] font-bold whitespace-nowrap text-zinc-100 transition-all duration-300 ease-out " +
-            (feedbackOn ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0")
-          }
-        >
-          {feedbackText}
-        </span>
+      {/* serif date riding the right edge */}
+      <span className="whitespace-nowrap text-right font-display text-[14px] font-semibold leading-none text-zinc-500 [text-box:trim-both_cap_alphabetic]">
+        {dateLabel}
       </span>
     </header>
   );
@@ -363,12 +342,6 @@ export function GameView({
   onFinish: () => void;
   initialRevealed?: number[];
 }) {
-  // transient guess feedback ("One away…") rides the header date slot during play.
-  const [feedbackText, setFeedbackText] = useState("");
-  const [feedbackOn, setFeedbackOn] = useState(false);
-  const feedbackTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
   // which list the rail/section shows: the live room, or the cumulative season /
   // all-time table (same table, different window).
   const [view, setView] = useState<RosterView>("live");
@@ -377,15 +350,7 @@ export function GameView({
   // mid-session re-renders this view even when nothing else changes.
   const [done, setDone] = useState(game.status !== "playing");
 
-  function showFeedback(msg: string): void {
-    setFeedbackText(msg);
-    setFeedbackOn(true);
-    clearTimeout(feedbackTimer.current);
-    feedbackTimer.current = setTimeout(() => setFeedbackOn(false), 1600);
-  }
-  useEffect(() => () => clearTimeout(feedbackTimer.current), []);
   useEffect(() => {
-    setFeedbackOn(false);
     setView("live");
     setDone(game.status !== "playing");
   }, [game]);
@@ -395,16 +360,12 @@ export function GameView({
   const scale = useScaleToFit(scaleRef);
 
   const header = (className: string) => (
-    <Header
-      puzzle={game.puzzle}
-      feedbackText={feedbackText}
-      feedbackOn={feedbackOn}
-      className={className}
-    />
+    <Header puzzle={game.puzzle} className={className} />
   );
 
   return (
-    // Mobile: fill the viewport (#app content box = 100dvh − its pt-8/pb-6 = 3.5rem)
+    // Mobile: fill the viewport (#app content box = 100dvh − its pt-8 −
+    // its safe-area-aware bottom padding; mirror index.html's #app classes)
     // so the column anchors to the top instead of #app's [&>*]:my-auto centering it —
     // which, with a short roster, stranded a big gap above the board. The players
     // column then flex-grows into that space (see below). Desktop resets to content
@@ -415,7 +376,7 @@ export function GameView({
       // stays centered (matching #app's auto-margin centering). scale(1) is omitted
       // so mobile never gets a needless containing block from the transform.
       style={scale !== 1 ? { transform: `scale(${scale})` } : undefined}
-      className="mx-auto flex min-h-[calc(100dvh-3.5rem)] w-full max-w-[480px] animate-fade-in flex-col gap-3 min-[900px]:min-h-0 min-[900px]:max-w-[860px] min-[900px]:flex-row min-[900px]:items-stretch min-[900px]:gap-6"
+      className="mx-auto flex min-h-[calc(100dvh_-_2rem_-_max(1.5rem,env(safe-area-inset-bottom)))] w-full max-w-[480px] animate-fade-in flex-col gap-3 min-[900px]:min-h-0 min-[900px]:max-w-[860px] min-[900px]:flex-row min-[900px]:items-stretch min-[900px]:gap-6"
     >
       {/* main column — board + footer. No header on mobile: Discord shows its own
           activity header there, so we hide ours and keep some top padding (on top of
@@ -427,7 +388,6 @@ export function GameView({
           game={game}
           onPresence={onPresence}
           onCommit={onCommit}
-          onFeedback={showFeedback}
           onFinish={() => {
             setView("live");
             setDone(true);

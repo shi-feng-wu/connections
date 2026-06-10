@@ -907,7 +907,7 @@ function State({
 }
 
 // A true device-width frame. An <iframe> loading the harness at a fixed CSS width gives
-// its content a REAL narrow viewport, so width media queries (min-[820px]:) and 100dvh
+// its content a REAL narrow viewport, so width media queries (min-[900px]:) and 100dvh
 // resolve against the phone size — unlike a plain width-capped <div>, which still sees
 // the desktop viewport and would mis-switch to the 50/50 layout. Lets us eyeball 320px
 // (the small-Android floor; Android's Display-Size accessibility setting shrinks the CSS

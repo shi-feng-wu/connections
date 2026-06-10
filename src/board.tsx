@@ -157,11 +157,11 @@ function EndSummary({ game }: { game: Game }) {
       </div>
 
       {/* right: the score — the total the components sum to. It holds its place across
-          the swap so the number never jumps; the ⓘ sits inline with the number, under
-          the label header, as the affordance + open-state cue. This cluster, not the
-          whole bar, is the hover/tap target for the breakdown. */}
+          the swap so the number never jumps; the ⓘ rides the right edge, vertically
+          centered on the label + score stack, as the affordance + open-state cue.
+          This cluster, not the whole bar, is the hover/tap target for the breakdown. */}
       <div
-        className="flex min-w-0 flex-none cursor-help flex-col items-end gap-0.75 [-webkit-tap-highlight-color:transparent]"
+        className="flex min-w-0 flex-none cursor-help items-center gap-[9px] [-webkit-tap-highlight-color:transparent]"
         role="button"
         tabIndex={0}
         aria-label="Score breakdown"
@@ -180,30 +180,30 @@ function EndSummary({ game }: { game: Game }) {
           }
         }}
       >
-        {/* At the narrow-Android floor (<=360px) "Out of guesses" would widen the
-            stack and push it off the right edge — cap it so it wraps to two lines
-            there; "Solved"/"Perfect" never reach the cap, so they stay one line. */}
-        <span
-          className={
-            "text-right text-[10px] font-semibold uppercase leading-tight tracking-[0.16em] max-[360px]:max-w-[4.5rem] " +
-            (won ? "text-emerald-400" : "text-zinc-400")
-          }
-        >
-          {label}
-        </span>
-        <span className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-col items-end gap-0.75">
+          {/* At the narrow-Android floor (<=360px) "Out of guesses" would widen the
+              stack and push it off the right edge — cap it so it wraps to two lines
+              there; "Solved"/"Perfect" never reach the cap, so they stay one line. */}
           <span
             className={
-              "inline-grid h-[15px] w-[15px] flex-none place-items-center rounded-full border font-serif text-[10px] font-bold not-italic leading-none transition-colors duration-150 " +
-              (open ? "border-zinc-400 text-[#efefe6]" : "border-zinc-600 text-zinc-500")
+              "text-right text-[10px] font-semibold uppercase leading-tight tracking-[0.16em] max-[360px]:max-w-[4.5rem] " +
+              (won ? "text-emerald-400" : "text-zinc-400")
             }
-            aria-hidden
           >
-            i
+            {label}
           </span>
           <span className="font-display text-[26px] font-bold leading-none tracking-[-0.02em] text-[#efefe6]">
             +{game.score.toLocaleString()}
           </span>
+        </div>
+        <span
+          className={
+            "inline-grid h-[15px] w-[15px] flex-none place-items-center rounded-full border font-serif text-[10px] font-bold not-italic leading-none transition-colors duration-150 " +
+            (open ? "border-zinc-400 text-[#efefe6]" : "border-zinc-600 text-zinc-500")
+          }
+          aria-hidden
+        >
+          i
         </span>
       </div>
     </div>

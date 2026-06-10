@@ -123,12 +123,13 @@ export function LoadingScreen({
     <>
       <LoadLockup caption="Loading today’s puzzle" date={date} number={number} />
       {/* Game-style loading tip (redesign "Loading Animations" · BotNotice): a borderless
-          line at the foot of the cold-start screen nudging the room to add the bot so it gets
-          the live "who's playing" card + daily recap. Cold-start only — not error/blocked, and
-          not the midnight turnover (a returning player already knows). The green is the puzzle's
-          category green used as a quiet accent. fixed so it sits at the viewport foot regardless
-          of the centered lockup; it fades in with the screen's animate-fade-in. */}
-      <div className="fixed inset-x-7 bottom-[34px] flex flex-col items-center gap-[7px] text-center">
+          line under the lockup nudging the room to add the bot so it gets the live "who's
+          playing" card + daily recap. Cold-start only — not error/blocked, and not the
+          midnight turnover (a returning player already knows). The green is the puzzle's
+          category green used as a quiet accent. In flow (not viewport-pinned), so it rides
+          just under the centered lockup at every height, mt-12 keeping it a clearly
+          separate, quieter block; it fades in with the screen's animate-fade-in. */}
+      <div className="mt-12 flex flex-col items-center gap-[7px] text-center">
         <span className="font-sans text-[10px] font-bold tracking-[0.22em] text-[#a0c35a] uppercase">
           Tip
         </span>

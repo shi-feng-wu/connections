@@ -19,7 +19,8 @@ api/        Vercel functions: puzzle.ts (NYT proxy), token.ts (OAuth), score.ts 
             cron-recap.ts + interactions.ts (daily recap bot)
 supabase/   schema.sql (tables + leaderboard functions, run once),
             recap-cron.sql (optional pg_cron trigger)
-scripts/    one-off Discord setup/inspection helpers (npm run register-commands, …)
+scripts/    Discord setup helpers (npm run register-commands, …) and a local
+            analytics dashboard (npm run dashboard)
 index.html  vite.config.ts  tsconfig.json  package.json
 ```
 
@@ -145,6 +146,23 @@ After deploying section 4 with `DISCORD_BOT_TOKEN`, `DISCORD_PUBLIC_KEY`, and
 5. Play a game in a server once (this records that channel as the recap target).
    The cron (`vercel.json`, daily at 06:00 UTC — just after the ET reset) then
    posts the recap there. Recaps are guild-only: a bot can't post to a group DM.
+
+## Admin dashboard (local)
+
+```bash
+npm run dashboard   # opens http://127.0.0.1:7337
+```
+
+A single-file, zero-dependency analytics dashboard over the `scores` table:
+players reached / weekly actives / servers, daily-active and acquisition
+charts, a day-N retention curve with per-cohort heatmap, top players and
+rooms, who's online right now, and a recent-games feed. Auto-refreshes every
+30 s.
+
+It's deliberately **not deployed**: it binds to loopback only and reads with
+the service-role key from your `.env`, so it exists only while you run it, on
+your machine. Don't put it behind a tunnel or bind it to `0.0.0.0` — that
+would publish your whole database.
 
 ## How multiplayer works
 

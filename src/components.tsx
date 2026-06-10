@@ -279,10 +279,17 @@ function Header({
 // this is the JS mirror of the same wide-layout breakpoint.
 const DESKTOP_BP = 900;
 const MAX_SCALE = 1.5;
-// Only let the board grow into this fraction of the viewport, leaving the rest as
-// breathing room — ~12.5% on every side at 0.75. A fraction (not a fixed px margin)
-// keeps the margins proportional, so bigger screens get proportionally bigger gutters.
-const VIEWPORT_FILL = 0.75;
+// Breathing room around the scaled board: a FIXED gutter per edge, not a viewport
+// fraction. This used to be a 0.75 fill ("proportionally bigger gutters on bigger
+// screens"), but on monitors big enough for proportional margins to look deliberate
+// it's MAX_SCALE that binds, not the fraction — the fraction only ever bit on the
+// smaller windows (Discord's wide-but-short desktop window especially), where it
+// stranded 12.5% of every edge precisely when space was scarcest (~180px of dead
+// height on a 1200×600 window). Fixed gutters spend that space on the board, and on
+// short windows the scale-up they allow also wins back the height the (mobile-tuned)
+// --tile-h reserve shaves off: tiles shrink with dvh, the natural height drops, and
+// the scale factor — computed from that shrunken height — rises to refill the gap.
+const GUTTER = 28;
 
 function useScaleToFit(ref: RefObject<HTMLElement | null>): number {
   const [scale, setScale] = useState(1);
@@ -297,8 +304,8 @@ function useScaleToFit(ref: RefObject<HTMLElement | null>): number {
       const natW = el.offsetWidth;
       const natH = el.offsetHeight;
       if (!natW || !natH) return;
-      const fitW = (window.innerWidth * VIEWPORT_FILL) / natW;
-      const fitH = (window.innerHeight * VIEWPORT_FILL) / natH;
+      const fitW = (window.innerWidth - GUTTER * 2) / natW;
+      const fitH = (window.innerHeight - GUTTER * 2) / natH;
       const next = Math.min(fitW, fitH, MAX_SCALE);
       setScale(next < 1 ? 1 : next);
     };

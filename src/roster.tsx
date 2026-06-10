@@ -238,18 +238,26 @@ const scoreOf = (p: PlayerState): number =>
 // them — styled like the leaderboard's score cell so the two tabs rhyme, dimmed on
 // a loss to match the row's ✗/time. On mobile the score rides in the Status box
 // instead (replacing the ✓/✗), since dots + score + time won't all fit there.
+// The slot renders on EVERY row at a fixed width (empty until the run is done,
+// sized for the widest case, "500pts") so the columns to the dots' right never
+// vary — the dots sit at the same x in every row, and a score pops in without
+// shifting anything.
 function FinalScore({ p }: { p: PlayerState }) {
   return (
     <span
       className={
-        "hidden flex-none text-[13px] font-extrabold tabular-nums tracking-[-0.01em] min-[900px]:inline " +
+        "hidden w-[42px] flex-none text-right text-[13px] font-extrabold tabular-nums tracking-[-0.01em] min-[900px]:inline " +
         (p.done === "won" ? "text-[#efefe6]" : "text-zinc-500")
       }
     >
-      {scoreOf(p)}
-      <span className="ml-0.5 text-[0.62em] font-semibold tracking-[0.02em] text-zinc-500">
-        pts
-      </span>
+      {p.done && (
+        <>
+          {scoreOf(p)}
+          <span className="ml-0.5 text-[0.62em] font-semibold tracking-[0.02em] text-zinc-500">
+            pts
+          </span>
+        </>
+      )}
     </span>
   );
 }
@@ -270,13 +278,12 @@ function LiveTime({ p }: { p: PlayerState }) {
 }
 
 function Status({ p }: { p: PlayerState }) {
-  // Fixed width (not min-w) sized for the widest case — status icon + H:MM:SS —
-  // so the time column never changes size as the elapsed time grows past 1h. A
-  // finished mobile box is a touch wider: the score stands in for the ✓/✗ there
-  // (the icons are desktop-only) and three digits outsize the glyph.
-  const box =
-    (p.done ? "flex w-[72px]" : "flex w-[66px]") +
-    " flex-none items-center gap-1.5 min-[900px]:w-[74px]";
+  // ONE fixed width for every state (not min-w, and not per-state): sized for the
+  // widest case — the finished mobile box, where the score stands in for the ✓/✗
+  // (the icons are desktop-only) next to the time. A per-state width (finished
+  // rows used to run 6px wider) made the mistake dots column jitter left/right
+  // from row to row depending on who had finished.
+  const box = "flex w-[72px] flex-none items-center gap-1.5 min-[900px]:w-[74px]";
   // mobile stand-in for the ✓/✗: the run's score, bright on a win, dim on a loss
   const pts = p.done && (
     <span
@@ -375,7 +382,7 @@ const RosterRow = memo(function RosterRow({
         {you ? " (you)" : ""}
       </span>
       <Mistakes p={p} />
-      {p.done && <FinalScore p={p} />}
+      <FinalScore p={p} />
       <Status p={p} />
     </div>
   );

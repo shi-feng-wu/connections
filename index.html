@@ -18,12 +18,15 @@
          Auto margins collapse to a top anchor on overflow, so the top stays reachable.
          pt-8 leaves headroom for the score hero, which rides up out of the title row —
          a mobile-only concern (desktop's score lives in the footer, not above a title),
-         so the desktop view drops the top padding and the header hugs the top. The
+         so desktop drops to pt-6: the same 24px as the bottom padding, keeping the
+         vertical padding SYMMETRIC there — my-auto centers within the content box, so
+         unequal padding would sit the board off-center, a visible lean (16px vs 40px
+         gutters) now that the scale-to-fit fills short windows to within ~28px. The
          900px switch matches DESKTOP_BP / the min-[900px]: classes in components.tsx —
          the wide layout's one breakpoint. Bottom padding grows to the home-indicator
          safe area when the webview extends under it (viewport-fit=cover above);
          GameView's mobile min-h calc mirrors both paddings — keep them in sync. -->
-    <div id="app" class="mx-auto flex min-h-dvh w-full max-w-[940px] flex-col px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-8 min-[900px]:pt-0 [&>*]:my-auto"></div>
+    <div id="app" class="mx-auto flex min-h-dvh w-full max-w-[940px] flex-col px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-8 min-[900px]:pt-6 [&>*]:my-auto"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

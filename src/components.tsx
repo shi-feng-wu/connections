@@ -242,12 +242,16 @@ function Header({
         <span className="font-display text-[27px] font-bold leading-none tracking-[-0.025em] text-[#efefe6] [text-box:trim-both_cap_alphabetic]">
           Connections
         </span>
-        <span className="flex-none rounded-full border border-white/[0.13] px-2 py-[3px] font-sans text-[10px] font-bold uppercase leading-none tracking-[0.08em] tabular-nums text-zinc-400">
+        {/* nudged down: the centered pill spans the wordmark's cap-to-baseline, which reads
+            high against the lowercase mass — optically center it on the x-height band */}
+        <span className="flex-none translate-y-[2px] rounded-full border border-white/[0.13] px-2 py-[3px] font-sans text-[10px] font-bold uppercase leading-none tracking-[0.08em] tabular-nums text-zinc-400">
           No. {puzzle.id}
         </span>
       </div>
-      {/* serif date riding the right edge */}
-      <span className="whitespace-nowrap text-right font-display text-[14px] font-semibold leading-none text-zinc-500 [text-box:trim-both_cap_alphabetic]">
+      {/* serif date riding the right edge — translated down so its baseline sits on the
+          wordmark's: both are cap-trimmed, so center-alignment leaves the smaller date's
+          baseline (capHeight27 − capHeight14)/2 ≈ 4.4px high */}
+      <span className="translate-y-[4.4px] whitespace-nowrap text-right font-display text-[14px] font-semibold leading-none text-zinc-500 [text-box:trim-both_cap_alphabetic]">
         {dateLabel}
       </span>
     </header>

@@ -98,7 +98,25 @@ binds a score to a server-timed session), and the leaderboard SQL itself.
 function bodies out of `supabase/schema.sql` and runs them in an in-process
 Postgres ([PGlite](https://pglite.dev), WASM), so the streak/aggregation logic
 is actually executed, not just reviewed. The UI is verified separately via the
-screenshot harness (`preview.html` + `src/preview.tsx`).
+screenshot harness (`/preview.html`, below).
+
+### UI preview (no backend)
+
+```bash
+npx vite            # plain Vite is enough — no vercel dev, no Discord, no Supabase
+```
+
+Then open `/preview.html`: it renders the full game UI with mock data
+(`src/preview.tsx`), so you can iterate on the board, end screen, roster,
+leaderboard, Discord cards, and PIP thumbnail without any backend. By default it
+shows every state stacked; a URL hash isolates one — `#progress`, `#won`,
+`#perfect`, `#lost`, `#loading`, `#error` for game states, `#simulate` for a
+live driver that plays a guess through the real board (so the solve
+choreography runs), `#card` / `#recap` for the Discord "who's playing" and
+daily-recap cards, `#pip` for the collapsed picture-in-picture thumbnail, and
+`#device` for narrow-Android frames of the end screen. Hash changes don't
+re-render — reload after switching. It's dev-only: Vite bundles `index.html`
+for production, so none of this ships.
 
 ## 4. Deploy to Vercel
 
@@ -222,8 +240,7 @@ isn't worth the per-guess latency for a public puzzle.
 
 PRs welcome. Before opening one: `npm test && npm run typecheck` (CI runs both
 plus a build). UI changes can be eyeballed without any backend via the
-screenshot harness — `npx vite`, then open `/preview.html` (hash filters like
-`#won`, `#lost`, `#progress` isolate a state).
+screenshot harness — see “UI preview (no backend)” above.
 
 ## License
 

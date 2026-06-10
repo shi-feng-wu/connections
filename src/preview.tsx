@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 // The card's font (the app UI uses different fonts). These live under src/, NOT
@@ -610,65 +610,181 @@ const showTurnover = pick === "" || onlyTurnover;
 // #device isolates the narrow-width device frames (320/360px iframes of the end screen).
 const showDevice = pick === "" || pick === "device";
 
-createRoot(document.getElementById("preview")!).render(
-  <div className="flex flex-col items-center gap-16 py-10">
-    {showTurnover && <TurnoverState />}
-    {showDevice && <DeviceFrames />}
-    {showSim && <Simulate />}
-    {!onlySim && shown}
-    {showPips && (
-      <div className="flex flex-col items-center gap-8">
-        <PipState label="PIP thumbnail · in progress (976×608)" game={playing} w={488} h={304} />
-        <PipState label="PIP thumbnail · lost" game={lost} revealed={[2, 3]} w={488} h={304} />
-        <PipState label="PIP thumbnail · won" game={won} w={488} h={304} />
-        <PipState label="PIP thumbnail · loading" game={null} w={488} h={304} />
-        <PipState label="PIP thumbnail · narrow PIP (square)" game={playing} w={320} h={320} />
+// ——— shared fragments (used by both the organized full page and the isolated views)
+
+const PIPS = (
+  <div className="flex w-full max-w-[1240px] flex-wrap items-start justify-center gap-8 px-4">
+    <PipState label="PIP thumbnail · in progress (976×608)" game={playing} w={488} h={304} />
+    <PipState label="PIP thumbnail · lost" game={lost} revealed={[2, 3]} w={488} h={304} />
+    <PipState label="PIP thumbnail · won" game={won} w={488} h={304} />
+    <PipState label="PIP thumbnail · loading" game={null} w={488} h={304} />
+    <PipState label="PIP thumbnail · narrow PIP (square)" game={playing} w={320} h={320} />
+  </div>
+);
+
+const ROSTER_LIVE = (
+  <section key="r-live" className="w-full max-w-[360px] px-4">
+    <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
+      Roster panel · standalone (Live tab)
+    </div>
+    <Roster players={ROSTER} selfId={SELF_ID} />
+  </section>
+);
+const ROSTER_EMPTY = (
+  <section key="r-empty" className="w-full max-w-[360px] px-4">
+    <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
+      Roster panel · no scores yet (Season tab → placeholder)
+    </div>
+    <Roster
+      players={ROSTER}
+      selfId={SELF_ID}
+      season={{ board: [], self: null }}
+      allTime={{ board: [], self: null }}
+      view="season"
+      onViewChange={noop}
+    />
+  </section>
+);
+const ROSTER_SEASON = (
+  <section key="r-season" className="w-full max-w-[418px]">
+    <div className="mb-3 px-1 text-xs font-semibold uppercase tracking-wide text-amber-400">
+      Roster panel · season standings (Season tab, ~rail width)
+    </div>
+    <Roster
+      players={ROSTER}
+      selfId={SELF_ID}
+      season={SEASON}
+      allTime={ALLTIME}
+      view="season"
+      onViewChange={noop}
+      scope="channel"
+      onScopeChange={noop}
+    />
+  </section>
+);
+
+const CARDS = (
+  <>
+    <Card label="Discord card · who's playing today" players={CARD_ROOM} />
+    <Card label="Discord card · busy room" players={CARD_BUSY} />
+    <Card label="Discord card · single player" players={CARD_SOLO} />
+  </>
+);
+const RECAPS = (
+  <>
+    <Recap label="Discord recap · daily reset post" data={CARD_RECAP} />
+    <Recap label="Discord recap · nobody played (streak broken)" data={CARD_RECAP_EMPTY} />
+  </>
+);
+
+// ——— page chrome, full (no-hash) view only. Isolated #views stay bare sections so
+// screenshot workflows keep a clean capture. The hash is read ONCE at load, so the
+// filter links force a reload after the browser applies the new hash.
+
+const FILTERS = ["progress", "perfect", "won", "lost", "loading", "error", "blocked", "simulate", "feedback", "scope", "card", "recap", "pip", "device", "turnover"];
+const reload = (): void => void setTimeout(() => location.reload(), 0);
+
+function PageHeader() {
+  return (
+    <header className="w-full max-w-[1240px] px-6">
+      <h1 className="font-display text-[28px] font-bold leading-none tracking-[-0.01em] text-[#efefe6]">
+        Connections <span className="text-zinc-500">· UI preview</span>
+      </h1>
+      <p className="mt-2.5 max-w-[72ch] text-[13px] leading-relaxed text-zinc-500">
+        Every surface below renders from mock data — no Discord, no Supabase, no /api.
+        A hash filter isolates one section for screenshots; the links reload because the
+        hash is only read at load.
+      </p>
+      <nav className="mt-4 flex flex-wrap gap-1.5" aria-label="Isolate a section">
+        {FILTERS.map((h) => (
+          <a
+            key={h}
+            href={`#${h}`}
+            onClick={reload}
+            className="rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-100"
+          >
+            #{h}
+          </a>
+        ))}
+      </nav>
+    </header>
+  );
+}
+
+// A titled band: section heading, hairline rule, and the isolating hash for the part
+// it wraps. The per-item amber labels stay — the band is the level above them.
+function Group({ title, hash, children }: { title: string; hash?: string; children: ReactNode }) {
+  return (
+    <section className="flex w-full flex-col items-center gap-9">
+      <div className="flex w-full max-w-[1240px] items-center gap-4 px-6">
+        <h2 className="whitespace-nowrap text-[13px] font-bold uppercase tracking-[0.2em] text-zinc-200">
+          {title}
+        </h2>
+        <span className="h-px flex-1 bg-white/10" aria-hidden />
+        {hash && (
+          <a
+            href={`#${hash}`}
+            onClick={reload}
+            className="whitespace-nowrap text-[11px] font-semibold text-zinc-600 transition-colors hover:text-zinc-300"
+          >
+            #{hash}
+          </a>
+        )}
       </div>
-    )}
-    {showCards && <Card label="Discord card · who's playing today" players={CARD_ROOM} />}
-    {showCards && <Card label="Discord card · busy room" players={CARD_BUSY} />}
-    {showCards && <Card label="Discord card · single player" players={CARD_SOLO} />}
-    {(showCards || onlyRecap) && <Recap label="Discord recap · daily reset post" data={CARD_RECAP} />}
-    {(showCards || onlyRecap) && <Recap label="Discord recap · nobody played (streak broken)" data={CARD_RECAP_EMPTY} />}
-    {!onlySim && !onlyCard && !onlyScope && !onlyRecap && !onlyTurnover && (
-      <section className="w-full max-w-[360px] px-4">
-        <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
-          Roster panel · standalone (Live tab)
-        </div>
-        <Roster players={ROSTER} selfId={SELF_ID} />
-      </section>
-    )}
-    {!onlySim && !onlyCard && !onlyScope && !onlyRecap && !onlyTurnover && (
-      <section className="w-full max-w-[360px] px-4">
-        <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
-          Roster panel · no scores yet (Season tab → placeholder)
-        </div>
-        <Roster
-          players={ROSTER}
-          selfId={SELF_ID}
-          season={{ board: [], self: null }}
-          allTime={{ board: [], self: null }}
-          view="season"
-          onViewChange={noop}
-        />
-      </section>
-    )}
-    {!onlySim && !onlyCard && !onlyRecap && !onlyTurnover && (
-      <section className="w-full max-w-[418px]">
-        <div className="mb-3 px-1 text-xs font-semibold uppercase tracking-wide text-amber-400">
-          Roster panel · season standings (Season tab, ~rail width)
-        </div>
-        <Roster
-          players={ROSTER}
-          selfId={SELF_ID}
-          season={SEASON}
-          allTime={ALLTIME}
-          view="season"
-          onViewChange={noop}
-          scope="channel"
-          onScopeChange={noop}
-        />
-      </section>
-    )}
-  </div>,
+      {children}
+    </section>
+  );
+}
+
+const fullPage = (
+  <div className="flex flex-col items-center gap-24 pb-28 pt-12">
+    <PageHeader />
+    <Group title="Game states">
+      <div className="flex w-full flex-col items-center gap-14">{STATES}</div>
+    </Group>
+    <Group title="Playground" hash="simulate">
+      <Simulate />
+    </Group>
+    <Group title="Roster panels" hash="scope">
+      <div className="flex w-full max-w-[1240px] flex-wrap items-start justify-center gap-8 px-4">
+        {ROSTER_LIVE}
+        {ROSTER_EMPTY}
+        {ROSTER_SEASON}
+      </div>
+    </Group>
+    <Group title="Discord cards" hash="card">
+      <div className="flex w-full flex-col items-center gap-12">
+        {CARDS}
+        {RECAPS}
+      </div>
+    </Group>
+    <Group title="PIP thumbnails" hash="pip">
+      {PIPS}
+    </Group>
+    <Group title="Device widths" hash="device">
+      <DeviceFrames />
+    </Group>
+    <Group title="Overlays" hash="turnover">
+      <TurnoverState />
+    </Group>
+  </div>
+);
+
+createRoot(document.getElementById("preview")!).render(
+  pick === "" ? (
+    fullPage
+  ) : (
+    <div className="flex flex-col items-center gap-16 py-10">
+      {showTurnover && <TurnoverState />}
+      {showDevice && <DeviceFrames />}
+      {showSim && <Simulate />}
+      {!onlySim && shown}
+      {showPips && PIPS}
+      {showCards && CARDS}
+      {(showCards || onlyRecap) && RECAPS}
+      {!onlySim && !onlyCard && !onlyScope && !onlyRecap && !onlyTurnover && ROSTER_LIVE}
+      {!onlySim && !onlyCard && !onlyScope && !onlyRecap && !onlyTurnover && ROSTER_EMPTY}
+      {!onlySim && !onlyCard && !onlyRecap && !onlyTurnover && ROSTER_SEASON}
+    </div>
+  ),
 );

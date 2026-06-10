@@ -59,10 +59,12 @@ function BreakItem({
 // players list (see Roster), not here. Inspecting the score doesn't open a floating
 // tooltip: the dots + time CROSS-FADE in place to the itemized breakdown (categories,
 // bonus, speed, mistakes) while the big +score stays put as the total they sum to.
-// Hover is mouse-only — this ships as a Discord Activity where CSS :hover sticks after
-// a tap (same reason as HoverButton) — so a real mouse reveals it on hover, touch
-// toggles it on tap, and a tap/Esc outside closes a pinned-open one. Losses read the
-// same: partial-credit categories, a 0 bonus/speed.
+// Only the score cluster (ⓘ + label + number) is the trigger — the dots/time side is
+// inert so a mouse parked there doesn't flip the bar. Hover is mouse-only — this ships
+// as a Discord Activity where CSS :hover sticks after a tap (same reason as
+// HoverButton) — so a real mouse reveals it on hover, touch toggles it on tap, and a
+// tap/Esc outside closes a pinned-open one. Losses read the same: partial-credit
+// categories, a 0 bonus/speed.
 function EndSummary({ game }: { game: Game }) {
   const b = game.scoreBreakdown;
   const won = game.status === "won";
@@ -93,29 +95,12 @@ function EndSummary({ game }: { game: Game }) {
   // (so the rest face's hairline divider can stretch the row's full height). They
   // cross-fade with a small counter-rise; only the visible one is exposed to AT.
   const face =
-    "transition-[opacity,transform] duration-200 ease-[cubic-bezier(.22,.61,.36,1)]";
+    "transition-[opacity,transform] duration-300 ease-[cubic-bezier(.32,.72,.24,1)]";
 
   return (
     <div
       ref={ref}
-      className="relative flex cursor-help items-center gap-3 max-[360px]:gap-2 [-webkit-tap-highlight-color:transparent]"
-      role="button"
-      tabIndex={0}
-      aria-label="Score breakdown"
-      aria-expanded={open}
-      onPointerEnter={(e) => {
-        if (e.pointerType === "mouse") setOver(true);
-      }}
-      onPointerLeave={(e) => {
-        if (e.pointerType === "mouse") setOver(false);
-      }}
-      onClick={() => setPinned((p) => !p)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          setPinned((p) => !p);
-        }
-      }}
+      className="relative flex items-center gap-3 max-[360px]:gap-2"
     >
       {/* left + centre: the run summary at rest, swapped on inspect for the makeup */}
       <div className="relative min-w-0 flex-1 self-stretch">
@@ -173,8 +158,38 @@ function EndSummary({ game }: { game: Game }) {
       </div>
 
       {/* right: the score — the total the components sum to. It holds its place across
-          the swap so the number never jumps; the ⓘ is the affordance + open-state cue. */}
-      <div className="flex flex-none items-center gap-[9px]">
+          the swap so the number never jumps; the ⓘ (left of the score, where it tucks
+          into slack space) is the affordance + open-state cue. This cluster, not the
+          whole bar, is the hover/tap target for the breakdown. */}
+      <div
+        className="flex flex-none cursor-help items-center gap-[9px] [-webkit-tap-highlight-color:transparent]"
+        role="button"
+        tabIndex={0}
+        aria-label="Score breakdown"
+        aria-expanded={open}
+        onPointerEnter={(e) => {
+          if (e.pointerType === "mouse") setOver(true);
+        }}
+        onPointerLeave={(e) => {
+          if (e.pointerType === "mouse") setOver(false);
+        }}
+        onClick={() => setPinned((p) => !p)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setPinned((p) => !p);
+          }
+        }}
+      >
+        <span
+          className={
+            "inline-grid h-[15px] w-[15px] flex-none place-items-center rounded-full border font-serif text-[10px] font-bold not-italic leading-none transition-colors duration-150 " +
+            (open ? "border-zinc-400 text-[#efefe6]" : "border-zinc-600 text-zinc-500")
+          }
+          aria-hidden
+        >
+          i
+        </span>
         <div className="flex min-w-0 flex-col items-end gap-0.75">
           {/* At the narrow-Android floor (<=360px) "Out of guesses" would widen the
               stack and push it off the right edge — cap it so it wraps to two lines
@@ -191,15 +206,6 @@ function EndSummary({ game }: { game: Game }) {
             +{game.score.toLocaleString()}
           </span>
         </div>
-        <span
-          className={
-            "inline-grid h-[15px] w-[15px] flex-none place-items-center rounded-full border font-serif text-[10px] font-bold not-italic leading-none transition-colors duration-150 " +
-            (open ? "border-zinc-400 text-[#efefe6]" : "border-zinc-600 text-zinc-500")
-          }
-          aria-hidden
-        >
-          i
-        </span>
       </div>
     </div>
   );

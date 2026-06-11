@@ -8,6 +8,13 @@
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
+  @font-face {
+    font-family: "Newsreader";
+    font-style: normal;
+    font-weight: 400 700;
+    font-display: swap;
+    src: url("/fonts/newsreader.woff2") format("woff2");
+  }
   body {
     margin: 0;
     background: #0a0a0c;
@@ -17,9 +24,9 @@
   }
   main { max-width: 720px; margin: 0 auto; padding: 64px 0 96px; }
   .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 40px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; width: 30px; height: 30px; flex: none; }
-  .grid i { border-radius: 5px; }
-  h1 { font-family: Georgia, "Times New Roman", serif; font-size: 34px; line-height: 1.15; color: #efefe6; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .brand img { width: 27px; height: 27px; flex: none; object-fit: contain; }
+  .wordmark { font-family: "Newsreader", Georgia, serif; font-weight: 700; font-size: 27px; line-height: 1; letter-spacing: -0.025em; color: #efefe6; }
+  h1 { font-family: "Newsreader", Georgia, "Times New Roman", serif; font-size: 34px; line-height: 1.15; color: #efefe6; margin: 0 0 6px; letter-spacing: -0.01em; }
   .updated { color: #71717a; font-size: 13px; margin: 0 0 40px; }
   h2 { color: #efefe6; font-size: 19px; margin: 38px 0 10px; }
   p, li { color: #c4c4cc; }
@@ -33,11 +40,8 @@
 <body>
 <main>
   <div class="brand">
-    <span class="grid" aria-hidden="true">
-      <i style="background:#f9df6d"></i><i style="background:#a0c35a"></i>
-      <i style="background:#b0c4ef"></i><i style="background:#ba81c5"></i>
-    </span>
-    <strong style="color:#efefe6">Connections</strong>
+    <img src="/connections-icon.png" alt="" width="27" height="27" />
+    <span class="wordmark">Connections</span>
   </div>
 
   <h1>Terms of Service</h1>

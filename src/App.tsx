@@ -155,7 +155,7 @@ export function App({
   // (first-ever open, used for scoring) — which on a reopen is hours stale.
   const joinedAtRef = useRef<number>(Date.now());
 
-  // The room's roster from /api/roster (polled every 5s): everyone who played this room's daily
+  // The room's roster from /api/roster (polled every 15s): everyone who played this room's daily
   // today, replayed from committed guesses, each carrying the green "online" ring when their
   // heartbeat is live. Your own row is overlaid from local state (see the `roster` memo) so it
   // never lags the poll. Empty for non-guild / non-daily contexts, where the roster is just you.
@@ -186,6 +186,9 @@ export function App({
   const [layoutMode, setLayoutMode] = useState<number>(
     Common.LayoutModeTypeObject.FOCUSED,
   );
+  // Ref mirror so the roster poll's interval closure reads the current layout, not the
+  // one captured at mount (synced by the layout effect next to the poll below).
+  const layoutModeRef = useRef<number>(Common.LayoutModeTypeObject.FOCUSED);
 
   function selfState(): PlayerState {
     const g = gameRef.current;
@@ -658,14 +661,17 @@ export function App({
     void refreshLeaderboard();
   }, [scopeMode]);
 
-  // The roster is poll-driven (no Realtime): refetch /api/roster every 5s so other players'
+  // The roster is poll-driven (no Realtime): refetch /api/roster every 15s so other players'
   // progress and the green "online" ring stay live, and that same call heartbeats us as present.
   // Your own row is instant (local overlay in the `roster` memo); only others lag up to one
-  // interval. Also the daily-reset fallback: a client left open across midnight ET is pinned to
-  // the old day — the precise timer below swaps at the exact reset, but a throttled/backgrounded
-  // tab can miss it, so re-check here too. Once the new puzzle is out the old one is closed (an
-  // unfinished old board ends unscored; a post-midnight finish is rejected by the
-  // session.date !== todayET() gate in api/score.ts).
+  // interval. Collapsed to PIP (or a hidden tab) the roster isn't visible, so the fetch is
+  // skipped — and the skipped heartbeat lets our ring age out honestly while we're away; the
+  // layout effect below fires a catch-up fetch on expand. Also the daily-reset fallback: a
+  // client left open across midnight ET is pinned to the old day — the precise timer below
+  // swaps at the exact reset, but a throttled/backgrounded tab can miss it, so re-check here
+  // too. Once the new puzzle is out the old one is closed (an unfinished old board ends
+  // unscored; a post-midnight finish is rejected by the session.date !== todayET() gate in
+  // api/score.ts).
   useEffect(() => {
     if (!isEmbedded) return;
     const id = setInterval(() => {
@@ -674,17 +680,28 @@ export function App({
         void swapToNewDay();
         return;
       }
+      if (layoutModeRef.current === Common.LayoutModeTypeObject.PIP || document.hidden) return;
       void fetchServerRoster();
-    }, 5_000);
+    }, 15_000);
     return () => clearInterval(id);
   }, [isEmbedded]);
 
-  // The season/all-time boards move only when someone finishes, so a slow 30s poll is plenty —
-  // a fresh finish already fires a targeted refresh (the effect below, and onFinish for your
-  // own). This is just the safety net for finishers we never catch mid-game.
+  // Sync the layout ref the poll reads, and catch the roster up the moment the player
+  // expands out of PIP (the poll skipped while collapsed, so it may be a while stale).
+  useEffect(() => {
+    const wasPip = layoutModeRef.current === Common.LayoutModeTypeObject.PIP;
+    layoutModeRef.current = layoutMode;
+    if (isEmbedded && wasPip && layoutMode !== Common.LayoutModeTypeObject.PIP) {
+      void fetchServerRoster();
+    }
+  }, [layoutMode]);
+
+  // The season/all-time boards move only when someone finishes, and a fresh finish already
+  // fires a targeted refresh (the effect below, and onFinish for your own) — so this poll is
+  // purely the safety net for finishers we never catch mid-game; 2 minutes is plenty.
   useEffect(() => {
     if (!isEmbedded) return;
-    const id = setInterval(() => void refreshLeaderboard(), 30_000);
+    const id = setInterval(() => void refreshLeaderboard(), 120_000);
     return () => clearInterval(id);
   }, [isEmbedded]);
 
@@ -708,7 +725,7 @@ export function App({
     return () => window.clearTimeout(timer);
   }, [isEmbedded]);
 
-  // The polled roster with your own local state overlaid, so your row never lags the 5s poll.
+  // The polled roster with your own local state overlaid, so your row never lags the poll.
   const roster = useMemo(() => {
     const byId = new Map<string, PlayerState>();
     for (const p of serverRoster) byId.set(p.userId, p);
@@ -723,8 +740,8 @@ export function App({
   // Live leaderboard, the near-real-time path: when another player wraps the daily their
   // season/all-time totals change server-side a beat later (once their score write lands),
   // so we refresh ~2.5s after first seeing them finish. The board then reshuffles and the
-  // FLIP rows slide to their new ranks. Own finishes already refresh via onFinish; the 30s
-  // poll backstops anyone we miss here.
+  // FLIP rows slide to their new ranks. Own finishes already refresh via onFinish; the
+  // 2-minute poll backstops anyone we miss here.
   const seenFinishers = useRef<Set<string>>(new Set());
   const lbRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {

@@ -15,7 +15,7 @@ const tableBlocks = [
   ...schema.matchAll(/create table if not exists public\.presence[\s\S]*?\);/g),
 ];
 
-const TTL = "15 seconds"; // mirrors ROSTER_ONLINE_TTL_MS in api/roster.ts (15_000)
+const TTL = "40 seconds"; // mirrors ROSTER_ONLINE_TTL_MS in api/roster.ts (40_000)
 const DATE = "2026-06-07";
 
 // The upsert api/roster.ts issues each poll: supabase .upsert() on the PK = INSERT ... ON CONFLICT.
@@ -48,7 +48,7 @@ beforeAll(async () => {
 
 describe("presence heartbeat (schema.sql)", () => {
   it("marks a fresh heartbeat online and a stale one offline", async () => {
-    await beat(db, "fresh", 3); // 3s ago → within the 15s TTL
+    await beat(db, "fresh", 3); // 3s ago → within the 40s TTL
     await beat(db, "stale", 60); // 60s ago → aged out
     expect(await online(db)).toEqual(["fresh"]);
   });

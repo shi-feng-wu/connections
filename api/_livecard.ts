@@ -17,7 +17,7 @@ export const CARD_POST_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours
 // (join) refreshes a bit faster than mid-game progress (update); a player who just
 // finished bypasses the update throttle so the final grid always lands.
 export const CARD_JOIN_THROTTLE_MS = 15_000; // 15s
-export const CARD_UPDATE_THROTTLE_MS = 30_000; // 30s
+export const CARD_UPDATE_THROTTLE_MS = 60_000; // 60s
 
 // Attach each player's current Connections grid (replayed from their committed guesses)
 // and their time: finish duration for a completed game, else elapsed-so-far. One query

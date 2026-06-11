@@ -12,7 +12,7 @@ import type { Puzzle } from "./game";
 // model immune to that, driven through the real `presence` DDL from schema.sql against real
 // Postgres (PGlite), with time modelled explicitly so the TTL window is deterministic:
 //   • an actively-polling player is online on every cycle (the signal updates, no flicker);
-//   • a single missed 5s beat does NOT drop them (the 15s TTL spans one hiccup — consistency);
+//   • a single missed 15s beat does NOT drop them (the 40s TTL spans one hiccup — consistency);
 //   • a player who stops polling ages out after the TTL (the signal reflects reality);
 //   • a returning player comes back online on their very next beat — no restart (the fix).
 
@@ -22,7 +22,7 @@ const tableBlocks = [...schema.matchAll(/create table if not exists public\.pres
 const SIM_DATE = "2026-06-10";
 const BASE = "2026-06-10T12:00:00.000Z"; // t=0 of the simulated timeline
 const BASE_MS = Date.parse(BASE);
-const TTL_MS = 15_000; // ROSTER_ONLINE_TTL_MS in api/roster.ts
+const TTL_MS = 40_000; // ROSTER_ONLINE_TTL_MS in api/roster.ts
 const at = (seconds: number): string => new Date(BASE_MS + seconds * 1000).toISOString();
 
 let db: PGlite;
@@ -61,36 +61,36 @@ beforeAll(async () => {
 describe("live roster signal — consistent and updating", () => {
   // One ordered timeline. Each step beats (a poll) then asserts what that instant's roster shows;
   // because only the latest beat per player is stored, every checkpoint reads true at-that-time
-  // state. Cadence 5s, TTL 15s. alice/bob poll continuously; carol skips one beat; dave leaves
+  // state. Cadence 15s, TTL 40s. alice/bob poll continuously; carol skips one beat; dave leaves
   // and later returns.
-  it("tracks every player correctly across a sequence of 5s polls", async () => {
+  it("tracks every player correctly across a sequence of 15s polls", async () => {
     // t=0 — everyone polls; everyone online.
     for (const u of ["alice", "bob", "carol", "dave"]) await beatAt(u, 0);
     expect(await onlineAt(0)).toEqual(new Set(["alice", "bob", "carol", "dave"]));
 
-    // t=5 — alice/bob/carol poll; dave goes quiet (his last beat stays at t=0).
-    for (const u of ["alice", "bob", "carol"]) await beatAt(u, 5);
-    expect(await onlineAt(5)).toEqual(new Set(["alice", "bob", "carol", "dave"])); // dave 5s old → still in
-
-    // t=10 — alice/bob poll; carol MISSES this beat (last beat t=5); dave still quiet (t=0).
-    for (const u of ["alice", "bob"]) await beatAt(u, 10);
-    // carol's single missed beat must NOT drop her (5s since her beat < 15s TTL) — no flicker.
-    expect(await onlineAt(10)).toEqual(new Set(["alice", "bob", "carol", "dave"])); // dave 10s old → still in
-
-    // t=15 — carol resumes; alice/bob keep polling; dave still gone (15s since t=0).
+    // t=15 — alice/bob/carol poll; dave goes quiet (his last beat stays at t=0).
     for (const u of ["alice", "bob", "carol"]) await beatAt(u, 15);
-    const at15 = await onlineAt(15);
-    expect(at15).toEqual(new Set(["alice", "bob", "carol"])); // dave aged out at exactly the TTL edge
+    expect(await onlineAt(15)).toEqual(new Set(["alice", "bob", "carol", "dave"])); // dave 15s old → still in
 
-    // t=20 — active trio still polling; dave unambiguously offline (20s since his last beat).
-    for (const u of ["alice", "bob", "carol"]) await beatAt(u, 20);
-    expect(await onlineAt(20)).toEqual(new Set(["alice", "bob", "carol"]));
+    // t=30 — alice/bob poll; carol MISSES this beat (last beat t=15); dave still quiet (t=0).
+    for (const u of ["alice", "bob"]) await beatAt(u, 30);
+    // carol's single missed beat must NOT drop her (15s since her beat < 40s TTL) — no flicker.
+    expect(await onlineAt(30)).toEqual(new Set(["alice", "bob", "carol", "dave"])); // dave 30s old → still in
 
-    // t=30 — dave RETURNS and polls once. He must light back up immediately (the old realtime
+    // t=45 — carol resumes; alice/bob keep polling; dave still gone (45s since t=0, past the TTL).
+    for (const u of ["alice", "bob", "carol"]) await beatAt(u, 45);
+    const at45 = await onlineAt(45);
+    expect(at45).toEqual(new Set(["alice", "bob", "carol"])); // dave aged out past the TTL
+
+    // t=60 — active trio still polling; dave unambiguously offline (60s since his last beat).
+    for (const u of ["alice", "bob", "carol"]) await beatAt(u, 60);
+    expect(await onlineAt(60)).toEqual(new Set(["alice", "bob", "carol"]));
+
+    // t=90 — dave RETURNS and polls once. He must light back up immediately (the old realtime
     // bug left him frozen until an Activity restart; the poll recovers him on the next beat).
-    // The trio's last beat was t=20 (10s ago < TTL), so they're still online too.
-    await beatAt("dave", 30);
-    expect(await onlineAt(30)).toEqual(new Set(["alice", "bob", "carol", "dave"]));
+    // The trio's last beat was t=60 (30s ago < TTL), so they're still online too.
+    await beatAt("dave", 90);
+    expect(await onlineAt(90)).toEqual(new Set(["alice", "bob", "carol", "dave"]));
   });
 });
 
@@ -127,8 +127,8 @@ describe("live signal → roster row (assembleRoster online flag)", () => {
   it("lights, ages out, and re-lights the green ring as the heartbeat moves", async () => {
     await beatAt("ringer", 100);
     expect(await rosterRingAt(100)).toBe(true); // fresh beat → ring on
-    expect(await rosterRingAt(120)).toBe(false); // 20s later, no new beat → ring off (left)
-    await beatAt("ringer", 125); // returns and polls
-    expect(await rosterRingAt(125)).toBe(true); // ring back on, no restart needed
+    expect(await rosterRingAt(145)).toBe(false); // 45s later, no new beat → ring off (left)
+    await beatAt("ringer", 150); // returns and polls
+    expect(await rosterRingAt(150)).toBe(true); // ring back on, no restart needed
   });
 });

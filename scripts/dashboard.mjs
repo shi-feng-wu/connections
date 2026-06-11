@@ -53,6 +53,55 @@ async function fetchAllScores() {
   return out;
 }
 
+// Every carded live_cards row (one per scope/day/channel — grows daily, so the
+// table sailed past Supabase's 1000-row default and the old single select silently
+// undercounted distinct servers). Paginate like fetchAllScores.
+async function fetchAllCards() {
+  const page = 1000;
+  let from = 0;
+  const out = [];
+  for (;;) {
+    const { data, error } = await db
+      .from('live_cards')
+      .select('scope_id, message_id')
+      .not('message_id', 'is', null)
+      .order('scope_id')
+      .range(from, from + page - 1);
+    if (error) throw new Error('live_cards: ' + error.message);
+    out.push(...(data ?? []));
+    if (!data || data.length < page) break;
+    from += page;
+  }
+  return out;
+}
+
+// True bot install count, straight from Discord (same source as the email they send).
+// live_cards can't tell you this: cards also exist in user-install servers (posted via
+// the interaction webhook, no bot in the guild) and rows outlive servers that removed
+// the bot. Mirrors fetchBotGuildIds in api/cron-recap.ts. Returns null when the token
+// is missing or Discord errors, so the KPI shows "—" instead of a wrong number.
+async function fetchBotGuildCount() {
+  const token = process.env.DISCORD_BOT_TOKEN ?? '';
+  if (!token) return null;
+  try {
+    const ids = new Set();
+    let after = '';
+    for (;;) {
+      const url = `https://discord.com/api/v10/users/@me/guilds?limit=200${after ? `&after=${after}` : ''}`;
+      const r = await fetch(url, { headers: { Authorization: `Bot ${token}` } });
+      if (!r.ok) return null;
+      const page = await r.json();
+      if (!Array.isArray(page) || page.length === 0) break;
+      for (const g of page) ids.add(g.id);
+      if (page.length < 200) break;
+      after = page[page.length - 1].id;
+    }
+    return ids.size;
+  } catch {
+    return null;
+  }
+}
+
 function isoMinusDays(iso, days) {
   const d = new Date(iso + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() - days);
@@ -67,12 +116,13 @@ async function loadStats() {
   const allDates = [...dateSet].sort();
   const latestDate = allDates.length ? allDates[allDates.length - 1] : null;
 
-  const [{ data: presence }, { data: cards }, { count: puzzlesCached }] = await Promise.all([
+  const [{ data: presence }, cards, { count: puzzlesCached }, botInstalls] = await Promise.all([
     latestDate
       ? db.from('presence').select('user_id, last_seen').eq('puzzle_date', latestDate)
       : Promise.resolve({ data: [] }),
-    db.from('live_cards').select('scope_id, message_id'),
+    fetchAllCards(),
     db.from('puzzles').select('*', { count: 'exact', head: true }),
+    fetchBotGuildCount(),
   ]);
 
   const now = Date.now();
@@ -266,7 +316,11 @@ async function loadStats() {
   const latestRows = latestDate ? rows.filter((r) => r.puzzle_date === latestDate) : [];
   const onlineNow = (presence ?? []).filter((p) => now - Date.parse(p.last_seen) < ONLINE_TTL_MS).length;
   const active5m = (presence ?? []).filter((p) => now - Date.parse(p.last_seen) < 5 * 60_000).length;
-  const botServers = new Set((cards ?? []).filter((c) => c.message_id).map((c) => c.scope_id)).size;
+  // Servers that ever had a live card posted — reach, not installs (includes user-install
+  // servers and ones that later removed the bot). botInstalls above is the real count.
+  const cardServers = new Set(
+    (cards ?? []).filter((c) => c.message_id && String(c.scope_id).startsWith('g:')).map((c) => c.scope_id),
+  ).size;
 
   return {
     generatedAt: now,
@@ -275,7 +329,8 @@ async function loadStats() {
       players: players.size,
       servers: [...scopes].filter((s) => s.startsWith('g:')).length,
       rooms: scopes.size,
-      botServers,
+      botInstalls,
+      cardServers,
       newPlayers7,
       wau: wau.size,
       peak,
@@ -643,7 +698,7 @@ function renderPage(s) {
 <div class="grid kpis">
   ${kpi('Players reached', num(t.players), `+${num(t.newPlayers7)} this week`, C.green)}
   ${kpi('Active this week', num(t.wau), `${num(l.players)} on today's puzzle`, C.blue)}
-  ${kpi('Servers', num(t.servers), `${num(t.botServers)} bot installs · ${num(t.rooms)} rooms`, C.purple)}
+  ${kpi('Servers', num(t.servers), `${t.botInstalls == null ? '—' : num(t.botInstalls)} bot installs · ${num(t.cardServers)} reached · ${num(t.rooms)} rooms`, C.purple)}
   ${kpi('Games played', num(t.games))}
   ${kpi('Peak day', num(t.peak.players), t.peak.date ? `players · ${esc(shortDate(t.peak.date))}` : '—')}
   ${kpi('Solve rate', pct(t.solveRate), `avg ${one(t.avgMistakes)} mistakes`)}

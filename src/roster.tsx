@@ -64,12 +64,43 @@ const fmtElapsed = (p: PlayerState, now: number): string => {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 };
 
-// Furthest ahead first: most groups solved, then fastest, then fewest mistakes.
+// Finished runs only — their elapsed is frozen (finishedAt − startedAt), so no `now`.
+const scoreOf = (p: PlayerState): number =>
+  p.done ? finishedScore(p.done, p.solvedCount, p.mistakesLeft, elapsedMs(p, 0)) : 0;
+
+// Points a live run has already BANKED — the score of busting right now, i.e. the
+// loss partial credit for groups solved. It only ever grows (a solve adds, nothing
+// subtracts — mistakes and time can't lower it), so against finished rows a live
+// row only climbs, never sinks; and it moves only on submits, so the list shuffles
+// on events, not on the clock.
+const bankedOf = (p: PlayerState): number =>
+  finishedScore("lost", p.solvedCount, p.mistakesLeft, 0);
+
+// The Live tab's order, one comparator:
+//   1. everyone ranks by points — the final score for finished runs (what the
+//      Leaderboard tab shows), banked-so-far (above) for live ones. Any win
+//      (≥350) outranks any live run (banked tops out at 180), so winners hold
+//      their podium until someone actually finishes above them;
+//   2. at equal points a live run outranks a finished one — it's still climbing,
+//      the finished score is capped there;
+//   3. remaining ties run the progress race: fastest, then fewest mistakes.
+// Between two LIVE runs this whole comparator collapses to the hierarchical race
+// sort — most groups solved, then fastest, then fewest mistakes — because banked
+// points are a pure function of groups solved (20·g²): equal groups → equal
+// points → the elapsed/mistakes tiers decide. Speed therefore ranks runners at
+// the same group count, the only place comparing raw clocks is fair. That
+// equivalence is also why no banding is needed (unlike the ceiling-based cut
+// this replaces): the points key and the race order can't disagree. Once
+// everyone is done the whole list is rule 1 — Live converges to the Leaderboard.
 export function sortRoster(players: PlayerState[], now: number): PlayerState[] {
+  const points = (p: PlayerState): number =>
+    p.done ? scoreOf(p) : bankedOf(p);
   return players
     .slice()
     .sort(
       (a, b) =>
+        points(b) - points(a) ||
+        (a.done ? 1 : 0) - (b.done ? 1 : 0) ||
         b.solvedCount - a.solvedCount ||
         elapsedMs(a, now) - elapsedMs(b, now) ||
         b.mistakesLeft - a.mistakesLeft,
@@ -229,10 +260,6 @@ function Mistakes({ p }: { p: PlayerState }) {
     </span>
   );
 }
-
-// Finished runs only — their elapsed is frozen (finishedAt − startedAt), so no `now`.
-const scoreOf = (p: PlayerState): number =>
-  p.done ? finishedScore(p.done, p.solvedCount, p.mistakesLeft, elapsedMs(p, 0)) : 0;
 
 // Desktop only: a finished row keeps its mistake dots and adds the score beside
 // them — styled like the leaderboard's score cell so the two tabs rhyme, dimmed on

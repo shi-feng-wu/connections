@@ -820,8 +820,8 @@ function Simulate() {
   }
 
   // #feedback isolates this playground and auto-fires a one-away guess (3 of one
-  // group + 1 other), so the transient "One away…" pill shows up in the header
-  // score slot — the same spot the end-screen hero lands.
+  // group + 1 other), so the transient "One away…" chip pops into the footer's
+  // middle, between the mistake dots and the shuffle button.
   useEffect(() => {
     if (location.hash.toLowerCase() !== "#feedback") return;
     void (async () => {

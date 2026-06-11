@@ -448,14 +448,18 @@ export function Board({
   const busy = useRef<boolean>(false);
   // word under the mouse, for the hover dim (mouse-only — see TILE_HOVER).
   const [hover, setHover] = useState<string | null>(null);
-  // Transient label on the Submit pill ("One away…", "Already guessed"). This guess
-  // feedback used to live in the header meta line (top-right, 12px — easy to miss,
-  // and hidden entirely on mobile); the Submit button is where you're already
-  // looking, so it owns the message now and carries aria-live for the announcement.
-  // Once the game has ended the pill is gone, so the end footer shows the hint
-  // instead (EndSummary's note face — the "couldn’t save" warning can land there).
-  // Reverts after `ms` (default 1.6s).
+  // Transient guess feedback ("One away…", "Guessed"): a chip that pops
+  // into the footer's empty middle, between the mistake dots and the shuffle
+  // button. It used to ride the Submit pill's label (and before that the header
+  // meta line — easy to miss, hidden on mobile), but morphing the button made the
+  // control itself shift underfoot; the chip keeps the message at the same eye
+  // line without touching anything pressable. Once the game has ended the chip's
+  // slot is gone, so the end footer shows the hint instead (EndSummary's note
+  // face — the "couldn’t save" warning can land there). Reverts after `ms`
+  // (default 1.6s). `hintN` bumps on every flash so a repeat of the same message
+  // (a second "Guessed") still replays the pop.
   const [hint, setHint] = useState<string | null>(null);
+  const [hintN, setHintN] = useState(0);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const [, bump] = useReducer((n: number) => n + 1, 0);
@@ -463,6 +467,7 @@ export function Board({
   const rerenderSync = () => flushSync(() => bump());
   function flashHint(msg: string, ms = 1600): void {
     setHint(msg);
+    setHintN((n) => n + 1);
     clearTimeout(hintTimer.current);
     hintTimer.current = setTimeout(() => setHint(null), ms);
   }
@@ -473,37 +478,34 @@ export function Board({
   const gridRef = useRef<HTMLDivElement>(null);
   const tailRef = useRef<HTMLDivElement>(null);
 
-  // Morph the Submit pill's width when its label swaps (Submit <-> a hint) instead of
-  // letting it snap: measure the rendered width before and after the swap — the same
-  // FLIP-by-measurement the board tiles use — then tween between them while the new
-  // word rises in just behind the reshape. The pill is clipped + nowrap (see its
-  // className) so the longer text can't reflow to a second line mid-morph.
-  const submitW = useRef<number | null>(null);
-  const submitWAnim = useRef<Animation | null>(null);
+  // The hint chip stays mounted (its text held in lastHint through the fade-out,
+  // same trick as EndSummary's note face) and animates with WAAPI: a SPRING scale
+  // pop on the way in — the same pop the tiles and mistake dots speak — and a
+  // plain opacity fade on the way out (no translate on text, see the fades rule).
+  // The chip starts at the className's opacity-0; both animations fill forwards,
+  // so its resting state is always whichever ran last.
+  const hintChipRef = useRef<HTMLDivElement>(null);
+  const lastHint = useRef("");
+  if (hint) lastHint.current = hint;
   useLayoutEffect(() => {
-    const label = tailRef.current?.querySelector<HTMLElement>("[data-submit-label]");
-    const btn = label?.parentElement ?? null;
-    if (!btn || !label) {
-      submitW.current = null; // end-screen footer has no Submit — reset for next game
-      return;
+    const chip = hintChipRef.current;
+    if (!chip) return; // end-screen footer — EndSummary's note face owns the hint
+    if (hint) {
+      chip.animate(
+        [
+          { opacity: 0, transform: "scale(.9)" },
+          { opacity: 1, transform: "scale(1)" },
+        ],
+        { duration: 320, easing: SPRING, fill: "forwards" },
+      );
+    } else if (lastHint.current) {
+      chip.animate([{ opacity: 1 }, { opacity: 0 }], {
+        duration: 240,
+        easing: "ease-out",
+        fill: "forwards",
+      });
     }
-    submitWAnim.current?.cancel(); // drop to natural width before measuring
-    const next = btn.getBoundingClientRect().width;
-    const prev = submitW.current;
-    submitW.current = next;
-    if (prev == null || Math.abs(prev - next) < 0.5) return; // first paint / unchanged
-    submitWAnim.current = btn.animate(
-      [{ width: `${prev}px` }, { width: `${next}px` }],
-      { duration: 340, easing: GLIDE },
-    );
-    label.animate(
-      [
-        { opacity: 0, transform: "translateY(5px)" },
-        { opacity: 1, transform: "translateY(0)" },
-      ],
-      { duration: 260, easing: GLIDE, delay: 50, fill: "backwards" },
-    );
-  }, [hint]);
+  }, [hint, hintN]);
 
   function broadcast(): void {
     const real = solvedLevels.current.filter(
@@ -810,9 +812,9 @@ export function Board({
     // show it immediately instead of waiting on the /api/guess round-trip (which made
     // every guess feel laggy once a real network was in play). onCommit records the
     // guess in the background (keepalive + ordered queue, see commitGuess); a guess that
-    // still can't be saved after retries surfaces a quiet warning — on the Submit pill
-    // mid-game, or the end footer's note face if the game has ended by the time the
-    // retries exhaust — rather than blocking play. Held longer than a guess hint: it's
+    // still can't be saved after retries surfaces a quiet warning — on the footer's
+    // hint chip mid-game, or the end footer's note face if the game has ended by the
+    // time the retries exhaust — rather than blocking play. Held longer than a guess hint: it's
     // the only signal the score may not record. Duplicates/noops aren't recorded
     // server-side, so we skip them.
     if (onCommit && result.type !== "duplicate" && result.type !== "noop") {
@@ -822,7 +824,7 @@ export function Board({
     }
 
     if (result.type === "duplicate") {
-      flashHint("Already guessed");
+      flashHint("Guessed");
       busy.current = false;
       return;
     }
@@ -956,6 +958,16 @@ export function Board({
   // Playing footer — one compact row: mistakes dots pinned left, controls right.
   // Shuffle/Deselect collapse to icons; their labels stay in the DOM (sr-only) so
   // accessible names and the preview driver's text lookup still resolve.
+  // The flex-1 middle is the hint chip's stage: guess feedback pops in centered
+  // in the dead space between the dots and the shuffle button. The chip is
+  // absolute (centered by the flex container's alignment, so WAAPI owns its
+  // transform) and nowrap — on the narrowest layouts a long message overhangs
+  // the dots rather than wrapping or squeezing the controls; it's opaque,
+  // shadowed, and z-raised, so it reads fine for the beat it's on stage.
+  // It's pointer-events-none and visually tile-material (the board's cream, not
+  // the Submit pill's white) so it never reads as another button. The sr-only
+  // twin carries the announcement: the visible chip holds its last text through
+  // the fade-out, so its content alone wouldn't re-announce a repeated message.
   function renderControls() {
     return (
       <div className="flex items-center gap-3">
@@ -975,7 +987,19 @@ export function Board({
             />
           ))}
         </span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="relative flex min-w-0 flex-1 items-center justify-center self-stretch">
+          <div
+            ref={hintChipRef}
+            aria-hidden
+            className="pointer-events-none absolute z-10 whitespace-nowrap rounded-full bg-[#efefe6] px-3.5 py-2 text-[11px] font-bold uppercase leading-none tracking-[0.08em] text-[#121212] opacity-0 shadow-[0_3px_12px_rgba(0,0,0,0.45)] max-[420px]:px-3 max-[420px]:text-[10px] max-[420px]:tracking-[0.04em]"
+          >
+            {hint ?? lastHint.current}
+          </div>
+          <span className="sr-only" role="status">
+            {hint}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
           <HoverButton
             className={BTN_ICON}
             hover="opacity-80"
@@ -998,17 +1022,13 @@ export function Board({
             <span className="sr-only">Deselect all</span>
           </HoverButton>
           <HoverButton
-            className={BTN_PRIMARY + " overflow-hidden whitespace-nowrap"}
+            className={BTN_PRIMARY}
             hover="opacity-85"
             onClick={() => void submit()}
-            disabled={selected.current.size !== 4 && !hint}
-            aria-label={hint ?? "Submit"}
-            aria-live="polite"
-            title={hint ?? "Submit"}
+            disabled={selected.current.size !== 4}
+            title="Submit"
           >
-            <span data-submit-label className="inline-block">
-              {hint ?? "Submit"}
-            </span>
+            Submit
           </HoverButton>
         </div>
       </div>

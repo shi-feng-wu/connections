@@ -151,6 +151,42 @@ export function assembleRoster(
   });
 }
 
+// What one roster_bundle RPC returns (supabase/schema.sql): every read a poll needs, in a
+// single round-trip — members is already one-row-per-user (latest identity, deduped by
+// `distinct on` server-side), the rest mirror the old per-table queries.
+type RosterBundle = {
+  members: CardPlayer[];
+  card_players: CardPlayer[];
+  scores: ScoreRow[];
+  progress: ProgressRow[];
+  seen: { user_id: string; last_seen: string }[];
+};
+
+// One bundle per (scope view, day), shared across a warm instance for a short TTL. Fluid
+// compute serves many concurrent requests from one instance with shared module state (the
+// same trick as the puzzle cache in _nyt.ts), so room-mates whose polls land inside the
+// window share one DB trip; only the caller's heartbeat write still lands per poll. 10s
+// keeps worst-case roster staleness under one 15s poll interval, and the absolute
+// last_seen timestamps age correctly inside the 40s online TTL — a cache hit can only
+// miss beats written in the last 10s, which the TTL's missed-beat slack already covers.
+const BUNDLE_TTL_MS = 10_000;
+const bundleCache = new Map<string, { at: number; bundle: RosterBundle }>();
+
+export function cachedBundle(key: string, now: number): RosterBundle | null {
+  const hit = bundleCache.get(key);
+  if (hit && now - hit.at < BUNDLE_TTL_MS) return hit.bundle;
+  if (hit) bundleCache.delete(key);
+  return null;
+}
+
+export function cacheBundle(key: string, bundle: RosterBundle, now: number): void {
+  // Opportunistic sweep so dead scopes don't accumulate across a long-lived instance.
+  if (bundleCache.size >= 256) {
+    for (const [k, v] of bundleCache) if (now - v.at >= BUNDLE_TTL_MS) bundleCache.delete(k);
+  }
+  bundleCache.set(key, { at: now, bundle });
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') {
@@ -179,80 +215,69 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   // has ever played in this scope — narrowed to this channel for the Channel view, the whole
   // guild for Server. A member's one daily game then surfaces here wherever they launched it
   // today; members who didn't play today are dropped by assembleRoster.
-  const wantChannel = req.body?.scopeMode !== 'server';
-
-  // Members (ever played here) for identity + the set to pull today's state for; plus today's
-  // card openers in this channel (first-timers with no prior score, and "opened not finished").
-  let memberQ = db.from('scores').select('user_id, name, avatar, created_at').eq('scope_id', scope);
-  let cardQ = db.from('live_cards').select('players').eq('scope_id', scope).eq('puzzle_date', date);
+  //
   // Channel narrowing only applies to a guild scope, where one guild spans many channels. A
   // c: DM/group scope IS a single channel, so narrowing is redundant and would drop legacy
   // rows written before channel_id existed — skip it (guildId is null for a DM/group).
-  if (wantChannel && channelId && guildId) {
-    memberQ = memberQ.eq('channel_id', channelId);
-    cardQ = cardQ.eq('channel_id', channelId);
-  }
-  const [{ data: memberData }, { data: cardRows }] = await Promise.all([memberQ, cardQ]);
+  const wantChannel = req.body?.scopeMode !== 'server';
+  const narrowTo = wantChannel && channelId && guildId ? channelId : null;
 
-  // Identity per id: a member's most-recent score name/avatar, then today's card openers
-  // override (freshest join-time identity). assembleRoster keeps only those who played today.
-  const identity = new Map<string, CardPlayer>();
-  for (const r of ((memberData as { user_id: string; name: string; avatar: string | null; created_at: string }[] | null) ?? [])
-    .slice()
-    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))) {
-    if (!identity.has(r.user_id)) identity.set(r.user_id, { id: r.user_id, name: r.name, avatar: r.avatar });
-  }
-  for (const c of (cardRows as { players: unknown }[] | null) ?? []) {
-    if (Array.isArray(c.players)) for (const p of c.players as CardPlayer[]) identity.set(p.id, p);
-  }
-  const joined = [...identity.values()];
-
-  const ids = joined.map((p) => p.id);
-  if (!ids.length) {
-    res.status(200).json({ players: [] });
-    return;
-  }
-
-  // Stamp the caller's heartbeat (they're polling, so they're here right now) concurrently with
-  // the reads — .then() fires the lazy query now; awaited below so the write lands before a
-  // serverless instance can freeze after the response. Soft: a failed beat just costs the ring.
   const now = Date.now();
-  const heartbeat = uid
-    ? db
+  // Independent of the bundle, and usually free (read-through cached in _nyt.ts).
+  const puzzleP = fetchPuzzle(date).catch(() => null);
+
+  let bundle = cachedBundle(`${scope}|${narrowTo ?? ''}|${date}`, now);
+  if (bundle) {
+    // A cache hit skips the RPC, but the caller's heartbeat must still land — it's what keeps
+    // their green ring alive on everyone else's roster. Soft: a failed beat just costs the ring.
+    if (uid) {
+      await db
         .from('presence')
         .upsert({ user_id: uid, puzzle_date: date, last_seen: new Date(now).toISOString() })
         .then(
           () => {},
           () => {},
-        )
-    : Promise.resolve();
+        );
+    }
+  } else {
+    // One round-trip for everything a poll reads (plus the caller's heartbeat, stamped inside):
+    // member identity (already one row per user), today's card openers, and today's
+    // scores/progress/presence for that id set — ANY scope, so a member's single daily game
+    // follows them into every room they belong to. See roster_bundle in supabase/schema.sql.
+    const { data, error } = await db.rpc('roster_bundle', {
+      p_scope: scope,
+      p_date: date,
+      p_channel: narrowTo,
+      p_uid: uid,
+    });
+    if (error || !data) {
+      // Same degradation as a failed table read before: an empty roster, never a 500 —
+      // presence overlays on the client keep the Live tab minimally alive.
+      res.status(200).json({ players: [] });
+      return;
+    }
+    bundle = data as RosterBundle;
+    cacheBundle(`${scope}|${narrowTo ?? ''}|${date}`, bundle, now);
+  }
 
-  // Today's finishes + committed progress + live heartbeats for the member/opener set — ANY
-  // scope, so a member's single daily game follows them into every room they belong to.
-  const [puzzle, { data: scoreData }, { data: progData }, { data: seenData }] = await Promise.all([
-    fetchPuzzle(date).catch(() => null),
-    db
-      .from('scores')
-      .select('user_id, name, avatar, solved, mistakes, groups_solved, duration_ms')
-      .in('user_id', ids)
-      .eq('puzzle_date', date),
-    db
-      .from('progress')
-      .select('user_id, guesses, started_at, updated_at')
-      .in('user_id', ids)
-      .eq('puzzle_date', date),
-    db.from('presence').select('user_id, last_seen').in('user_id', ids).eq('puzzle_date', date),
-  ]);
-  await heartbeat;
-  const scoreRows = (scoreData as ScoreRow[] | null) ?? [];
-  const progressRows = (progData as ProgressRow[] | null) ?? [];
+  // Identity per id: a member's most-recent score name/avatar, then today's card openers
+  // override (freshest join-time identity). assembleRoster keeps only those who played today.
+  const identity = new Map<string, CardPlayer>();
+  for (const m of bundle.members) identity.set(m.id, m);
+  for (const p of bundle.card_players) if (p && typeof p.id === 'string') identity.set(p.id, p);
+  const joined = [...identity.values()];
+  if (!joined.length) {
+    res.status(200).json({ players: [] });
+    return;
+  }
+
   // last_seen per player → the "online" set assembleRoster paints the green ring from.
   const lastSeen = new Map<string, number>();
-  for (const r of (seenData as { user_id: string; last_seen: string }[] | null) ?? []) {
+  for (const r of bundle.seen) {
     const t = Date.parse(r.last_seen);
     if (!Number.isNaN(t)) lastSeen.set(r.user_id, t);
   }
 
-  const players = assembleRoster(joined, scoreRows, progressRows, puzzle, now, lastSeen);
+  const players = assembleRoster(joined, bundle.scores, bundle.progress, await puzzleP, now, lastSeen);
   res.status(200).json({ players });
 }

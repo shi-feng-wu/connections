@@ -643,3 +643,86 @@ begin
 end $$;
 
 alter table public.live_cards enable row level security;
+
+-- Everything one /api/roster poll needs, in a single round-trip. The handler used to make
+-- six REST calls per poll (members, card players, then scores/progress/presence + the
+-- caller's heartbeat); at a 15s poll per player that was the dominant serverless cost, so
+-- this bundles them into one function call. It also dedupes member identity server-side:
+-- the old member query returned EVERY score row ever written in the scope (growing with
+-- calendar time) just so TS could pick each user's most recent name/avatar — here that's
+-- a `distinct on`, one row per member forever.
+--
+--   members      latest score-row identity per member (ever played in this scope, narrowed
+--                to p_channel for the guild Channel view) — the membership model room_board
+--                uses, mirrored.
+--   card_players raw [{id,name,avatar}] entries from today's live cards (join-time identity;
+--                the handler overlays these over members, freshest wins).
+--   scores/progress/seen  today's rows for the member ∪ card-opener id set, ANY scope, so a
+--                member's single daily game follows them into every room they belong to.
+--
+-- The caller's presence heartbeat (they're polling, so they're here right now) is stamped
+-- in the same trip when p_uid is set. That write makes this volatile and service-role-only:
+-- progress.guesses and presence are anon-denied tables (RLS, no policy), so the function
+-- must not hand them to anon either — execute is revoked from public below.
+drop function if exists public.roster_bundle(text, date, text, text);
+create or replace function public.roster_bundle(
+  p_scope   text,
+  p_date    date,
+  p_channel text default null,
+  p_uid     text default null
+)
+returns json
+language plpgsql
+set search_path = public
+as $$
+declare
+  result json;
+begin
+  if p_uid is not null then
+    insert into public.presence (user_id, puzzle_date, last_seen)
+    values (p_uid, p_date, now())
+    on conflict (user_id, puzzle_date) do update set last_seen = excluded.last_seen;
+  end if;
+
+  with members as (
+    select distinct on (user_id) user_id, name, avatar
+    from public.scores
+    where scope_id = p_scope and (p_channel is null or channel_id = p_channel)
+    order by user_id, created_at desc
+  ),
+  card_players as (
+    select p ->> 'id' as user_id, p
+    from public.live_cards l, jsonb_array_elements(l.players) as p
+    where l.scope_id = p_scope and l.puzzle_date = p_date
+      and (p_channel is null or l.channel_id = p_channel)
+  ),
+  ids as (
+    select user_id from members union select user_id from card_players
+  )
+  select json_build_object(
+    'members', coalesce((
+      select json_agg(json_build_object('id', m.user_id, 'name', m.name, 'avatar', m.avatar))
+      from members m), '[]'::json),
+    'card_players', coalesce((select json_agg(c.p) from card_players c), '[]'::json),
+    'scores', coalesce((
+      select json_agg(json_build_object(
+        'user_id', s.user_id, 'name', s.name, 'avatar', s.avatar, 'solved', s.solved,
+        'mistakes', s.mistakes, 'groups_solved', s.groups_solved, 'duration_ms', s.duration_ms))
+      from public.scores s join ids on ids.user_id = s.user_id
+      where s.puzzle_date = p_date), '[]'::json),
+    'progress', coalesce((
+      select json_agg(json_build_object(
+        'user_id', pr.user_id, 'guesses', pr.guesses,
+        'started_at', pr.started_at, 'updated_at', pr.updated_at))
+      from public.progress pr join ids on ids.user_id = pr.user_id
+      where pr.puzzle_date = p_date), '[]'::json),
+    'seen', coalesce((
+      select json_agg(json_build_object('user_id', se.user_id, 'last_seen', se.last_seen))
+      from public.presence se join ids on ids.user_id = se.user_id
+      where se.puzzle_date = p_date), '[]'::json)
+  ) into result;
+  return result;
+end $$;
+
+revoke all on function public.roster_bundle(text, date, text, text) from public;
+grant execute on function public.roster_bundle(text, date, text, text) to service_role;

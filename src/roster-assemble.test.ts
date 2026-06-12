@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assembleRoster } from "../api/roster";
+import { assembleRoster, cacheBundle, cachedBundle } from "../api/roster";
 import type { CardPlayer } from "../api/_card";
 import type { Puzzle } from "./game";
 
@@ -161,5 +161,16 @@ describe("assembleRoster", () => {
     const start = NOW - 30_000;
     const out = assembleRoster([cp("A")], [], [prog("A", [group(0)], start)], puzzle, NOW);
     expect(out[0].online).toBe(false);
+  });
+});
+
+// The per-instance bundle cache that lets room-mates' polls share one roster_bundle trip.
+describe("bundle cache", () => {
+  const empty = { members: [], card_players: [], scores: [], progress: [], seen: [] };
+  it("serves a fresh entry, expires it after the 10s TTL, and misses unknown keys", () => {
+    cacheBundle("g:1||2026-06-07", empty, NOW);
+    expect(cachedBundle("g:1||2026-06-07", NOW + 9_999)).toBe(empty);
+    expect(cachedBundle("g:1|ch1|2026-06-07", NOW)).toBeNull(); // a narrowed view is its own entry
+    expect(cachedBundle("g:1||2026-06-07", NOW + 10_000)).toBeNull();
   });
 });

@@ -75,20 +75,31 @@ async function fetchAllCards() {
   return out;
 }
 
-// True bot install count, straight from Discord (same source as the email they send).
+// True bot installs, straight from Discord (same source as the email they send).
 // live_cards can't tell you this: cards also exist in user-install servers (posted via
 // the interaction webhook, no bot in the guild) and rows outlive servers that removed
-// the bot. Mirrors fetchBotGuildIds in api/cron-recap.ts. Returns null when the token
-// is missing or Discord errors, so the KPI shows "—" instead of a wrong number.
-async function fetchBotGuildCount() {
+// the bot. Guild listing mirrors fetchBotGuildIds in api/cron-recap.ts. Returns null
+// when the token is missing or Discord errors, so the KPI shows "—" instead of a
+// wrong number.
+//
+// The timeline comes from the bot's own member joined_at in each guild
+// (GET /guilds/{id}/members/{botUserId} — the OAuth2-flavored /users/@me/guilds/{id}/member
+// 403s for bot tokens). Discord keeps no log of past installs, so this is "current
+// guilds by the day the bot joined"; servers that removed the bot drop out of the
+// whole curve. joined_at never changes for a guild, so it's cached per guild id and
+// only newly-seen guilds cost requests on the 30s auto-refresh.
+let botUserId = null; // the bot's own user id, fetched once
+const joinedAtByGuild = new Map(); // guild id -> 'YYYY-MM-DD' (absent = not fetched yet or last attempt failed)
+async function fetchBotInstalls() {
   const token = process.env.DISCORD_BOT_TOKEN ?? '';
   if (!token) return null;
+  const headers = { Authorization: `Bot ${token}` };
   try {
     const ids = new Set();
     let after = '';
     for (;;) {
       const url = `https://discord.com/api/v10/users/@me/guilds?limit=200${after ? `&after=${after}` : ''}`;
-      const r = await fetch(url, { headers: { Authorization: `Bot ${token}` } });
+      const r = await fetch(url, { headers });
       if (!r.ok) return null;
       const page = await r.json();
       if (!Array.isArray(page) || page.length === 0) break;
@@ -96,7 +107,23 @@ async function fetchBotGuildCount() {
       if (page.length < 200) break;
       after = page[page.length - 1].id;
     }
-    return ids.size;
+    if (!botUserId) {
+      const r = await fetch('https://discord.com/api/v10/users/@me', { headers });
+      if (r.ok) botUserId = (await r.json()).id;
+    }
+    const missing = botUserId ? [...ids].filter((id) => !joinedAtByGuild.has(id)) : [];
+    for (let i = 0; i < missing.length; i += 10) {
+      await Promise.all(
+        missing.slice(i, i + 10).map(async (id) => {
+          const r = await fetch(`https://discord.com/api/v10/guilds/${id}/members/${botUserId}`, { headers });
+          if (!r.ok) return; // left absent → retried on the next refresh
+          const m = await r.json();
+          if (m?.joined_at) joinedAtByGuild.set(id, m.joined_at.slice(0, 10));
+        }),
+      );
+    }
+    const joins = [...ids].map((id) => joinedAtByGuild.get(id)).filter(Boolean);
+    return { count: ids.size, joins };
   } catch {
     return null;
   }
@@ -116,13 +143,13 @@ async function loadStats() {
   const allDates = [...dateSet].sort();
   const latestDate = allDates.length ? allDates[allDates.length - 1] : null;
 
-  const [{ data: presence }, cards, { count: puzzlesCached }, botInstalls] = await Promise.all([
+  const [{ data: presence }, cards, { count: puzzlesCached }, installs] = await Promise.all([
     latestDate
       ? db.from('presence').select('user_id, last_seen').eq('puzzle_date', latestDate)
       : Promise.resolve({ data: [] }),
     fetchAllCards(),
     db.from('puzzles').select('*', { count: 'exact', head: true }),
-    fetchBotGuildCount(),
+    fetchBotInstalls(),
   ]);
 
   const now = Date.now();
@@ -291,6 +318,22 @@ async function loadStats() {
     grid, gridMaxOffset,
   };
 
+  // Bot install timeline: current guilds bucketed by the day the bot joined, with a
+  // running total. Continuous from the first install through today so removal-free
+  // stretches show as flat line, not missing days.
+  const installSeries = [];
+  if (installs && installs.joins.length) {
+    const byDay = new Map();
+    for (const d of installs.joins) byDay.set(d, (byDay.get(d) ?? 0) + 1);
+    const today = new Date(now).toISOString().slice(0, 10);
+    let cum = 0;
+    for (let d = [...byDay.keys()].sort()[0]; d <= today; d = isoMinusDays(d, -1)) {
+      const add = byDay.get(d) ?? 0;
+      cum += add;
+      installSeries.push({ date: d, newInstalls: add, cumInstalls: cum });
+    }
+  }
+
   const rooms = [...byScope.entries()]
     .map(([scope, e]) => ({
       scope, kind: scope.startsWith('g:') ? 'server' : scope.startsWith('c:') ? 'dm' : 'other',
@@ -329,7 +372,7 @@ async function loadStats() {
       players: players.size,
       servers: [...scopes].filter((s) => s.startsWith('g:')).length,
       rooms: scopes.size,
-      botInstalls,
+      botInstalls: installs?.count ?? null,
       cardServers,
       newPlayers7,
       wau: wau.size,
@@ -347,6 +390,7 @@ async function loadStats() {
       active5m,
     },
     series,
+    installSeries,
     retention,
     rooms,
     topPlayers,
@@ -528,6 +572,21 @@ function renderPage(s) {
       tip: (i) => `${full[i].date} · ${full[i].cumPlayers} players · ${full[i].cumServers} servers reached`,
     }
   );
+
+  const inst = s.installSeries;
+  const installChart = inst.length
+    ? lineChart(
+        inst.map((d) => d.date),
+        [
+          { name: 'Bot installs (total)', color: C.yellow, fill: true, values: inst.map((d) => d.cumInstalls) },
+          { name: 'New installs', color: C.purple, axis: 'right', values: inst.map((d) => d.newInstalls) },
+        ],
+        {
+          h: 200,
+          tip: (i) => `${inst[i].date} · ${inst[i].cumInstalls} installed · +${inst[i].newInstalls} new`,
+        }
+      )
+    : '<div class="empty">No install data — needs DISCORD_BOT_TOKEN in .env.</div>';
 
   // retention
   const R = s.retention;
@@ -717,6 +776,11 @@ function renderPage(s) {
 <div class="panel">
   <h2>Cumulative reach · total players &amp; servers over time</h2>
   ${growthChart}
+</div>
+
+<div class="panel">
+  <h2>Bot installs over time <span class="hsub">· current servers by the day the bot joined — removals drop out of history</span></h2>
+  ${installChart}
 </div>
 
 <div class="panel">

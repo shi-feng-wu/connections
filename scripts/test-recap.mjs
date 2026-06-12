@@ -6,9 +6,9 @@
 //
 // Run (args or env for the test ids):
 //   node --env-file=.env scripts/test-recap.mjs <guildId> <channelId> [YYYY-MM-DD] [--force]
-//   npm run test-recap -- <guildId> <channelId> --force
+//   ppnpm test-recap -- <guildId> <channelId> --force
 //
-// Or set TEST_GUILD_ID / TEST_CHANNEL_ID in .env and run `npm run test-recap -- --force`.
+// Or set TEST_GUILD_ID / TEST_CHANNEL_ID in .env and run `ppnpm test-recap -- --force`.
 //
 //   date    optional puzzle date to recap (defaults to yesterday ET, server-side).
 //   --force clears that channel's recap_posts ledger row first, so you can re-run and it

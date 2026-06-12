@@ -57,7 +57,7 @@ https://your-project.vercel.app/api/interactions
   empty** — which silently breaks the slash command (*"The application did not
   respond"*). If you edit anything here, keep this URL populated.
 
-## 4. Commands (`npm run register-commands`)
+## 4. Commands (`pnpm register-commands`)
 
 Two commands, two surfaces — both named `connections`:
 
@@ -85,7 +85,7 @@ Use Discord's own install screen — the same one Wordle shows — with two choi
 | **Add to My Apps**  | User install | `applications.commands`                 | `/connections` works **everywhere** (any server/DM). No bot, no recap. |
 | **Add to Server**   | Guild install| `applications.commands` + `bot` (View Channel, Send Messages, Embed Links, Attach Files) | Adds the bot so the daily recap can post. |
 
-`npm run configure-install` sets this up (PATCHes `/applications/@me`): it writes the
+`pnpm configure-install` sets this up (PATCHes `/applications/@me`): it writes the
 per-context Default Install Settings above **and clears any Custom URL** so the native
 Discord-provided link takes over. Then confirm in **Installation → Install Link =
 `Discord Provided Link`**, with both **Installation Contexts** (User + Guild) checked.

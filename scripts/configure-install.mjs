@@ -13,7 +13,7 @@
 // Discord-provided links are limited to the applications.commands and bot scopes, so the
 // recap can't ride the native install as a webhook — the bot is how a third-party app
 // posts unprompted. Run once (re-run to change scopes/permissions):
-//   npm run configure-install
+//   pnpm configure-install
 // Needs DISCORD_BOT_TOKEN in .env (loaded via --env-file).
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;

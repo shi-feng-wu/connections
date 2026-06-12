@@ -11,7 +11,7 @@
 // Idempotent, and uses POST so it never touches your other commands.
 //
 // Run:
-//   npm run discord:entry-point
+//   pnpm discord:entry-point
 // Needs VITE_DISCORD_CLIENT_ID and DISCORD_BOT_TOKEN in .env (loaded via --env-file),
 // or pass them as args: node scripts/ensure-entry-point.mjs <client_id> <bot_token>
 
@@ -56,7 +56,7 @@ const entry = commands.find((c) => c.type === PRIMARY_ENTRY_POINT);
 if (entry) {
   console.log(
     `✓ Entry Point command already exists: "${entry.name}" (id ${entry.id}). Nothing to do.` +
-      (entry.name !== NAME ? `\n  (run "npm run register-commands" to rename it to /${NAME}.)` : ""),
+      (entry.name !== NAME ? `\n  (run "pnpm register-commands" to rename it to /${NAME}.)` : ""),
   );
   process.exit(0);
 }

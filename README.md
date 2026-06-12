@@ -21,8 +21,8 @@ api/        Vercel functions: puzzle.ts (NYT proxy), token.ts (OAuth), score.ts 
             cron-recap.ts + interactions.ts (daily recap bot)
 supabase/   schema.sql (tables + leaderboard functions, run once),
             recap-cron.sql (optional pg_cron trigger)
-scripts/    Discord setup helpers (npm run register-commands, …) and a local
-            analytics dashboard (npm run dashboard)
+scripts/    Discord setup helpers (pnpm register-commands, …) and a local
+            analytics dashboard (pnpm dashboard)
 index.html  vite.config.ts  tsconfig.json  package.json
 ```
 
@@ -53,7 +53,7 @@ static client + functions, Supabase handles realtime/DB.
 
 ```bash
 fnm use
-npm install
+pnpm install
 cp .env.example .env
 ```
 
@@ -78,7 +78,7 @@ daily recap (section 5); leave them blank to ship just the Activity:
 ## 3. Run locally
 
 ```bash
-npm i -g vercel     # one-time
+pnpm add -g vercel  # one-time
 vercel dev          # serves the client + /api functions together
 ```
 
@@ -88,8 +88,8 @@ progress, so you can watch multiplayer work without Discord.
 ### Tests
 
 ```bash
-npm test            # vitest run (one-shot); npm run test:watch to iterate
-npm run typecheck   # tsc --noEmit
+pnpm test            # vitest run (one-shot); ppnpm test:watch to iterate
+pnpm typecheck   # tsc --noEmit
 ```
 
 Covers the parts that must be correct: the pure `Game` model (`game.ts`: submit
@@ -162,7 +162,7 @@ After deploying section 4 with `DISCORD_BOT_TOKEN`, `DISCORD_PUBLIC_KEY`, and
    signed PING; it only saves if `DISCORD_PUBLIC_KEY` is deployed and correct.
 4. Rename the auto-created Entry Point command so it's `/connections`:
    ```bash
-   npm run register-commands   # uses VITE_DISCORD_CLIENT_ID + DISCORD_BOT_TOKEN from .env
+   pnpm register-commands   # uses VITE_DISCORD_CLIENT_ID + DISCORD_BOT_TOKEN from .env
    ```
 5. Play a game in a server once (this records that channel as the recap target).
    The cron (`vercel.json`, daily at 06:00 UTC — just after the ET reset) then
@@ -171,7 +171,7 @@ After deploying section 4 with `DISCORD_BOT_TOKEN`, `DISCORD_PUBLIC_KEY`, and
 ## Admin dashboard (local)
 
 ```bash
-npm run dashboard   # opens http://127.0.0.1:7337
+pnpm dashboard   # opens http://127.0.0.1:7337
 ```
 
 A single-file, zero-dependency analytics dashboard over the `scores` table:
@@ -241,7 +241,7 @@ isn't worth the per-guess latency for a public puzzle.
 
 ## Contributing
 
-PRs welcome. Before opening one: `npm test && npm run typecheck` (CI runs both
+PRs welcome. Before opening one: `pnpm test && pnpm typecheck` (CI runs both
 plus a build). UI changes can be eyeballed without any backend via the
 screenshot harness — see “UI preview (no backend)” above.
 

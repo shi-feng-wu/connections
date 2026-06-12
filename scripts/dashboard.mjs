@@ -8,10 +8,10 @@
 // full database to anyone.
 //
 // Run:
-//   npm run dashboard            # opens http://127.0.0.1:7337
-//   DASHBOARD_PORT=8080 npm run dashboard
+//   pnpm dashboard            # opens http://127.0.0.1:7337
+//   DASHBOARD_PORT=8080 pnpm dashboard
 // Needs SUPABASE_URL (or VITE_SUPABASE_URL) + SUPABASE_SERVICE_ROLE_KEY in .env
-// (loaded via --env-file). No build step, no tsx — plain node, like `npm run status`.
+// (loaded via --env-file). No build step, no tsx — plain node, like `pnpm status`.
 
 import { createServer } from 'node:http';
 import { exec } from 'node:child_process';

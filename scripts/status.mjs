@@ -13,7 +13,7 @@
 // stops, the status just disappears; nothing else in the app breaks.
 //
 // Run:
-//   npm run status
+//   pnpm status
 // Needs DISCORD_BOT_TOKEN in .env (loaded via --env-file).
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;

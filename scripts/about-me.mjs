@@ -9,7 +9,7 @@
 // connection (see scripts/presence.mjs).
 //
 // Run once (re-run to change the text):
-//   npm run about-me
+//   pnpm about-me
 // Needs DISCORD_BOT_TOKEN in .env (loaded via --env-file).
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;

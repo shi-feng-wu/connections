@@ -25,7 +25,7 @@
 // <host>/api/interactions (Developer Portal ▸ General Information, or PATCH /applications/@me).
 //
 // Run once after setting up the bot:
-//   npm run register-commands
+//   pnpm register-commands
 // Needs VITE_DISCORD_CLIENT_ID and DISCORD_BOT_TOKEN in .env (loaded via --env-file).
 
 const APP_ID = process.env.VITE_DISCORD_CLIENT_ID;

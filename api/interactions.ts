@@ -167,6 +167,27 @@ export function routeInteraction(body: Interaction): object {
   return { type: CHANNEL_MESSAGE_WITH_SOURCE, data: { content: 'Unsupported interaction.', flags: EPHEMERAL } };
 }
 
+// Ephemeral "add the bot" nudge for a launch in a server without the bot — the highest-
+// intent install moment there is (someone is actively playing where recaps can't post).
+// Re-shown to the same player in the same room at most once per cooldown.
+const INSTALL_NUDGE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+
+// The nudge message: /enable-posts' pitch + admin handoff, compressed for an ephemeral
+// (Discord already labels it "Only you can see this"). Exported for tests.
+export function installNudgePayload(appId: string): object {
+  return {
+    content:
+      '### Get the daily recap in this channel\n' +
+      'Add the bot and it posts the **daily recap** — yesterday’s results plus the season ' +
+      'leaderboard — and the live **“who’s playing”** card here, every day.\n' +
+      '-# Adding it needs **Manage Server**. Not an admin? Ask one to run `/enable-posts`.',
+    flags: EPHEMERAL,
+    components: [
+      { type: 1, components: [{ type: 2, style: 5, label: 'Add to Server', url: installUrl(appId) }] },
+    ],
+  };
+}
+
 // Whether this interaction was authorized ONLY as a user install — the app is on the user's
 // account, not installed to this guild, so the bot isn't a member and can't post/edit the
 // card (it would 403 with Missing Access). authorizing_integration_owners keys the install
@@ -227,9 +248,11 @@ async function postCard(body: LaunchInteraction): Promise<void> {
   // A user-install launch in a server without the bot still has a guild_id (so the scope
   // gate above passes), but the bot can't post/edit there — it isn't a member. Skip the card
   // (the game, scoring, and the in-app leaderboard/roster all work without it) rather than
-  // 403'ing on every edit.
+  // 403'ing on every edit — and instead show the launcher the ephemeral install nudge,
+  // since this is exactly the room the recap/card pitch is for.
   if (isUserInstallOnly(body)) {
     console.log('[card] skip: user-install launch (bot not in this guild)', { guildId });
+    await nudgeInstall(body, scope, appId, token);
     return;
   }
 
@@ -350,6 +373,53 @@ async function postCard(body: LaunchInteraction): Promise<void> {
     { onConflict: 'scope_id,puzzle_date,channel_id' },
   );
   if (upErr) console.error('[card] live_cards upsert error (schema migrated?)', upErr.message);
+}
+
+// Show the launcher of a bot-less server the ephemeral "Add to Server" pitch, at most once
+// per (room, player) per cooldown. The throttle row is claimed BEFORE the followup is sent,
+// so a double-fired interaction can't double-nudge; a send that then fails just waits out
+// the cooldown (better than risking spam the other way around). Any DB error — including
+// the install_nudges table not existing yet — skips the nudge entirely: this is a growth
+// nicety and must never noise up a launch.
+async function nudgeInstall(
+  body: LaunchInteraction,
+  scope: string,
+  appId: string,
+  token: string,
+): Promise<void> {
+  const u = body.member?.user ?? body.user;
+  if (!u?.id) return;
+  const db = admin();
+  if (!db) return;
+
+  const { data: row, error: selErr } = await db
+    .from('install_nudges')
+    .select('nudged_at')
+    .eq('scope_id', scope)
+    .eq('user_id', u.id)
+    .maybeSingle();
+  if (selErr) {
+    console.warn('[nudge] skip: select failed (table missing?)', selErr.message);
+    return;
+  }
+  const last = row?.nudged_at ? Date.parse(row.nudged_at as string) : null;
+  if (last != null && Date.now() - last < INSTALL_NUDGE_COOLDOWN_MS) return;
+
+  const { error: upErr } = await db
+    .from('install_nudges')
+    .upsert({ scope_id: scope, user_id: u.id, nudged_at: new Date().toISOString() });
+  if (upErr) {
+    console.warn('[nudge] skip: claim failed', upErr.message);
+    return;
+  }
+
+  const r = await fetch(interactionFollowupUrl(appId, token), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(installNudgePayload(appId)),
+  });
+  if (!r.ok) console.error('[nudge] followup failed', { status: r.status }, await r.text().catch(() => ''));
+  else console.log('[nudge] sent', { scope, user: u.id });
 }
 
 async function rawBody(req: VercelRequest): Promise<string> {

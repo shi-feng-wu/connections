@@ -3,7 +3,7 @@ import type { Puzzle } from '../src/game.js';
 import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import { type CardPlayer, mergePlayer, renderRoster } from './_card.js';
-import { fetchDiscordUser, fetchUserGuildIds } from './_discord.js';
+import { botInGuild, fetchDiscordUser, fetchUserGuildIds } from './_discord.js';
 import { botCardUrl, CARD_JOIN_THROTTLE_MS, cardPayload, playerFinished, sendCard, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
 
@@ -50,6 +50,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
+    // Whether this server has the bot (guild install), kicked off now so it overlaps the
+    // puzzle/DB work below. The app keys its install prompts (loading tip, end-screen
+    // recap pitch) off this: true/false is definitive, null means "couldn't tell" and the
+    // client shows nothing rather than pitching a server that may already have the bot.
+    // Every guild response carries it — including the early "finished" return, since the
+    // end screen (where the pitch lives) is exactly where a finished player lands.
+    const botInstalled = botInGuild(guildId, process.env.DISCORD_BOT_TOKEN ?? '');
+
     const date = todayET();
 
     // A player who already finished today (won or lost) isn't playing anymore, so opening
@@ -63,7 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       /* title falls back to no number; grids render blank */
     }
     if (puzzle && (await playerFinished(db, puzzle, user.id, date))) {
-      res.status(200).json({ ok: false, reason: 'finished' });
+      res.status(200).json({ ok: false, reason: 'finished', botInstalled: await botInstalled });
       return;
     }
 
@@ -124,7 +132,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       },
       { onConflict: 'scope_id,puzzle_date,channel_id' },
     );
-    res.status(200).json({ ok: true, edited, players: players.length });
+    res.status(200).json({ ok: true, edited, players: players.length, botInstalled: await botInstalled });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : 'error' });
   }

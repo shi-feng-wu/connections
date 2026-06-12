@@ -901,6 +901,9 @@ function State({
         initialRevealed={revealed}
         onPresence={noop}
         onFinish={noop}
+        // Bot-less-guild path, so the end states show the recap pitch (GameView only
+        // renders it once the run is over, so in-progress states stay clean).
+        onAddBot={noop}
       />
     </section>
   );
@@ -1029,6 +1032,8 @@ function LoadState({
         onRetry={noop}
         date="2026-06-06"
         number={1169}
+        // bot-less-guild path so the harness shows the targeted tip
+        tip
       />
     </section>
   );

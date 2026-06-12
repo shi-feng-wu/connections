@@ -515,6 +515,20 @@ $$;
 
 grant execute on function public.room_recap_stats(text, date, date, text) to anon, authenticated;
 
+-- Install-nudge throttle: one row per (room, user), bumped each time the launcher of a
+-- bot-less server is shown the ephemeral "add the bot for recaps" followup (see
+-- /api/interactions). The nudge re-arms after INSTALL_NUDGE_COOLDOWN_MS (a week), so the
+-- timestamp is updated in place rather than appended. Written only by the service role;
+-- RLS with no policy denies the anon key entirely (same posture as progress/live_cards).
+create table if not exists public.install_nudges (
+  scope_id  text        not null,
+  user_id   text        not null,
+  nudged_at timestamptz not null default now(),
+  primary key (scope_id, user_id)
+);
+
+alter table public.install_nudges enable row level security;
+
 -- In-progress / finished daily state, per player per puzzle: the authoritative
 -- record of what a player has actually guessed today. /api/guess appends each
 -- guess (commit-then-reveal, so an outcome can't be seen and then abandoned to

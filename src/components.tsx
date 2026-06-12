@@ -92,12 +92,16 @@ export function LoadingScreen({
   onRetry,
   date,
   number,
+  tip = false,
 }: {
   error?: boolean;
   blocked?: boolean;
   onRetry: () => void;
   date?: string;
   number?: number;
+  // show the /enable-posts tip — App passes true only in a guild that positively
+  // lacks the bot, so installed servers and DMs load clean.
+  tip?: boolean;
 }) {
   const inner = blocked ? (
     <>
@@ -125,22 +129,27 @@ export function LoadingScreen({
       {/* Game-style loading tip (redesign "Loading Animations" · BotNotice): a borderless
           line under the lockup nudging the room to add the bot so it gets the live "who's
           playing" card + daily recap. Cold-start only — not error/blocked, and not the
-          midnight turnover (a returning player already knows). The green is the puzzle's
-          category green used as a quiet accent. In flow (not viewport-pinned), so it rides
-          just under the centered lockup at every height, mt-12 keeping it a clearly
-          separate, quieter block; it fades in with the screen's animate-fade-in. */}
-      <div className="mt-12 flex flex-col items-center gap-[7px] text-center">
-        <span className="font-sans text-[10px] font-bold tracking-[0.22em] text-[#a0c35a] uppercase">
-          Tip
-        </span>
-        <p className="max-w-[300px] font-sans text-[12.5px] leading-[1.7] text-zinc-400">
-          Run{" "}
-          <span className="rounded-[5px] bg-white/[0.06] px-[5px] py-px font-semibold text-zinc-300">
-            /enable-posts
-          </span>{" "}
-          to get live player posts and daily recap posts.
-        </p>
-      </div>
+          midnight turnover (a returning player already knows) — and TARGETED: App passes
+          `tip` only in a guild that positively lacks the bot, so it never noises up an
+          installed server or a DM. Benefit-first copy; the command is the path, not the
+          lead. The green is the puzzle's category green used as a quiet accent. In flow
+          (not viewport-pinned), so it rides just under the centered lockup at every
+          height, mt-12 keeping it a clearly separate, quieter block; it fades in with the
+          screen's animate-fade-in. */}
+      {tip && (
+        <div className="mt-12 flex flex-col items-center gap-[7px] text-center">
+          <span className="font-sans text-[10px] font-bold tracking-[0.22em] text-[#a0c35a] uppercase">
+            Tip
+          </span>
+          <p className="max-w-[300px] font-sans text-[12.5px] leading-[1.7] text-zinc-400">
+            Want the day’s results and the leaderboard posted here at every reset? Run{" "}
+            <span className="rounded-[5px] bg-white/[0.06] px-[5px] py-px font-semibold text-zinc-300">
+              /enable-posts
+            </span>
+            .
+          </p>
+        </div>
+      )}
     </>
   );
 
@@ -335,6 +344,7 @@ export function GameView({
   allTime,
   scope,
   onScopeChange,
+  onAddBot,
   onPresence,
   onCommit,
   onFinish,
@@ -349,6 +359,9 @@ export function GameView({
   // shared Channel/Server toggle (guild launches only); omitted → no toggle.
   scope?: RosterScope;
   onScopeChange?: (s: RosterScope) => void;
+  // opens the guild-install consent — present only in a guild without the bot, where
+  // the end screen pitches the daily recap (see Roster's RecapPrompt).
+  onAddBot?: () => void;
   onPresence: (snap: BoardSnapshot) => void;
   onCommit?: (guess: string[]) => Promise<boolean>;
   onFinish: () => void;
@@ -424,6 +437,7 @@ export function GameView({
             season={season}
             allTime={allTime}
             nextPuzzle={done}
+            onAddBot={done ? onAddBot : undefined}
           />
         </div>
       </div>

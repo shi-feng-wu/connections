@@ -1,5 +1,5 @@
 import { LEVELS, MAX_MISTAKES, type Game } from "./game";
-import logoUrl from "./assets/connections-logo.webp";
+import logoUrl from "./assets/connections-nyt.png";
 
 // Compact board shown when the activity is collapsed to Discord's picture-in-picture
 // layout (ACTIVITY_LAYOUT_MODE_UPDATE → PIP). A left-rail design: the chrome lives in a

@@ -1,6 +1,6 @@
 import { generateKeyPairSync, sign as edSign } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { isUserInstallOnly, routeInteraction, verifyDiscordSig } from "../api/interactions";
+import { installNudgePayload, isUserInstallOnly, routeInteraction, verifyDiscordSig } from "../api/interactions";
 
 // api/interactions.ts: Discord signs every interaction (Ed25519); an unverified
 // request must be refused, and the recap's Play button must map to a launch.
@@ -105,6 +105,33 @@ describe("routeInteraction", () => {
     expect(r.type).toBe(4);
     expect(r.data.components).toBeUndefined(); // no button
     expect(r.data.content).toContain("already");
+  });
+});
+
+// The ephemeral install nudge a bot-less launch gets instead of the card: same one-click
+// Add-to-Server button as /enable-posts, plus the ask-an-admin handoff for non-admins.
+describe("installNudgePayload", () => {
+  const p = installNudgePayload("app123") as {
+    flags?: number;
+    content?: string;
+    components?: { components: { style?: number; url?: string; label?: string }[] }[];
+  };
+
+  it("is ephemeral (only the launcher sees it)", () => {
+    expect(p.flags).toBe(64);
+  });
+
+  it("pitches the recap and hands off to an admin for non-admins", () => {
+    expect(p.content).toContain("daily recap");
+    expect(p.content).toContain("/enable-posts"); // the admin handoff path
+  });
+
+  it("carries the one-click guild-install link", () => {
+    const btn = p.components?.[0].components[0];
+    expect(btn?.style).toBe(5); // link button
+    expect(btn?.label).toBe("Add to Server");
+    expect(btn?.url).toContain("client_id=app123");
+    expect(btn?.url).toContain("integration_type=0");
   });
 });
 

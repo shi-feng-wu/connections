@@ -60,6 +60,34 @@ export async function fetchUserGuildIds(accessToken: unknown): Promise<string[] 
   }
 }
 
+// Whether the bot is a member of a guild (i.e. the app is guild-installed there). Tri-state:
+// false only on a definitive 403/404 ("missing access" / unknown guild — the bot isn't in
+// it), null when it can't be determined (no token, rate limit, network), so callers never
+// pitch an install to a server that might already have the bot. /api/join forwards this to
+// the app, which keys the loading tip + end-screen recap prompt off it. Cached per warm
+// lambda — install status barely moves, and this otherwise costs a Discord call per open.
+const BOT_GUILD_TTL_MS = 5 * 60 * 1000;
+const botGuildCache = new Map<string, { val: boolean; at: number }>();
+
+export async function botInGuild(guildId: string, botToken: string): Promise<boolean | null> {
+  if (!guildId || !botToken) return null;
+  const hit = botGuildCache.get(guildId);
+  if (hit && Date.now() - hit.at < BOT_GUILD_TTL_MS) return hit.val;
+  try {
+    const r = await fetch(`https://discord.com/api/v10/guilds/${guildId}`, {
+      headers: { Authorization: `Bot ${botToken}` },
+    });
+    if (r.ok || r.status === 403 || r.status === 404) {
+      const val = r.ok;
+      botGuildCache.set(guildId, { val, at: Date.now() });
+      return val;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Server (guild) name via the bot token, for the recap card's room eyebrow. Best-effort:
 // null on any failure (bot not in the guild, rate limit, etc.) → the recap falls back to
 // the static "DAILY RECAP" label. Needs the bot to be a member of the guild.

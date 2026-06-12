@@ -502,6 +502,50 @@ function Tabs({
 
 // Renders as a fragment: the tab heading and the active list. Live shows the ranked
 // player rows; Season / All-time share one cumulative standings table. The list is
+// End-screen recap pitch (rail footer): shown only in a guild that positively lacks the
+// bot, once the run is over — the moment the recap makes intuitive sense ("this, every
+// morning"). One notch louder than the countdown row below it (a hairline panel, not a
+// bare row) but in the same editorial voice: benefit-first copy (balanced wraps, no
+// orphans) with the primary pill bottom-right opening Discord's guild-install consent
+// (App's onAddBot → openExternalLink). Non-admins get the quiet handoff line instead of
+// a dead end. The ✕ dismisses it for this mount only (it returns next game — the pitch
+// is once-a-day-ish by nature, not a modal to suppress forever).
+function RecapPrompt({ onAdd }: { onAdd: () => void }) {
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed) return null;
+  return (
+    <div className="relative flex flex-none animate-fade-in flex-col rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+      <HoverButton
+        onClick={() => setDismissed(true)}
+        hover="text-zinc-300"
+        aria-label="Dismiss"
+        title="Dismiss"
+        className="absolute right-1.5 top-1.5 cursor-pointer rounded-full p-2 text-zinc-600 transition-colors duration-150 ease-out active:text-zinc-300"
+      >
+        <X size={14} strokeWidth={2.5} aria-hidden />
+      </HoverButton>
+      <div className="min-w-0 pr-7">
+        <div className="text-balance text-[12.5px] font-semibold leading-snug text-zinc-200">
+          Get the daily recap here
+        </div>
+        <div className="mt-0.5 text-balance text-[11.5px] leading-snug text-zinc-500">
+          The day’s results and the leaderboard, posted at the nightly reset.
+        </div>
+        <div className="mt-1 text-balance text-[10.5px] leading-snug text-zinc-600">
+          Needs Manage Server, or ask an admin to run /enable-posts.
+        </div>
+      </div>
+      <HoverButton
+        onClick={onAdd}
+        hover="opacity-85"
+        className="mt-3 cursor-pointer self-end rounded-full bg-zinc-100 px-3.5 py-2 text-[12px] font-semibold leading-none text-zinc-900 transition-opacity duration-150 ease-out active:opacity-70"
+      >
+        Enable
+      </HoverButton>
+    </div>
+  );
+}
+
 // capped + scrolls on mobile and flexes to fill the rail on desktop.
 export function Roster({
   players,
@@ -513,6 +557,7 @@ export function Roster({
   season,
   allTime,
   nextPuzzle,
+  onAddBot,
 }: {
   players: PlayerState[];
   selfId: string;
@@ -528,6 +573,8 @@ export function Roster({
   // your run is over → pin the next-puzzle countdown under the list (the footer's
   // score summary stays clean; this is the quiet "rail footer" slot of the redesign).
   nextPuzzle?: boolean;
+  // post-game recap pitch for a bot-less guild (see RecapPrompt); omitted → no pitch.
+  onAddBot?: () => void;
 }) {
   const [viewState, setViewState] = useState<RosterView>("live");
   const view = viewProp ?? viewState;
@@ -629,6 +676,9 @@ export function Roster({
           )}
         </FlipList>
       )}
+      {/* post-game recap pitch (bot-less guilds only), pinned above the countdown so
+          the rail's last word stays the quietest */}
+      {onAddBot && <RecapPrompt onAdd={onAddBot} />}
       {/* once your run is over, when today's board resets becomes relevant — a quiet
           countdown row pinned under whichever list is open (the live list's bottom
           fade dissolves into it) */}

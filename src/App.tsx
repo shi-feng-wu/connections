@@ -41,6 +41,38 @@ function writeScopeMode(mode: RosterScope): void {
 
 const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
 
+// Guild-install ("Add to Server") link for the end-screen recap prompt — same scopes +
+// permissions as the /enable-posts button. KEEP IN SYNC with api/interactions.ts
+// installUrl() and scripts/configure-install.mjs.
+const INSTALL_PERMISSIONS = "117760";
+function installUrl(): string {
+  return (
+    `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}` +
+    `&integration_type=0&scope=bot+applications.commands&permissions=${INSTALL_PERMISSIONS}`
+  );
+}
+
+// Last-known "does this server have the bot" per guild, so the loading tip can target
+// bot-less servers from the very first frame of a repeat launch — /api/join (the live
+// answer) lands seconds later. Wrapped like the other storage helpers: a blocked iframe
+// just means no cache, and the prompts wait for the live value.
+const BOT_KEY = "conn-bot-installed:";
+function readBotInstalled(guildId: string): boolean | null {
+  try {
+    const v = localStorage.getItem(BOT_KEY + guildId);
+    return v === "1" ? true : v === "0" ? false : null;
+  } catch {
+    return null;
+  }
+}
+function writeBotInstalled(guildId: string, installed: boolean): void {
+  try {
+    localStorage.setItem(BOT_KEY + guildId, installed ? "1" : "0");
+  } catch {
+    /* storage blocked — fine, just won't pre-target the next launch's tip */
+  }
+}
+
 // Today's ET calendar date (YYYY-MM-DD), matching the server's todayET so the client can
 // detect the midnight-ET daily reset and reload the new day's puzzle.
 function etDate(): string {
@@ -173,6 +205,10 @@ export function App({
   const [phase, setPhase] = useState<"loading" | "ready" | "error" | "blocked">(
     "loading",
   );
+  // Whether this guild has the bot (guild install): the live answer from /api/join,
+  // seeded from the per-guild localStorage cache at handshake so a repeat launch
+  // targets the loading tip immediately. null = unknown / not a guild → show nothing.
+  const [botInstalled, setBotInstalled] = useState<boolean | null>(null);
   // Midnight day-rollover veil (src/components.tsx DayTurnover): `resetting` drives the
   // overlay; the ref guards swapToNewDay so the precise timer and the 30s poll can't both
   // fire a swap; newDayDate is the date we're rolling into, shown on the veil; newDayNo is
@@ -538,6 +574,9 @@ export function App({
       guildIdRef.current = sdk.guildId ?? null;
       channelIdRef.current = sdk.channelId ?? null;
       scopeRef.current = canonicalScope(sdk.guildId, sdk.channelId);
+      // Seed install status from the last launch's answer so the loading tip (visible
+      // before /api/join responds) is already targeted; the live value overwrites it below.
+      if (sdk.guildId) setBotInstalled(readBotInstalled(sdk.guildId));
 
       // Collapsing the activity puts it into Discord's picture-in-picture layout.
       // Track that so the app can swap to a compact board thumbnail (see render)
@@ -608,17 +647,29 @@ export function App({
       // Add this player to the channel's "who's playing today" card (append-only; the
       // server edits the room's live card — the launcher's /connections message — via the
       // interaction token). Fire-and-forget: the card is a nicety and must never block play.
+      // The response also carries botInstalled — whether this server has the bot — which
+      // targets the install prompts (loading tip, end-screen recap pitch).
+      const launchGuild = guildIdRef.current;
       void fetch("/api/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           accessToken: access_token,
-          guildId: guildIdRef.current,
+          guildId: launchGuild,
           channelId: channelIdRef.current,
         }),
-      }).catch(() => {
-        /* no card this time */
-      });
+      })
+        .then(async (r) => {
+          if (!r.ok || !launchGuild) return;
+          const d = (await r.json()) as { botInstalled?: boolean | null };
+          if (typeof d.botInstalled === "boolean") {
+            setBotInstalled(d.botInstalled);
+            writeBotInstalled(launchGuild, d.botInstalled);
+          }
+        })
+        .catch(() => {
+          /* no card this time */
+        });
 
       return true;
     } catch (e) {
@@ -791,6 +842,14 @@ export function App({
       await refreshLeaderboard();
     })();
   };
+  // Open Discord's guild-install consent (the same link as /enable-posts' button) in the
+  // user's browser. Embedded-only by construction: botInstalled is only ever set after a
+  // Discord handshake, so the prompt never renders standalone where sdkRef is null.
+  const addBot = (): void => {
+    void sdkRef.current?.commands.openExternalLink({ url: installUrl() }).catch(() => {
+      /* user dismissed Discord's leave-app dialog — nothing to do */
+    });
+  };
   // Loading takes precedence (gameRef null until first fetch); error only once a fetch has
   // failed; blocked when opened outside Discord. The DayTurnover veil overlays whichever of
   // these is showing, so the midnight swap (ready → loading → ready) plays out underneath it.
@@ -802,6 +861,9 @@ export function App({
         onRetry={retry}
         date={etDate()}
         number={cachedPuzzleNo(etDate())}
+        // Tip only where it can act: a guild that positively lacks the bot. Installed
+        // servers and DMs (botInstalled null) load clean.
+        tip={botInstalled === false}
       />
     ) : (
       <GameView
@@ -814,6 +876,9 @@ export function App({
         // Channel/Server toggle only in a guild — a DM/group (c: scope) has no distinction.
         scope={guildIdRef.current ? scopeMode : undefined}
         onScopeChange={guildIdRef.current ? setScopeMode : undefined}
+        // End-screen recap pitch, only where it means something: a guild that positively
+        // lacks the bot (false, not null/unknown — never pitch a server that has it).
+        onAddBot={guildIdRef.current && botInstalled === false ? addBot : undefined}
         onPresence={onPresence}
         onCommit={commitGuess}
         onFinish={onFinish}

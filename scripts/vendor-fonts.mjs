@@ -54,7 +54,7 @@ for (const [, subset, body] of blocks) {
   if (seen.has(family)) continue;
   seen.add(family);
 
-  const weight = body.match(/font-weight:\s*([\d ]+);/)[1].trim(); // e.g. "400 700"
+  const weight = body.match(/font-weight:\s*([\d ]+);/)[1].trim(); // ex. "400 700"
   const url = body.match(/url\((https:\/\/[^)]+\.woff2)\)/)[1];
   const file = `${slug(family)}.woff2`;
 

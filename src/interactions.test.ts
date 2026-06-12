@@ -121,8 +121,10 @@ describe("installNudgePayload", () => {
     expect(p.flags).toBe(64);
   });
 
-  it("pitches the recap and hands off to an admin for non-admins", () => {
-    expect(p.content).toContain("daily recap");
+  it("leads with the live card, keeps the recap, and hands off to an admin", () => {
+    expect(p.content).toContain("who’s playing");
+    // The live card is the launch-moment payoff, so it must come before the recap pitch.
+    expect(p.content!.indexOf("who’s playing")).toBeLessThan(p.content!.indexOf("nightly recap"));
     expect(p.content).toContain("/enable-posts"); // the admin handoff path
   });
 

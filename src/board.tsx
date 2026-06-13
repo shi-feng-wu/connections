@@ -1,4 +1,4 @@
-import { Clock, Eraser, EyeOff, Shuffle as ShuffleIcon } from "lucide-react";
+import { Clock, Eraser, Shuffle as ShuffleIcon } from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
@@ -330,7 +330,7 @@ export type BoardSnapshot = {
 // Keyed by puzzle id, so the next day's puzzle starts covered again. Best-effort:
 // any storage failure (private mode, disabled) just falls back to session-only.
 const spoilerKey = (puzzleId: number): string => `conn-spoiler-${puzzleId}`;
-function readSpoilerSeen(puzzleId: number): Set<number> {
+export function readSpoilerSeen(puzzleId: number): Set<number> {
   try {
     const raw = localStorage.getItem(spoilerKey(puzzleId));
     const arr: unknown = raw ? JSON.parse(raw) : [];
@@ -393,12 +393,6 @@ function SpoilerBar({
       }
       style={{ background: LEVELS[level].color }}
     >
-      {/* eye-off hint in the left gutter — signals the card is tappable */}
-      {!gone && (
-        <span className="spoiler-eye-hint">
-          <EyeOff strokeWidth={2.25} aria-hidden />
-        </span>
-      )}
       {!gone && (
         <span className="spoiler-cover" aria-hidden>
           <span className="spoiler-glint" />

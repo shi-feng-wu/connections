@@ -1,4 +1,5 @@
 import { LEVELS, MAX_MISTAKES, type Game } from "./game";
+import { readSpoilerSeen } from "./board";
 import logoUrl from "./assets/connections-nyt.png";
 
 // Compact board shown when the activity is collapsed to Discord's picture-in-picture
@@ -45,6 +46,20 @@ export function PipThumbnail({
   const dateLabel = new Date(`${game.puzzle.date}T00:00:00`).toLocaleDateString(
     "en-US",
     { month: "long", day: "numeric" },
+  );
+
+  // Levels whose category is still spoiler-covered on the full board — the loss
+  // back-fills plus the win's last-solved group, minus any the player has already
+  // tapped to reveal (persisted per puzzle). Their names are withheld here too,
+  // so collapsing to the thumbnail can't leak a category the board still hides.
+  const spoilerSeen = readSpoilerSeen(game.puzzle.id);
+  const spoilered = new Set(
+    [
+      ...revealed,
+      ...(game.status === "won" && game.solved.length === 4
+        ? [game.solved[3].level]
+        : []),
+    ].filter((lvl) => !spoilerSeen.has(lvl)),
   );
 
   const remaining = game.board; // words still in play → cream tiles
@@ -149,9 +164,11 @@ export function PipThumbnail({
               }
               style={{ background: LEVELS[g.level].color }}
             >
-              <span className="block max-w-full truncate font-sans text-[2.34375cqw] font-extrabold uppercase leading-[1.05] tracking-[-0.01em] text-[#121212]">
-                {g.category}
-              </span>
+              {!spoilered.has(g.level) && (
+                <span className="block max-w-full truncate font-sans text-[2.34375cqw] font-extrabold uppercase leading-[1.05] tracking-[-0.01em] text-[#121212]">
+                  {g.category}
+                </span>
+              )}
               <span className="block max-w-full truncate font-sans text-[1.5625cqw] font-normal uppercase leading-[1.15] text-[#121212]">
                 {g.members.join(", ")}
               </span>

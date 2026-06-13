@@ -281,7 +281,7 @@ body {
    shown BLURRED under a diagonal hatch, so you can still try to guess the
    connection from the words first — the blur is heavy enough that the word is
    unreadable but you can tell it's there. Tapping clears the blur as the hatch
-   wipes away. An eye-off icon in the left gutter signals the card is tappable.
+   wipes away.
    Mirrors the redesign's "Desktop Connections" spoiler. `#121212` is the
    solved-bar text color (the "on-category" ink). */
 
@@ -298,29 +298,6 @@ body {
 }
 .spoiler-bar.revealed .spoiler-cat {
   filter: blur(0);
-}
-
-/* Reveal-hint eye-off in the left gutter — signals the card is tappable (the
-   blur alone could read as a render glitch) and balances the layout. Fades out
-   as the card is revealed, then unmounts with the cover. */
-.spoiler-eye-hint {
-  position: absolute;
-  left: 13px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 5;
-  display: grid;
-  place-items: center;
-  pointer-events: none;
-  color: color-mix(in srgb, #121212 68%, transparent);
-  transition: opacity 0.25s ease;
-}
-.spoiler-eye-hint svg {
-  width: 17px;
-  height: 17px;
-}
-.spoiler-bar.revealed .spoiler-eye-hint {
-  opacity: 0;
 }
 
 /* The full-card diagonal hatch — above the colored fill (z-2), below the text

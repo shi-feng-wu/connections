@@ -5,3 +5,6 @@
   - Two line answers revealed not enough padding
 
   - Minimized discord view looks bad
+
+- Add border radius and padding to the readme pic
+- spoilered categories aren't faded if they were not solved, when unsolved categories are faded

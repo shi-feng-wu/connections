@@ -8,3 +8,4 @@
 
 - Add border radius and padding to the readme pic
 - spoilered categories aren't faded if they were not solved, when unsolved categories are faded
+- share link at end like the official site

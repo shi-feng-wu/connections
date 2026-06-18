@@ -377,3 +377,41 @@ body {
     animation: none;
   }
 }
+
+/* ---- End-screen score breakdown: the run-summary bar FADES UP to the points makeup ----
+   The whole footer bar is the hover/tap target (see EndSummary). On open the summary
+   face fades out in place while the breakdown face fades in and rises a few px into its
+   spot — the gentle "fade up" reveal from the redesign (Desktop Connections.html). The
+   summary stays in normal flow so it alone fixes the row height; the breakdown is
+   absolutely overlaid and only the incoming face moves (a small transform, never a
+   reflow), so the board below never shifts. It's a single-direction rise + fade on the
+   snappy hero/tab curve, so it reads of a piece with the roster tab swap (tabIn) — not
+   the counter-rise that shimmered before (see [[simple-fades-no-text-translate]]). */
+.sb-front {
+  transition: opacity 0.16s ease;
+}
+.sb-break {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition:
+    opacity 0.18s ease,
+    transform 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.sb-open .sb-front {
+  opacity: 0;
+  pointer-events: none;
+}
+.sb-open .sb-break {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+/* Reduced motion: keep the fade, drop the rise. */
+@media (prefers-reduced-motion: reduce) {
+  .sb-break {
+    transform: none;
+  }
+}

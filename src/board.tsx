@@ -25,26 +25,42 @@ const fmtClock = (ms: number | null): string => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
-// One additive column of the inline breakdown the end-screen bar reveals on hover: a
-// tiny caption stacked over its signed point value. `neg` greys the mistakes value.
+// One additive column of the breakdown the end-screen bar fades up to reveal: a tiny
+// caption stacked over its signed point value, the row reading left→right as an
+// equation. `neg` greys the mistakes deduction; `total` is the sum the rest add up to —
+// right-aligned in the serif score voice, set off by a hairline divider.
 function BreakItem({
   caption,
   value,
   neg,
+  total,
 }: {
   caption: string;
   value: string;
   neg?: boolean;
+  total?: boolean;
 }) {
   return (
-    <div className="flex min-w-0 flex-col items-center gap-[3px]">
-      <span className="whitespace-nowrap text-[8.5px] font-semibold uppercase leading-none tracking-[0.07em] text-zinc-500 max-[380px]:text-[7.5px] max-[360px]:tracking-[0.02em]">
+    <div
+      className={
+        "flex min-w-0 flex-col gap-[3px] leading-none " +
+        (total ? "items-end border-l border-white/10 pl-2.5" : "items-start")
+      }
+    >
+      <span
+        className={
+          "whitespace-nowrap text-[8.5px] font-semibold uppercase leading-none tracking-[0.06em] max-[380px]:text-[7.5px] max-[360px]:tracking-[0.02em] " +
+          (total ? "text-zinc-400" : "text-zinc-500")
+        }
+      >
         {caption}
       </span>
       <span
         className={
-          "text-[15px] font-bold leading-none tabular-nums " +
-          (neg ? "text-zinc-400" : "text-emerald-400")
+          "leading-none tabular-nums " +
+          (total
+            ? "font-display text-[17px] font-bold tracking-[-0.01em] text-[#efefe6]"
+            : "text-[14px] font-bold " + (neg ? "text-zinc-400" : "text-emerald-400"))
         }
       >
         {value}
@@ -55,21 +71,22 @@ function BreakItem({
 
 // End-screen footer. At rest it's the run summary, two clusters at the far edges with
 // room to breathe: mistake dots (left), then the clock-icon solve-time chip, a hairline
-// divider, and the serif score (right). The next-puzzle countdown lives under the
-// players list (see Roster), not here. Inspecting the score doesn't open a floating
-// tooltip: the dots + time CROSS-FADE in place to the itemized breakdown (categories,
-// bonus, speed, mistakes) while the big +score stays put as the total they sum to.
-// Only the score cluster (ⓘ + label + number) is the trigger — the dots/time side is
-// inert so a mouse parked there doesn't flip the bar. Hover is mouse-only — this ships
-// as a Discord Activity where CSS :hover sticks after a tap (same reason as
-// HoverButton) — so a real mouse reveals it on hover, touch toggles it on tap, and a
-// tap/Esc outside closes a pinned-open one. Losses read the same: partial-credit
-// categories, a 0 bonus/speed.
+// divider, the serif score, and the ⓘ affordance (right). The next-puzzle countdown
+// lives under the players list (see Roster), not here. Inspecting doesn't open a
+// floating tooltip: the WHOLE bar FADES UP in place — the summary face fades out while
+// the itemized breakdown (categories, bonus, speed, mistakes → total) fades in and rises
+// a few px into its place, the gentle fade-up reveal from the redesign. The whole bar is
+// the trigger now, not just the score cluster, so a mouse anywhere over it reveals the
+// makeup. Hover is mouse-only — this ships as a Discord Activity where CSS :hover sticks
+// after a tap (same reason as HoverButton) — so a real mouse reveals it on hover, touch
+// toggles it on tap, and a tap/Esc outside closes a pinned-open one.
+// Losses read the same: partial-credit categories, a 0 bonus/speed.
 // `note` is the transient "Couldn’t save that guess" warning for a commit that fails
 // after the game ends (the final guess's commit usually resolves mid-end-choreography):
-// it rides a third cross-fade face here because the playing-state Submit pill — the
-// note's home during play — is gone, and the old slot (the desktop header's date) is
-// hidden on mobile, which made the warning invisible exactly where scores matter.
+// it rides a face that overlays the bar (and outranks the reveal) because the
+// playing-state Submit pill — the note's home during play — is gone, and the old slot
+// (the desktop header's date) is hidden on mobile, which made the warning invisible
+// exactly where scores matter.
 function EndSummary({ game, note }: { game: Game; note?: string | null }) {
   const b = game.scoreBreakdown;
   const won = game.status === "won";
@@ -101,33 +118,45 @@ function EndSummary({ game, note }: { game: Game; note?: string | null }) {
     };
   }, [pinned]);
 
-  // Both faces absolute-fill one box whose height the stationary score column fixes
-  // (so the rest face's hairline divider can stretch the row's full height). They
-  // swap on a plain opacity cross-fade — the same one the header's date↔feedback
-  // slot uses; the earlier counter-rise translate read as jank (subpixel text
-  // shimmer), so the faces stay put. Only the visible one is exposed to AT.
-  // Closing waits 200ms (the delay-200 on the closed-state classes) so grazing off
-  // the score doesn't yank the breakdown away; opening stays immediate.
-  const face = "transition-opacity duration-300 ease-out";
-
   return (
     <div
       ref={ref}
-      className="relative flex items-center gap-3 max-[360px]:gap-2"
+      className="relative flex cursor-help select-none items-center [-webkit-tap-highlight-color:transparent]"
+      role="button"
+      tabIndex={0}
+      aria-label="Score breakdown"
+      aria-expanded={open}
+      onPointerEnter={(e) => {
+        if (e.pointerType === "mouse") setOver(true);
+      }}
+      onPointerLeave={(e) => {
+        if (e.pointerType === "mouse") setOver(false);
+      }}
+      onClick={() => setPinned((p) => !p)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setPinned((p) => !p);
+        }
+      }}
     >
-      {/* left + centre: the run summary at rest, swapped on inspect for the makeup */}
-      <div className="relative min-w-0 flex-1 self-stretch">
-        {/* REST face — mistake dots far left, clock-icon solve-time chip far right,
-            closed off by a hairline divider against the (stationary) score */}
+      {/* The fade-up stage spans the whole bar. The summary face sits in normal flow and
+          fixes the row height; the breakdown face is absolutely overlaid and fades up
+          over it on open (.sb-open drives both). The note (below) overlays the whole
+          thing, fading the stage out under it so the reveal never peeks through. */}
+      <div
+        className={
+          "sb-stage relative min-w-0 flex-1 transition-opacity duration-200 ease-out " +
+          (showNote ? "pointer-events-none opacity-0 " : "opacity-100 ") +
+          (open ? "sb-open" : "")
+        }
+      >
+        {/* SUMMARY — the run summary. In normal flow, so it alone fixes the row height:
+            mistake dots (left); solve-time chip · divider · status + score · ⓘ (right).
+            Fades out in place on open. */}
         <div
           aria-hidden={open || showNote}
-          className={
-            face +
-            " absolute inset-0 flex items-center justify-between gap-3 max-[360px]:gap-2 " +
-            (open || showNote
-              ? "pointer-events-none opacity-0"
-              : "opacity-100 delay-200")
-          }
+          className="sb-front flex items-center justify-between gap-3 max-[360px]:gap-2"
         >
           <span
             className="inline-flex flex-none items-center gap-1.75"
@@ -149,89 +178,61 @@ function EndSummary({ game, note }: { game: Game; note?: string | null }) {
               <span>{fmtClock(game.durationMs)}</span>
             </div>
             <span className="my-1 w-px flex-none self-stretch bg-white/10" aria-hidden />
+            <div className="flex min-w-0 flex-col items-end gap-0.75">
+              {/* At the narrow-Android floor (<=360px) "Out of guesses" would widen
+                  the stack and push it off the right edge — cap it so it wraps to two
+                  lines; "Solved"/"Perfect" never reach the cap, so they stay one. */}
+              <span
+                className={
+                  "text-right text-[10px] font-semibold uppercase leading-tight tracking-[0.16em] max-[360px]:max-w-[4.5rem] " +
+                  (won ? "text-emerald-400" : "text-zinc-400")
+                }
+              >
+                {label}
+              </span>
+              <span className="font-display text-[26px] font-bold leading-none tracking-[-0.02em] text-[#efefe6]">
+                +{game.score.toLocaleString()}
+              </span>
+            </div>
+            <span
+              className={
+                "inline-grid h-[15px] w-[15px] flex-none place-items-center rounded-full border font-serif text-[10px] font-bold not-italic leading-none transition-colors duration-150 " +
+                (open ? "border-zinc-400 text-[#efefe6]" : "border-zinc-600 text-zinc-500")
+              }
+              aria-hidden
+            >
+              i
+            </span>
           </div>
         </div>
 
-        {/* BREAKDOWN face — the additive components, summing to the score at right */}
+        {/* BREAKDOWN — the additive makeup spread across the bar as a left→right
+            equation, landing on the total where the score sat. Absolutely overlaid;
+            fades in and rises a few px into place on open (see .sb-break). */}
         <div
           aria-hidden={!open}
-          className={
-            face +
-            " absolute inset-0 flex items-center justify-between gap-1.5 px-1 max-[360px]:gap-1 max-[360px]:px-0 " +
-            (open ? "opacity-100" : "pointer-events-none opacity-0 delay-200")
-          }
+          className="sb-break flex items-center justify-between gap-1.5 px-0.5 max-[360px]:gap-1 max-[360px]:px-0"
         >
           <BreakItem caption="Categories" value={`+${b.completion}`} />
           <BreakItem caption="Bonus" value={`+${b.solveBonus}`} />
           <BreakItem caption="Speed" value={won ? `+${b.speed}` : "+0"} />
           <BreakItem caption="Mistakes" value={won ? `−${b.penalty}` : "−0"} neg />
-        </div>
-
-        {/* NOTE face — the rare post-game "couldn’t save" warning; outranks both
-            other faces while it shows, then the rest face fades back. role=status
-            announces it (the playing-state pill's aria-live is gone by now). */}
-        <div
-          role="status"
-          aria-hidden={!showNote}
-          className={
-            face +
-            " absolute inset-0 flex items-center justify-center text-[12.5px] font-bold text-zinc-100 " +
-            (showNote ? "opacity-100" : "pointer-events-none opacity-0")
-          }
-        >
-          {note ?? lastNote.current}
+          <BreakItem caption="Total" value={`+${game.score.toLocaleString()}`} total />
         </div>
       </div>
 
-      {/* right: the score — the total the components sum to. It holds its place across
-          the swap so the number never jumps; the ⓘ rides the right edge, vertically
-          centered on the label + score stack, as the affordance + open-state cue.
-          This cluster, not the whole bar, is the hover/tap target for the breakdown. */}
+      {/* NOTE — the rare post-game "couldn’t save" warning; overlays the bar and
+          outranks the reveal while it shows (open is forced false), then fades back.
+          role=status announces it (the playing-state pill's aria-live is gone by now). */}
       <div
-        className="flex min-w-0 flex-none cursor-help items-center gap-[9px] [-webkit-tap-highlight-color:transparent]"
-        role="button"
-        tabIndex={0}
-        aria-label="Score breakdown"
-        aria-expanded={open}
-        onPointerEnter={(e) => {
-          if (e.pointerType === "mouse") setOver(true);
-        }}
-        onPointerLeave={(e) => {
-          if (e.pointerType === "mouse") setOver(false);
-        }}
-        onClick={() => setPinned((p) => !p)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setPinned((p) => !p);
-          }
-        }}
+        role="status"
+        aria-hidden={!showNote}
+        className={
+          "absolute inset-0 flex items-center justify-center text-[12.5px] font-bold text-zinc-100 transition-opacity duration-300 ease-out " +
+          (showNote ? "opacity-100" : "pointer-events-none opacity-0")
+        }
       >
-        <div className="flex min-w-0 flex-col items-end gap-0.75">
-          {/* At the narrow-Android floor (<=360px) "Out of guesses" would widen the
-              stack and push it off the right edge — cap it so it wraps to two lines
-              there; "Solved"/"Perfect" never reach the cap, so they stay one line. */}
-          <span
-            className={
-              "text-right text-[10px] font-semibold uppercase leading-tight tracking-[0.16em] max-[360px]:max-w-[4.5rem] " +
-              (won ? "text-emerald-400" : "text-zinc-400")
-            }
-          >
-            {label}
-          </span>
-          <span className="font-display text-[26px] font-bold leading-none tracking-[-0.02em] text-[#efefe6]">
-            +{game.score.toLocaleString()}
-          </span>
-        </div>
-        <span
-          className={
-            "inline-grid h-[15px] w-[15px] flex-none place-items-center rounded-full border font-serif text-[10px] font-bold not-italic leading-none transition-colors duration-150 " +
-            (open ? "border-zinc-400 text-[#efefe6]" : "border-zinc-600 text-zinc-500")
-          }
-          aria-hidden
-        >
-          i
-        </span>
+        {note ?? lastNote.current}
       </div>
     </div>
   );

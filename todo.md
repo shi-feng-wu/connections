@@ -11,3 +11,5 @@
 - share link at end like the official site
 - cold streaks
 - recap suggestions pushes up the no one in leaderboard text
+- keyboard commands
+- footer

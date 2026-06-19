@@ -243,6 +243,17 @@ const TILE =
 // Ideal/ceiling word size (responsive); FitText only shrinks below this to fit.
 const TILE_TEXT = "block w-full text-center text-[clamp(9px,3vw,17px)]";
 
+// Solved-bar text. The bar height is fixed (--tile-h, up to 80px), so a category
+// and/or answer list that wraps to two lines has to fit four total lines without
+// overflowing. Phone portrait stays vw-governed (~13px / ~12px) and was already
+// fine, so only the upper cap is pulled in — on wide layouts the font otherwise
+// pins at the ceiling while the board sits in the narrow left half of the 50/50
+// split, where 18px/16px crowded (and slightly overflowed) the four-line case.
+// Shared by the plain solved bar and the SpoilerBar so the two never drift.
+const BAR_CAT =
+  "font-extrabold uppercase tracking-tight text-[clamp(12px,3.4vw,16px)] leading-tight";
+const BAR_MEMBERS = "uppercase text-[clamp(10px,3vw,13px)] leading-tight";
+
 // Tile word, auto-fitted to the tile like NYT Connections: short words render at the
 // responsive ceiling; a word that would touch the edges has its font scaled down
 // (never the tile padding) until it fits the content box — measured, not guessed, so
@@ -400,12 +411,8 @@ function SpoilerBar({
         </span>
       )}
       {/* the REAL category name, shown blurred until tapped (see .spoiler-cat) */}
-      <div className="spoiler-cat font-extrabold uppercase tracking-tight text-[clamp(12px,3.4vw,18px)] leading-tight">
-        {category}
-      </div>
-      <div className="relative z-[3] uppercase text-[clamp(10px,3vw,16px)] leading-tight">
-        {members.join(", ")}
-      </div>
+      <div className={"spoiler-cat " + BAR_CAT}>{category}</div>
+      <div className={"relative z-[3] " + BAR_MEMBERS}>{members.join(", ")}</div>
     </button>
   );
 }
@@ -898,12 +905,8 @@ export function Board({
                 className="flex h-[var(--tile-h)] flex-col items-center justify-center rounded-lg px-2 text-center text-[#121212]"
                 style={{ background: LEVELS[lvl].color }}
               >
-                <div className="font-extrabold uppercase tracking-tight text-[clamp(12px,3.4vw,18px)] leading-tight">
-                  {g.category}
-                </div>
-                <div className="uppercase text-[clamp(10px,3vw,16px)] leading-tight">
-                  {g.members.join(", ")}
-                </div>
+                <div className={BAR_CAT}>{g.category}</div>
+                <div className={BAR_MEMBERS}>{g.members.join(", ")}</div>
               </div>
             );
           })}

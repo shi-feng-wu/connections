@@ -260,15 +260,41 @@ body {
 }
 
 :root {
+  /* Safe-area insets. Discord injects --discord-safe-area-inset-* on the iframe root
+     to clear its mobile/tablet top bar (and the device notch); we prefer those and
+     fall back to the CSS env() insets for iOS + local/dev (where Discord's vars are
+     absent). These are the ONLY clearances we pad for — no hardcoded bar height, since
+     the native bar lives outside our DOM and can't be measured from in here. Per
+     Discord's mobile docs the vars may be unset until the first layout/orientation
+     change, so the env() fallback is what holds at cold start. */
+  --sait: var(--discord-safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --saib: var(--discord-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --sail: var(--discord-safe-area-inset-left, env(safe-area-inset-left, 0px));
+  --sair: var(--discord-safe-area-inset-right, env(safe-area-inset-right, 0px));
+
   /* Board tile + solved-bar + skeleton height. The board is always 4 rows, so keep
      tiles at the full 80px and only shrink once the viewport is genuinely too short
-     to fit those 4 rows + the surrounding chrome (Discord's wide-but-short desktop
-     case) — then scale down with the viewport. The reserve is the non-board vertical
-     space (container padding + footer + the inter-row gaps), so the fixed→scaling
-     crossover lands where the board would actually start to clip (~460px tall),
-     instead of early. Below ~350px it bottoms out at 52px. dvh matches the
-     min-h-dvh container and tracks mobile browser chrome. */
-  --tile-h: clamp(52px, calc((100dvh - 140px) / 4), 80px);
+     to fit those 4 rows + the surrounding chrome — then scale down with the viewport.
+     --board-reserve is the non-board vertical space subtracted before dividing the
+     height among 4 rows. DESKTOP value (140px) is load-bearing: the wide layout's
+     scale-to-fit only scales UP, so the board must fit the window on its own, and 140
+     ≈ the 48px container padding + 78px footer/inter-row gaps + buffer, placing the
+     fixed→scaling crossover right where the board would clip (~460px tall). Mobile
+     overrides it below (single column scrolls, so we bias toward tile ASPECT over
+     fitting everything). dvh matches the min-h-dvh container and tracks browser chrome. */
+  --board-reserve: 140px;
+  --tile-h: clamp(52px, calc((100dvh - var(--board-reserve)) / 4), 80px);
+}
+
+/* Single-column (mobile/tablet) tile sizing: the page scrolls here, unlike the wide
+   layout, so reserve only the real chrome (footer + inter-row gaps) plus the top bar
+   clearance — NOT the full desktop padding. This keeps tiles from squishing flat on
+   short viewports (the board grows taller and the page scrolls instead). Mirrors the
+   800px (DESKTOP_BP) breakpoint; -0.02px so it never overlaps min-[800px]: at 800. */
+@media (max-width: 799.98px) {
+  :root {
+    --board-reserve: calc(var(--sait) + 80px);
+  }
 }
 
 /* Discord activity iframe can be narrow; never scroll sideways. */

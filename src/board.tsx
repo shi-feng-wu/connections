@@ -60,7 +60,8 @@ function BreakItem({
           "leading-none tabular-nums " +
           (total
             ? "font-display text-[17px] font-bold tracking-[-0.01em] text-[#efefe6]"
-            : "text-[14px] font-bold " + (neg ? "text-zinc-400" : "text-emerald-400"))
+            : "text-[14px] font-bold " +
+              (neg ? "text-zinc-400" : "text-emerald-400"))
         }
       >
         {value}
@@ -174,10 +175,18 @@ function EndSummary({ game, note }: { game: Game; note?: string | null }) {
           </span>
           <div className="flex min-w-0 items-center gap-3.5 self-stretch max-[360px]:gap-2.5">
             <div className="flex items-center gap-2 text-[15px] font-semibold tabular-nums text-zinc-400">
-              <Clock size={15} strokeWidth={2.25} className="flex-none text-zinc-500" aria-hidden />
+              <Clock
+                size={15}
+                strokeWidth={2.25}
+                className="flex-none text-zinc-500"
+                aria-hidden
+              />
               <span>{fmtClock(game.durationMs)}</span>
             </div>
-            <span className="my-1 w-px flex-none self-stretch bg-white/10" aria-hidden />
+            <span
+              className="my-1 w-px flex-none self-stretch bg-white/10"
+              aria-hidden
+            />
             <div className="flex min-w-0 flex-col items-end gap-0.75">
               {/* At the narrow-Android floor (<=360px) "Out of guesses" would widen
                   the stack and push it off the right edge — cap it so it wraps to two
@@ -197,7 +206,9 @@ function EndSummary({ game, note }: { game: Game; note?: string | null }) {
             <span
               className={
                 "inline-grid h-[15px] w-[15px] flex-none place-items-center rounded-full border font-serif text-[10px] font-bold not-italic leading-none transition-colors duration-150 " +
-                (open ? "border-zinc-400 text-[#efefe6]" : "border-zinc-600 text-zinc-500")
+                (open
+                  ? "border-zinc-400 text-[#efefe6]"
+                  : "border-zinc-600 text-zinc-500")
               }
               aria-hidden
             >
@@ -216,8 +227,16 @@ function EndSummary({ game, note }: { game: Game; note?: string | null }) {
           <BreakItem caption="Categories" value={`+${b.completion}`} />
           <BreakItem caption="Bonus" value={`+${b.solveBonus}`} />
           <BreakItem caption="Speed" value={won ? `+${b.speed}` : "+0"} />
-          <BreakItem caption="Mistakes" value={won ? `−${b.penalty}` : "−0"} neg />
-          <BreakItem caption="Total" value={`+${game.score.toLocaleString()}`} total />
+          <BreakItem
+            caption="Mistakes"
+            value={won ? `−${b.penalty}` : "−0"}
+            neg
+          />
+          <BreakItem
+            caption="Total"
+            value={`+${game.score.toLocaleString()}`}
+            total
+          />
         </div>
       </div>
 
@@ -378,7 +397,11 @@ function SpoilerBar({
   dim = false,
   defaultRevealed = false,
   onReveal,
-}: Group & { dim?: boolean; defaultRevealed?: boolean; onReveal?: () => void }) {
+}: Group & {
+  dim?: boolean;
+  defaultRevealed?: boolean;
+  onReveal?: () => void;
+}) {
   const [revealed, setRevealed] = useState(defaultRevealed);
   const [gone, setGone] = useState(defaultRevealed);
   function reveal(): void {
@@ -412,7 +435,9 @@ function SpoilerBar({
       )}
       {/* the REAL category name, shown blurred until tapped (see .spoiler-cat) */}
       <div className={"spoiler-cat " + BAR_CAT}>{category}</div>
-      <div className={"relative z-[3] " + BAR_MEMBERS}>{members.join(", ")}</div>
+      <div className={"relative z-[3] " + BAR_MEMBERS}>
+        {members.join(", ")}
+      </div>
     </button>
   );
 }
@@ -462,7 +487,9 @@ export function Board({
   // (a second "Guessed") still replays the pop.
   const [hint, setHint] = useState<string | null>(null);
   const [hintN, setHintN] = useState(0);
-  const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
 
   const [, bump] = useReducer((n: number) => n + 1, 0);
   const rerender = () => bump();
@@ -866,7 +893,9 @@ export function Board({
           solvedLevels (re-rendered on each solve) rather than a :has selector,
           so it holds even where :has isn't supported. */}
       <div
-        className={"flex flex-col" + (solvedLevels.current.length ? " gap-2" : "")}
+        className={
+          "flex flex-col" + (solvedLevels.current.length ? " gap-2" : "")
+        }
         ref={boardRef}
       >
         <div className="flex flex-col gap-2" ref={solvedRef}>

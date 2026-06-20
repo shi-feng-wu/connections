@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Connections</title>
+    <link rel="icon" type="image/png" href="/connections-icon.png" />
     <!-- Self-hosted fonts (see src/index.css). Google Fonts is blocked inside the
          Discord Activity sandbox, so the @font-face src points at our own origin;
          preload to cut the score/wordmark serif's flash-of-fallback. -->
@@ -16,17 +17,18 @@
          content is taller than the viewport (the end screen), justify-center pushes
          the top off-screen with no way to scroll to it — clipping the score hero.
          Auto margins collapse to a top anchor on overflow, so the top stays reachable.
-         pt-8 leaves headroom for the score hero, which rides up out of the title row —
-         a mobile-only concern (desktop's score lives in the footer, not above a title),
-         so desktop drops to pt-6: the same 24px as the bottom padding, keeping the
-         vertical padding SYMMETRIC there — my-auto centers within the content box, so
-         unequal padding would sit the board off-center, a visible lean (16px vs 40px
-         gutters) now that the scale-to-fit fills short windows to within ~28px. The
-         900px switch matches DESKTOP_BP / the min-[900px]: classes in components.tsx —
-         the wide layout's one breakpoint. Bottom padding grows to the home-indicator
-         safe area when the webview extends under it (viewport-fit=cover above);
-         GameView's mobile min-h calc mirrors both paddings — keep them in sync. -->
-    <div id="app" class="mx-auto flex min-h-dvh w-full max-w-[940px] flex-col px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-8 min-[900px]:pt-6 [&>*]:my-auto"></div>
+         Mobile/tablet top padding is exactly --sait — the Discord top-bar + notch
+         clearance (index.css) — and no more: just enough that the native bar never
+         overlaps the board, which on short viewports hands the freed space to the tiles
+         instead of squishing them. Desktop has no overlay bar (--sait≈0 there), so it
+         drops to pt-6: the same 24px as the bottom padding, keeping the vertical padding
+         SYMMETRIC — my-auto centers within the content box, so unequal padding would sit
+         the board off-center, a visible lean now that scale-to-fit fills short windows
+         to within ~28px. The 800px switch matches DESKTOP_BP / the min-[800px]: classes
+         in components.tsx — the wide layout's one breakpoint. Bottom padding grows to the
+         home-indicator safe area when the webview extends under it (viewport-fit=cover
+         above); GameView's mobile min-h calc mirrors both paddings — keep them in sync. -->
+    <div id="app" class="mx-auto flex min-h-dvh w-full max-w-[940px] flex-col px-4 pb-[max(1.5rem,var(--saib))] pt-[var(--sait)] min-[800px]:pt-6 [&>*]:my-auto"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

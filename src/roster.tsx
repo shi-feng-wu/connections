@@ -199,7 +199,7 @@ function Avatar({
   return (
     <div
       className={
-        "relative grid h-6.5 w-6.5 flex-none place-items-center rounded-full text-[11px] font-extrabold text-[#0c0c0c] select-none min-[900px]:h-8 min-[900px]:w-8 min-[900px]:text-[13px]" +
+        "relative grid h-6.5 w-6.5 flex-none place-items-center rounded-full text-[11px] font-extrabold text-[#0c0c0c] select-none min-[800px]:h-8 min-[800px]:w-8 min-[800px]:text-[13px]" +
         ring
       }
       style={{ background: colorFor(p.userId) }}
@@ -223,19 +223,19 @@ function Avatar({
 function MiniBoard({ p, flash }: { p: PlayerState; flash: boolean }) {
   const solved = p.solvedLevels;
   return (
-    <div className="flex w-5.5 flex-none flex-col gap-[2px] min-[900px]:w-7.5">
+    <div className="flex w-5.5 flex-none flex-col gap-[2px] min-[800px]:w-7.5">
       {solved.map((lvl, i) => (
         <div
           key={`s${lvl}`}
           className={
-            "h-[5px] overflow-hidden rounded-[2px] min-[900px]:h-1.5 " +
+            "h-[5px] overflow-hidden rounded-[2px] min-[800px]:h-1.5 " +
             (flash && i === solved.length - 1 ? "animate-solve-flash" : "")
           }
           style={{ background: LEVELS[lvl].color }}
         />
       ))}
       {Array.from({ length: 4 - solved.length }, (_, r) => (
-        <div className="flex h-[5px] gap-[1.5px] min-[900px]:h-1.5" key={`e${r}`}>
+        <div className="flex h-[5px] gap-[1.5px] min-[800px]:h-1.5" key={`e${r}`}>
           {[0, 1, 2, 3].map((c) => (
             <div className="flex-1 rounded-[1px] bg-zinc-700" key={c} />
           ))}
@@ -273,7 +273,7 @@ function FinalScore({ p }: { p: PlayerState }) {
   return (
     <span
       className={
-        "hidden w-[42px] flex-none text-right text-[13px] font-extrabold tabular-nums tracking-[-0.01em] min-[900px]:inline " +
+        "hidden w-[42px] flex-none text-right text-[13px] font-extrabold tabular-nums tracking-[-0.01em] min-[800px]:inline " +
         (p.done === "won" ? "text-[#efefe6]" : "text-zinc-500")
       }
     >
@@ -292,7 +292,7 @@ function FinalScore({ p }: { p: PlayerState }) {
 // ml-auto pins the time to the box's right edge, leaving the status icon at the
 // left — anchored next to the mistake dots rather than floating with the time.
 const TIME =
-  "ml-auto text-[12px] tabular-nums tracking-[0.01em] min-[900px]:text-[13px]";
+  "ml-auto text-[12px] tabular-nums tracking-[0.01em] min-[800px]:text-[13px]";
 
 // An in-progress row's running clock. The 1Hz subscription lives HERE — in a leaf
 // that renders one span — so a second ticking over re-renders only these clocks, not
@@ -310,12 +310,12 @@ function Status({ p }: { p: PlayerState }) {
   // (the icons are desktop-only) next to the time. A per-state width (finished
   // rows used to run 6px wider) made the mistake dots column jitter left/right
   // from row to row depending on who had finished.
-  const box = "flex w-[72px] flex-none items-center gap-1.5 min-[900px]:w-[74px]";
+  const box = "flex w-[72px] flex-none items-center gap-1.5 min-[800px]:w-[74px]";
   // mobile stand-in for the ✓/✗: the run's score, bright on a win, dim on a loss
   const pts = p.done && (
     <span
       className={
-        "flex-none text-[12.5px] font-extrabold tabular-nums min-[900px]:hidden " +
+        "flex-none text-[12.5px] font-extrabold tabular-nums min-[800px]:hidden " +
         (p.done === "won" ? "text-[#efefe6]" : "text-zinc-500")
       }
     >
@@ -325,7 +325,7 @@ function Status({ p }: { p: PlayerState }) {
   if (p.done === "lost")
     return (
       <div className={box}>
-        <X className="hidden flex-none text-zinc-500 min-[900px]:block" size={15} strokeWidth={2.6} aria-label="Out" />
+        <X className="hidden flex-none text-zinc-500 min-[800px]:block" size={15} strokeWidth={2.6} aria-label="Out" />
         {pts}
         <span className={TIME + " text-zinc-600"}>{fmtElapsed(p, 0)}</span>
       </div>
@@ -333,7 +333,7 @@ function Status({ p }: { p: PlayerState }) {
   if (p.done === "won")
     return (
       <div className={box}>
-        <Check className="hidden flex-none text-zinc-100 min-[900px]:block" size={15} strokeWidth={2.8} aria-label="Solved" />
+        <Check className="hidden flex-none text-zinc-100 min-[800px]:block" size={15} strokeWidth={2.8} aria-label="Solved" />
         {pts}
         <span className={TIME + " text-zinc-200"}>{fmtElapsed(p, 0)}</span>
       </div>
@@ -354,14 +354,14 @@ function Status({ p }: { p: PlayerState }) {
 function Rank({ rank }: { rank: number }) {
   if (rank === 1)
     return (
-      <div className="mr-0.5 w-5.5 flex-none text-center text-[13px] tabular-nums min-[900px]:-mr-0.75">
+      <div className="mr-0.5 w-5.5 flex-none text-center text-[13px] tabular-nums min-[800px]:-mr-0.75">
         <span className="inline-grid h-5 w-5 place-items-center rounded-md bg-zinc-100 text-[12px] font-extrabold text-zinc-900">
           1
         </span>
       </div>
     );
   return (
-    <div className="mr-0.5 w-5.5 flex-none text-center text-[13px] tabular-nums text-zinc-500 min-[900px]:-mr-0.75">
+    <div className="mr-0.5 w-5.5 flex-none text-center text-[13px] tabular-nums text-zinc-500 min-[800px]:-mr-0.75">
       {rank}
     </div>
   );
@@ -392,7 +392,7 @@ const RosterRow = memo(function RosterRow({
       ref={rowRef}
       data-flip-row={p.userId}
       className={
-        "relative flex flex-none items-center gap-2 rounded-[9px] px-2.5 py-2 min-[900px]:gap-2.75 min-[900px]:px-3 min-[900px]:py-2.25 " +
+        "relative flex flex-none items-center gap-2 rounded-[9px] px-2.5 py-2 min-[800px]:gap-2.75 min-[800px]:px-3 min-[800px]:py-2.25 " +
         (you ? "bg-zinc-100/10" : "bg-zinc-900/60")
       }
     >
@@ -611,9 +611,9 @@ export function Roster({
       // Desktop live list owns its scroller, so centering is contained. Everywhere
       // else — the standings table, and ALL lists on mobile (where the page is the
       // scroller, so centering would yank the whole view and drag the board
-      // offscreen) — just nudge the row into view. 900 mirrors DESKTOP_BP.
+      // offscreen) — just nudge the row into view. 800 mirrors DESKTOP_BP.
       block:
-        view === "live" && window.innerWidth >= 900 ? "center" : "nearest",
+        view === "live" && window.innerWidth >= 800 ? "center" : "nearest",
     });
   }, [view]);
 
@@ -652,7 +652,7 @@ export function Roster({
           // The bottom fade is desktop-only: on mobile the column grows with its content
           // (the PAGE scrolls, this list never does), so a fade would dim the last row
           // while falsely implying more rows inside the box.
-          className="flex min-h-0 flex-1 animate-tab-in flex-col gap-1.5 overflow-y-auto scrollbar-thin pb-6 min-[900px]:list-fade"
+          className="flex min-h-0 flex-1 animate-tab-in flex-col gap-1.5 overflow-y-auto scrollbar-thin pb-6 min-[800px]:list-fade"
         >
           {sorted.length ? (
             sorted.map((p, i) => {

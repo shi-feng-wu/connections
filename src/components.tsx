@@ -271,7 +271,7 @@ function Header({
 // Responsive game shell. Mobile / tablet: a single column — header, board + footer,
 // then the players section (Live / Season / All-time tabs + list) — capped at
 // max-w-480 and centered, so the in-between (tablet) band reads as a roomy phone
-// rather than stretching the board wide. Desktop (≥900px): a 50/50
+// rather than stretching the board wide. Desktop (≥800px): a 50/50
 // split — board + footer on the left, and a right rail (header, tabs, list) that
 // absolute-fills the column so it matches the board's height and scrolls its list
 // rather than driving the layout taller. Season and All-time share one standings
@@ -289,9 +289,9 @@ function Header({
 // *unscaled* layout box (CSS transforms don't affect them), so measuring the very
 // element we scale is both correct and loop-free — and a ResizeObserver re-measures
 // when the board's height changes (rows collapsing into solved bars).
-// Keep in sync with the `min-[900px]:` class literals (components/roster/season) —
+// Keep in sync with the `min-[800px]:` class literals (components/roster/season) —
 // this is the JS mirror of the same wide-layout breakpoint.
-const DESKTOP_BP = 900;
+const DESKTOP_BP = 800;
 const MAX_SCALE = 1.5;
 // Breathing room around the scaled board: a FIXED gutter per edge, not a viewport
 // fraction. This used to be a 0.75 fill ("proportionally bigger gutters on bigger
@@ -389,8 +389,8 @@ export function GameView({
   );
 
   return (
-    // Mobile: fill the viewport (#app content box = 100dvh − its pt-8 −
-    // its safe-area-aware bottom padding; mirror index.html's #app classes)
+    // Mobile: fill the viewport (#app content box = 100dvh − its top safe-area
+    // padding (--sait) − its bottom safe-area padding; mirror index.html's #app classes)
     // so the column anchors to the top instead of #app's [&>*]:my-auto centering it —
     // which, with a short roster, stranded a big gap above the board. The players
     // column then flex-grows into that space (see below). Desktop resets to content
@@ -401,13 +401,13 @@ export function GameView({
       // stays centered (matching #app's auto-margin centering). scale(1) is omitted
       // so mobile never gets a needless containing block from the transform.
       style={scale !== 1 ? { transform: `scale(${scale})` } : undefined}
-      className="mx-auto flex min-h-[calc(100dvh_-_2rem_-_max(1.5rem,env(safe-area-inset-bottom)))] w-full max-w-[480px] animate-fade-in flex-col gap-3 min-[900px]:min-h-0 min-[900px]:max-w-[860px] min-[900px]:flex-row min-[900px]:items-stretch min-[900px]:gap-6"
+      className="mx-auto flex min-h-[calc(100dvh_-_var(--sait)_-_max(1.5rem,var(--saib)))] w-full max-w-[480px] animate-fade-in flex-col gap-3 min-[800px]:min-h-0 min-[800px]:max-w-[860px] min-[800px]:flex-row min-[800px]:items-stretch min-[800px]:gap-6"
     >
       {/* main column — board + footer. No header on mobile: Discord shows its own
-          activity header there, so we hide ours and keep some top padding (on top of
-          #app's pt-8) to clear it. The header sits atop the players rail on desktop
-          instead (below). */}
-      <div className="flex w-full min-w-0 flex-col gap-3 pt-7 min-[900px]:flex-1 min-[900px]:pt-0">
+          activity header there, so we hide ours; #app's pt-[--sait] already clears
+          that bar, so no extra top padding here. The header sits atop the players rail
+          on desktop instead (below). */}
+      <div className="flex w-full min-w-0 flex-col gap-3 min-[800px]:flex-1">
         <Board
           key={gameKey}
           game={game}
@@ -425,8 +425,8 @@ export function GameView({
       {/* players column — mobile flex-grows into the freed vertical space (list fills +
           scrolls internally); desktop rail absolute-fills to match the board's height */}
       <div className="relative flex w-full min-w-0 flex-1 flex-col min-h-0">
-        <div className="flex min-h-0 flex-1 flex-col gap-2.5 min-[900px]:absolute min-[900px]:inset-0">
-          {header("hidden min-[900px]:flex")}
+        <div className="flex min-h-0 flex-1 flex-col gap-2.5 min-[800px]:absolute min-[800px]:inset-0">
+          {header("hidden min-[800px]:flex")}
           <Roster
             players={players}
             selfId={selfId}

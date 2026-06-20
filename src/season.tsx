@@ -26,7 +26,7 @@ function LeaderAvatar({
     <div
       className={
         // same avatar as the live roster row (src/roster.tsx Avatar) for consistency
-        "relative grid h-6.5 w-6.5 flex-none place-items-center rounded-full text-[11px] font-extrabold text-[#0c0c0c] select-none min-[900px]:h-8 min-[900px]:w-8 min-[900px]:text-[13px]" +
+        "relative grid h-6.5 w-6.5 flex-none place-items-center rounded-full text-[11px] font-extrabold text-[#0c0c0c] select-none min-[800px]:h-8 min-[800px]:w-8 min-[800px]:text-[13px]" +
         (you ? " shadow-[0_0_0_2px_#09090b,0_0_0_4px_#f4f4f5]" : "")
       }
       style={{ background: colorFor(id) }}
@@ -74,7 +74,7 @@ function ScoreCell({ v }: { v: number }) {
       {v.toLocaleString()}
       {/* the unit only fits once the desktop rail frees up width; on mobile the
           column header ("Score") carries the meaning instead */}
-      <span className="ml-0.5 hidden text-[0.62em] font-semibold tracking-[0.02em] text-zinc-500 min-[900px]:inline">
+      <span className="ml-0.5 hidden text-[0.62em] font-semibold tracking-[0.02em] text-zinc-500 min-[800px]:inline">
         pts
       </span>
     </span>
@@ -87,7 +87,7 @@ function ScoreCell({ v }: { v: number }) {
 // Phones get a 5-column track: Played and Avg ✗ drop out (hidden cells below) and
 // the gap tightens, otherwise the fixed columns swallow the name entirely at 360px.
 const LGRID =
-  "grid grid-cols-[22px_minmax(0,1fr)_62px_32px_48px] items-center gap-1.5 min-[900px]:grid-cols-[22px_minmax(0,1fr)_64px_44px_52px_32px] min-[900px]:gap-2";
+  "grid grid-cols-[22px_minmax(0,1fr)_62px_32px_48px] items-center gap-1.5 min-[800px]:grid-cols-[22px_minmax(0,1fr)_64px_44px_52px_32px] min-[800px]:gap-2";
 
 type LedgerEntry = {
   id: string;
@@ -119,7 +119,7 @@ function LedgerRow({
         // same card as the live roster row (src/roster.tsx RosterRow): a rounded
         // zinc-900/60 panel, your row lifted to zinc-100/10 — spaced, not divided.
         LGRID +
-        " rounded-[9px] px-2.5 py-2 min-[900px]:px-3 min-[900px]:py-2.25 " +
+        " rounded-[9px] px-2.5 py-2 min-[800px]:px-3 min-[800px]:py-2.25 " +
         (you ? "bg-zinc-100/10" : "bg-zinc-900/60")
       }
     >
@@ -136,7 +136,7 @@ function LedgerRow({
       )}
       {/* pl-1 on mobile widens just the rank→avatar gap (matching the live roster);
           the legend's "Player" label gets the same pad so they stay aligned. */}
-      <div className="flex min-w-0 items-center gap-2.5 pl-1 min-[900px]:pl-0">
+      <div className="flex min-w-0 items-center gap-2.5 pl-1 min-[800px]:pl-0">
         <LeaderAvatar id={e.id} name={e.name} avatar={e.avatar} you={you} />
         <span
           className={
@@ -158,7 +158,7 @@ function LedgerRow({
         <span className="font-semibold text-zinc-300">{e.wins}</span>/{e.plays}
       </div>
       {/* Avg ✗ is a desktop-only column (see LGRID) */}
-      <div className="hidden text-right text-[13px] tabular-nums text-zinc-400 min-[900px]:block">
+      <div className="hidden text-right text-[13px] tabular-nums text-zinc-400 min-[800px]:block">
         {Number(e.avg_mistakes).toFixed(1)}
       </div>
     </div>
@@ -189,7 +189,7 @@ export function StandingsEmpty({ window }: { window: "season" | "all" }) {
     // the grid into the footer, so a plain center lands ~71px low. The extra bottom
     // padding lifts the centered text back onto the grid's vertical midline (offset
     // is fixed by the header/tabs/footer heights — independent of --tile-h).
-    <div className="flex min-h-0 flex-1 animate-tab-in flex-col items-center justify-center gap-5 px-6 py-12 text-center min-[900px]:pt-0 min-[900px]:pb-[140px]">
+    <div className="flex min-h-0 flex-1 animate-tab-in flex-col items-center justify-center gap-5 px-6 py-12 text-center min-[800px]:pt-0 min-[800px]:pb-[140px]">
       <div className="flex flex-col gap-1.5">
         <h3 className="font-display text-[19px] font-semibold leading-tight tracking-[-0.01em] text-[#efefe6]">
           First place is open
@@ -242,7 +242,7 @@ export function LedgerBody({
           // on mobile the column grows and the page scrolls, so the bottom fade
           // would falsely imply more rows — desktop-only there. The capped
           // (46vh) variant always scrolls internally, so it keeps the fade.
-          (fill ? "min-h-0 flex-1 min-[900px]:list-fade" : "max-h-[46vh] list-fade") +
+          (fill ? "min-h-0 flex-1 min-[800px]:list-fade" : "max-h-[46vh] list-fade") +
           " flex flex-col gap-1.5 overflow-y-auto scrollbar-thin pb-6"
         }
       >
@@ -268,20 +268,20 @@ export function LedgerBody({
       <div
         className={
           LGRID +
-          " mt-1.5 border-t border-white/[0.05] px-2.5 pt-2.5 text-[9.5px] font-semibold uppercase tracking-[0.09em] text-zinc-500 min-[900px]:px-3"
+          " mt-1.5 border-t border-white/[0.05] px-2.5 pt-2.5 text-[9.5px] font-semibold uppercase tracking-[0.09em] text-zinc-500 min-[800px]:px-3"
         }
       >
         <span />
-        <span className="pl-1 text-left min-[900px]:pl-0">Player</span>
+        <span className="pl-1 text-left min-[800px]:pl-0">Player</span>
         <span className="text-right">Score</span>
         {/* the word doesn't fit the mobile streak column; the flame alone reads fine
             since every row pairs it with a count */}
         <span className="flex items-center justify-end gap-[3px]">
           <Flame size={9} fill="currentColor" strokeWidth={0} aria-hidden />
-          <span className="hidden min-[900px]:inline">Streak</span>
+          <span className="hidden min-[800px]:inline">Streak</span>
         </span>
         <span className="text-right">Won</span>
-        <span className="hidden items-center justify-end gap-0.5 min-[900px]:flex">
+        <span className="hidden items-center justify-end gap-0.5 min-[800px]:flex">
           Avg <X size={9} strokeWidth={2.6} aria-hidden />
         </span>
       </div>

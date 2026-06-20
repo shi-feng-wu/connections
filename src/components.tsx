@@ -277,72 +277,57 @@ function Header({
 // rather than driving the layout taller. Season and All-time share one standings
 // table (different window); the end-screen locate arrow scrolls + pulses your row in
 // whichever tab is open.
-// Desktop "scale to fit". The board layout caps out at max-w-860px with 80px tiles
-// (--tile-h, FIXED in the wide layout) and text frozen at its clamp ceilings, so on a
-// big monitor it's a small island floating in black, and on a wide-but-short window
-// (Discord's desktop activity especially) it's taller than the viewport. Rather than
-// bump each ceiling (tile height, the three text clamps, gaps, padding) in lockstep —
-// which drifts the proportions apart — we scale the whole GameView uniformly with a
-// CSS transform, which preserves every aspect ratio by construction (incl. the solved
-// bars, which would otherwise flatten). The factor is bounded by BOTH the viewport
-// width and height (so the scaled board never clips), capped at MAX_SCALE and floored
-// at MIN_SCALE. Scaling BELOW 1 is the whole point on short windows: a uniform shrink
-// keeps tiles/bars square instead of the dvh clamp squishing tile HEIGHT while the
-// width-driven text stays large (the flat-bar bug). Below MIN_SCALE we stop and let
-// the page scroll rather than shrink the text to illegibility. Anything under
-// DESKTOP_BP opts out entirely (single column; the dvh clamp + scroll handle it).
-// offsetWidth/offsetHeight read the *unscaled* layout box (CSS transforms don't affect
-// them), so measuring the very element we scale is both correct and loop-free — and a
-// ResizeObserver re-measures when the board's height changes (rows collapsing into
-// solved bars). Keep DESKTOP_BP in sync with the `min-[800px]:` class literals
-// (components/roster/season) — this is the JS mirror of the same wide-layout breakpoint.
+// Desktop "scale to fit". The wide layout FILLS the viewport height (#app zeroes its
+// desktop vertical padding): the roster rail fills its full-height column — showing as
+// many players as fit and scrolling only when even that overflows — while the BOARD is
+// scaled to fit the height of ITS OWN column, centered. This is the fix for "short/narrow
+// desktop windows kept huge top/bottom padding": the board is a fixed-aspect block, so on
+// a window taller than it can fill (its width caps how tall it gets) it used to center the
+// whole board+rail unit, stranding dead vertical space above and below. Now the rail eats
+// that height (more players, less scrolling) and only the board centers in its column,
+// with a small BOARD_INSET of breathing room — the "minimum padding to look good", nothing
+// extra. The scale is a CSS transform on the board wrapper, bounded by its COLUMN's inner
+// width and height (so it never clips the column), capped at MAX_SCALE (big-monitor
+// scale-up) and floored at MIN_SCALE (below which a rare ultra-short window scrolls rather
+// than rendering illegibly). offsetWidth/Height read the *unscaled* box (transforms don't
+// affect them), so measuring the very element we scale is loop-free; a ResizeObserver on
+// the wrapper AND its column re-measures on board changes (rows → solved bars) and resizes.
+// Keep DESKTOP_BP in sync with the `min-[800px]:` class literals (components/roster/season)
+// — this is the JS mirror of the same wide-layout breakpoint.
 const DESKTOP_BP = 800;
 const MAX_SCALE = 1.5;
-// Floor for the wide-layout shrink: below this the board would read too small / its
-// text too fine, so we stop scaling and let the (rare) ultra-short window scroll.
+// Floor for the wide-layout shrink: below this the board would read too small / its text
+// too fine, so we stop scaling and let the (rare) ultra-short window scroll.
 const MIN_SCALE = 0.62;
-// Breathing room around the scaled board: a FIXED gutter per edge, not a viewport
-// fraction. This used to be a 0.75 fill ("proportionally bigger gutters on bigger
-// screens"), but on monitors big enough for proportional margins to look deliberate
-// it's MAX_SCALE that binds, not the fraction — the fraction only ever bit on the
-// smaller windows (Discord's wide-but-short desktop window especially), where it
-// stranded 12.5% of every edge precisely when space was scarcest (~180px of dead
-// height on a 1200×600 window). Fixed gutters spend that space on the board: with the
-// wide-layout --tile-h fixed, the board has one natural height, and the scale factor
-// (computed from it) fills the window down to MIN_SCALE — uniform shrink, intact aspect.
-// GUTTER is the HORIZONTAL breathing room (only binds on narrow-but-tall windows). The
-// VERTICAL gutter is sacrificed first when height is scarce — see vGutter() — because
-// on a short window the top/bottom padding should collapse before the board does.
-const GUTTER = 28;
-// Vertical margin per edge: a small fraction of the viewport so a short window spends
-// its height on the board rather than padding (the desktop #app zeroes its own vertical
-// padding so this gutter is the ONLY wide-layout vertical margin). Capped at GUTTER so a
-// tall window still tops out at the same comfortable 28px, floored so the board never
-// kisses the edge. Shrinks ~immediately as the window shortens: at 1000px → 28, 600px →
-// 18, 420px → ~13, 320px → 10.
-const vGutter = (h: number): number => Math.min(GUTTER, Math.max(10, h * 0.03));
+// Minimal breathing room (per edge) between the board and its column's edges — the
+// "minimum padding to look good"; every other px of the column is spent on the board.
+const BOARD_INSET = 12;
 
+// Scales `ref` (the board wrapper) to fit its parent column. Returns 1 below DESKTOP_BP
+// (single column owns its own sizing) so mobile never gets a transform.
 function useScaleToFit(ref: RefObject<HTMLElement | null>): number {
   const [scale, setScale] = useState(1);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const measure = (): void => {
-      if (window.innerWidth < DESKTOP_BP) {
+      const col = el.parentElement;
+      if (window.innerWidth < DESKTOP_BP || !col) {
         setScale(1);
         return;
       }
       const natW = el.offsetWidth;
       const natH = el.offsetHeight;
-      if (!natW || !natH) return;
-      const fitW = (window.innerWidth - GUTTER * 2) / natW;
-      const fitH = (window.innerHeight - vGutter(window.innerHeight) * 2) / natH;
-      const next = Math.min(fitW, fitH, MAX_SCALE);
+      const availW = col.clientWidth - BOARD_INSET * 2;
+      const availH = col.clientHeight - BOARD_INSET * 2;
+      if (!natW || !natH || availW <= 0 || availH <= 0) return;
+      const next = Math.min(availW / natW, availH / natH, MAX_SCALE);
       setScale(next < MIN_SCALE ? MIN_SCALE : next);
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    if (el.parentElement) ro.observe(el.parentElement);
     window.addEventListener("resize", measure);
     return () => {
       ro.disconnect();
@@ -410,39 +395,50 @@ export function GameView({
     // padding (--sait) − its bottom safe-area padding; mirror index.html's #app classes)
     // so the column anchors to the top instead of #app's [&>*]:my-auto centering it —
     // which, with a short roster, stranded a big gap above the board. The players
-    // column then flex-grows into that space (see below). Desktop resets to content
-    // height so the board stays vertically centered in the wide window.
-    <div
-      ref={scaleRef}
-      // transform-origin defaults to center, so the board grows symmetrically and
-      // stays centered (matching #app's auto-margin centering). scale(1) is omitted
-      // so mobile never gets a needless containing block from the transform.
-      style={scale !== 1 ? { transform: `scale(${scale})` } : undefined}
-      className="mx-auto flex min-h-[calc(100dvh_-_var(--sait)_-_max(1.5rem,var(--saib)))] w-full max-w-[480px] animate-fade-in flex-col gap-3 min-[800px]:min-h-0 min-[800px]:max-w-[860px] min-[800px]:flex-row min-[800px]:items-stretch min-[800px]:gap-6"
-    >
+    // column then flex-grows into that space (see below). Desktop FILLS the viewport
+    // height (#app zeroes its desktop vertical padding) so the rail fills it and there's
+    // no dead top/bottom padding; the board scales to fit its own column (useScaleToFit).
+    <div className="mx-auto flex min-h-[calc(100dvh_-_var(--sait)_-_max(1.5rem,var(--saib)))] w-full max-w-[480px] animate-fade-in flex-col gap-3 min-[800px]:min-h-[100dvh] min-[800px]:max-w-[940px] min-[800px]:flex-row min-[800px]:items-stretch min-[800px]:gap-6">
       {/* main column — board + footer. No header on mobile: Discord shows its own
           activity header there, so we hide ours; #app's pt-[--sait] already clears
           that bar, so no extra top padding here. The header sits atop the players rail
-          on desktop instead (below). */}
-      <div className="flex w-full min-w-0 flex-col gap-3 min-[800px]:flex-1">
-        <Board
-          key={gameKey}
-          game={game}
-          onPresence={onPresence}
-          onCommit={onCommit}
-          onFinish={() => {
-            setView("live");
-            setDone(true);
-            onFinish();
-          }}
-          initialRevealed={initialRevealed}
-        />
+          on desktop instead (below). Desktop: flex-1 (takes the width the fixed rail
+          leaves) and centers the scaled board wrapper within its full-height column. */}
+      <div className="flex w-full min-w-0 flex-col gap-3 min-[800px]:flex-1 min-[800px]:items-center min-[800px]:justify-center min-[800px]:gap-0">
+        <div
+          ref={scaleRef}
+          // transform-origin defaults to center, so the board grows symmetrically and
+          // stays centered in its column. scale(1) is omitted so mobile never gets a
+          // needless containing block from the transform. Desktop caps the board's
+          // natural width (so it has room to scale UP) but never exceeds the column.
+          style={scale !== 1 ? { transform: `scale(${scale})` } : undefined}
+          className="w-full min-[800px]:w-[340px] min-[800px]:max-w-full"
+        >
+          <Board
+            key={gameKey}
+            game={game}
+            onPresence={onPresence}
+            onCommit={onCommit}
+            onFinish={() => {
+              setView("live");
+              setDone(true);
+              onFinish();
+            }}
+            initialRevealed={initialRevealed}
+          />
+        </div>
       </div>
 
       {/* players column — mobile flex-grows into the freed vertical space (list fills +
-          scrolls internally); desktop rail absolute-fills to match the board's height */}
-      <div className="relative flex w-full min-w-0 flex-1 flex-col min-h-0">
-        <div className="flex min-h-0 flex-1 flex-col gap-2.5 min-[800px]:absolute min-[800px]:inset-0">
+          scrolls internally); desktop is a FIXED-width rail that fills the full viewport
+          height (absolute-fills its column), so it shows as many players as fit and
+          scrolls only when even that overflows — no longer matched to the short board. */}
+      <div className="relative flex w-full min-w-0 flex-1 flex-col min-h-0 min-[800px]:w-[380px] min-[800px]:flex-none">
+        {/* py-3 desktop: the rail fills the full-height column, so without it the header
+            would touch the top edge and the next-puzzle row the bottom edge of the
+            activity window. 12px matches the board's BOARD_INSET so the two columns'
+            content lines up and every viewport keeps a little breathing room. */}
+        <div className="flex min-h-0 flex-1 flex-col gap-2.5 min-[800px]:absolute min-[800px]:inset-0 min-[800px]:py-3">
           {header("hidden min-[800px]:flex")}
           <Roster
             players={players}

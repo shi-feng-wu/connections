@@ -90,6 +90,7 @@ async function fetchAllCards() {
 // only newly-seen guilds cost requests on the 30s auto-refresh.
 let botUserId = null; // the bot's own user id, fetched once
 const joinedAtByGuild = new Map(); // guild id -> 'YYYY-MM-DD' (absent = not fetched yet or last attempt failed)
+const guildNameById = new Map(); // guild id -> server name (from /users/@me/guilds; absent for servers the bot has left)
 async function fetchBotInstalls() {
   const token = process.env.DISCORD_BOT_TOKEN ?? '';
   if (!token) return null;
@@ -103,7 +104,10 @@ async function fetchBotInstalls() {
       if (!r.ok) return null;
       const page = await r.json();
       if (!Array.isArray(page) || page.length === 0) break;
-      for (const g of page) ids.add(g.id);
+      for (const g of page) {
+        ids.add(g.id);
+        if (g.name) guildNameById.set(g.id, g.name);
+      }
       if (page.length < 200) break;
       after = page[page.length - 1].id;
     }
@@ -435,7 +439,7 @@ function dur(ms) {
 function scopeLabel(scope) {
   if (!scope) return 'unknown';
   const tail = scope.slice(-4);
-  if (scope.startsWith('g:')) return 'Server ·' + tail;
+  if (scope.startsWith('g:')) return guildNameById.get(scope.slice(2)) || 'Server ·' + tail;
   if (scope.startsWith('c:')) return 'DM/Group ·' + tail;
   return scope;
 }

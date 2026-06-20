@@ -277,32 +277,39 @@ function Header({
 // rather than driving the layout taller. Season and All-time share one standings
 // table (different window); the end-screen locate arrow scrolls + pulses your row in
 // whichever tab is open.
-// Desktop "scale to fill". The board layout caps out at max-w-860px with 80px tiles
-// (--tile-h) and text frozen at its clamp ceilings, so on a big monitor it's a small
-// island floating in black. Rather than bump each ceiling (tile height, the three
-// text clamps, gaps, padding) in lockstep — which drifts the proportions apart — we
-// scale the whole GameView uniformly with a CSS transform, which preserves every
-// aspect ratio by construction. The factor is bounded by BOTH the viewport width and
-// height (so the scaled board never clips), capped at MAX_SCALE, and never below 1:
-// the sub-860px / mobile shrink is already handled by the layout's dvh/vw clamps, and
-// anything under DESKTOP_BP opts out entirely. offsetWidth/offsetHeight read the
-// *unscaled* layout box (CSS transforms don't affect them), so measuring the very
-// element we scale is both correct and loop-free — and a ResizeObserver re-measures
-// when the board's height changes (rows collapsing into solved bars).
-// Keep in sync with the `min-[800px]:` class literals (components/roster/season) —
-// this is the JS mirror of the same wide-layout breakpoint.
+// Desktop "scale to fit". The board layout caps out at max-w-860px with 80px tiles
+// (--tile-h, FIXED in the wide layout) and text frozen at its clamp ceilings, so on a
+// big monitor it's a small island floating in black, and on a wide-but-short window
+// (Discord's desktop activity especially) it's taller than the viewport. Rather than
+// bump each ceiling (tile height, the three text clamps, gaps, padding) in lockstep —
+// which drifts the proportions apart — we scale the whole GameView uniformly with a
+// CSS transform, which preserves every aspect ratio by construction (incl. the solved
+// bars, which would otherwise flatten). The factor is bounded by BOTH the viewport
+// width and height (so the scaled board never clips), capped at MAX_SCALE and floored
+// at MIN_SCALE. Scaling BELOW 1 is the whole point on short windows: a uniform shrink
+// keeps tiles/bars square instead of the dvh clamp squishing tile HEIGHT while the
+// width-driven text stays large (the flat-bar bug). Below MIN_SCALE we stop and let
+// the page scroll rather than shrink the text to illegibility. Anything under
+// DESKTOP_BP opts out entirely (single column; the dvh clamp + scroll handle it).
+// offsetWidth/offsetHeight read the *unscaled* layout box (CSS transforms don't affect
+// them), so measuring the very element we scale is both correct and loop-free — and a
+// ResizeObserver re-measures when the board's height changes (rows collapsing into
+// solved bars). Keep DESKTOP_BP in sync with the `min-[800px]:` class literals
+// (components/roster/season) — this is the JS mirror of the same wide-layout breakpoint.
 const DESKTOP_BP = 800;
 const MAX_SCALE = 1.5;
+// Floor for the wide-layout shrink: below this the board would read too small / its
+// text too fine, so we stop scaling and let the (rare) ultra-short window scroll.
+const MIN_SCALE = 0.62;
 // Breathing room around the scaled board: a FIXED gutter per edge, not a viewport
 // fraction. This used to be a 0.75 fill ("proportionally bigger gutters on bigger
 // screens"), but on monitors big enough for proportional margins to look deliberate
 // it's MAX_SCALE that binds, not the fraction — the fraction only ever bit on the
 // smaller windows (Discord's wide-but-short desktop window especially), where it
 // stranded 12.5% of every edge precisely when space was scarcest (~180px of dead
-// height on a 1200×600 window). Fixed gutters spend that space on the board, and on
-// short windows the scale-up they allow also wins back the height the (mobile-tuned)
-// --tile-h reserve shaves off: tiles shrink with dvh, the natural height drops, and
-// the scale factor — computed from that shrunken height — rises to refill the gap.
+// height on a 1200×600 window). Fixed gutters spend that space on the board: with the
+// wide-layout --tile-h fixed, the board has one natural height, and the scale factor
+// (computed from it) fills the window down to MIN_SCALE — uniform shrink, intact aspect.
 const GUTTER = 28;
 
 function useScaleToFit(ref: RefObject<HTMLElement | null>): number {
@@ -321,7 +328,7 @@ function useScaleToFit(ref: RefObject<HTMLElement | null>): number {
       const fitW = (window.innerWidth - GUTTER * 2) / natW;
       const fitH = (window.innerHeight - GUTTER * 2) / natH;
       const next = Math.min(fitW, fitH, MAX_SCALE);
-      setScale(next < 1 ? 1 : next);
+      setScale(next < MIN_SCALE ? MIN_SCALE : next);
     };
     measure();
     const ro = new ResizeObserver(measure);

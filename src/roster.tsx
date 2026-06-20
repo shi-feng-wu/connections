@@ -528,10 +528,10 @@ function RecapPrompt({ onAdd }: { onAdd: () => void }) {
         <div className="text-balance text-[12.5px] font-semibold leading-snug text-zinc-200">
           Get the daily recap here
         </div>
-        <div className="mt-0.5 text-balance text-[11.5px] leading-snug text-zinc-500">
+        <div className="mt-0.5 text-pretty text-[11.5px] leading-snug text-zinc-500">
           The day’s results and the leaderboard, posted at the nightly reset.
         </div>
-        <div className="mt-1 text-balance text-[10.5px] leading-snug text-zinc-600">
+        <div className="mt-1 text-pretty text-[10.5px] leading-snug text-zinc-600">
           Needs Manage Server, or ask an admin to run /enable-posts.
         </div>
       </div>

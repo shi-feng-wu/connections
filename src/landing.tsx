@@ -647,7 +647,7 @@ const riseDelay = (i: number): { animationDelay: string } => ({
 // Section heading, the game's display serif.
 function H2({ children }: { children: string }) {
   return (
-    <h2 className="font-display text-[28px] font-bold tracking-[-0.01em] text-[#efefe6]">
+    <h2 className="text-balance font-display text-[28px] font-bold tracking-[-0.01em] text-[#efefe6]">
       {children}
     </h2>
   );
@@ -683,13 +683,13 @@ export function Landing() {
       <section className="mt-14 grid items-center gap-12 min-[820px]:mt-20 min-[820px]:grid-cols-[1fr_minmax(0,420px)] min-[820px]:gap-14">
         <div className="flex flex-col items-start gap-6">
           <h1
-            className="animate-tab-in font-display text-[42px] font-bold leading-[1.04] tracking-[-0.015em] text-[#efefe6] min-[820px]:text-[54px]"
+            className="animate-tab-in text-balance font-display text-[42px] font-bold leading-[1.04] tracking-[-0.015em] text-[#efefe6] min-[820px]:text-[54px]"
             style={riseDelay(1)}
           >
             The daily Connections, played together.
           </h1>
           <p
-            className="max-w-[46ch] animate-tab-in font-sans text-[15px] leading-[1.75] text-zinc-400"
+            className="max-w-[46ch] animate-tab-in text-pretty font-sans text-[15px] leading-[1.75] text-zinc-400"
             style={riseDelay(2)}
           >
             Launch it in a Discord channel or call and everyone gets the same
@@ -716,7 +716,7 @@ export function Landing() {
             </a>
           </div>
           <p
-            className="max-w-[48ch] animate-tab-in font-sans text-[12.5px] leading-relaxed text-zinc-600"
+            className="max-w-[48ch] animate-tab-in text-pretty font-sans text-[12.5px] leading-relaxed text-zinc-600"
             style={riseDelay(4)}
           >
             Works as a user install too, but{" "}
@@ -736,12 +736,12 @@ export function Landing() {
         <DemoRoster />
         <div className="flex flex-col items-start gap-5 max-[819px]:-order-1">
           <H2>Watch the room race.</H2>
-          <p className="max-w-[48ch] font-sans text-[14px] leading-[1.8] text-zinc-400">
+          <p className="max-w-[48ch] text-pretty font-sans text-[14px] leading-[1.8] text-zinc-400">
             Everyone on today's puzzle shows up beside your board, their grids
             filling in guess by guess. Colors only, so nothing spoils. Finishers
             take a time and a rank while the rest of the room plays on.
           </p>
-          <p className="max-w-[48ch] font-sans text-[14px] leading-[1.8] text-zinc-400">
+          <p className="max-w-[48ch] text-pretty font-sans text-[14px] leading-[1.8] text-zinc-400">
             Wins feed monthly seasons and all-time standings kept per server:
             streaks, win rates, average mistakes. Only your first finish of the
             daily counts, so replays can't farm points.
@@ -752,7 +752,7 @@ export function Landing() {
       {/* The Discord cards, drawn by the bot's own renderer. */}
       <section className="mt-28 flex flex-col gap-5">
         <H2>It posts back to the channel.</H2>
-        <p className="max-w-[62ch] font-sans text-[14px] leading-[1.8] text-zinc-400">
+        <p className="max-w-[62ch] text-pretty font-sans text-[14px] leading-[1.8] text-zinc-400">
           A who's-playing card sits in the channel and live-edits as the room
           races; after the midnight-ET reset, a recap lands with yesterday's
           podium and the season so far. Both below are drawn in your browser by
@@ -761,13 +761,13 @@ export function Landing() {
         <div className="mt-2 grid items-start gap-10 min-[820px]:grid-cols-[5fr_7fr]">
           <div className="flex flex-col gap-3">
             <RosterCard />
-            <p className="font-sans text-[12.5px] text-zinc-600">
+            <p className="text-pretty font-sans text-[12.5px] text-zinc-600">
               Today's room, mid-race. Grids edit in as guesses commit.
             </p>
           </div>
           <div className="flex flex-col gap-3">
             <RecapCard />
-            <p className="font-sans text-[12.5px] text-zinc-600">
+            <p className="text-pretty font-sans text-[12.5px] text-zinc-600">
               The daily recap: yesterday's results beside the season standings.
             </p>
           </div>
@@ -775,7 +775,7 @@ export function Landing() {
       </section>
 
       <footer className="mt-28 flex flex-col gap-4 border-t border-white/10 pt-7 pb-2 min-[820px]:flex-row min-[820px]:items-center min-[820px]:justify-between">
-        <p className="max-w-[58ch] font-sans text-[12px] leading-relaxed text-zinc-600">
+        <p className="max-w-[58ch] text-pretty font-sans text-[12px] leading-relaxed text-zinc-600">
           A personal project, not affiliated with or endorsed by The New York
           Times. Puzzle content and the Connections name are NYT's.
         </p>

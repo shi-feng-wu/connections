@@ -105,15 +105,15 @@ export function LoadingScreen({
 }) {
   const inner = blocked ? (
     <>
-      <div className="text-sm font-medium text-zinc-300">Open in Discord to play.</div>
-      <div className="text-xs text-zinc-500">
+      <div className="text-balance text-sm font-medium text-zinc-300">Open in Discord to play.</div>
+      <div className="text-pretty text-xs text-zinc-500">
         Connections runs as a Discord Activity — launch it from a server or call.
       </div>
     </>
   ) : error ? (
     <>
-      <div className="text-sm font-medium text-zinc-300">Couldn’t load the puzzle.</div>
-      <div className="text-xs text-zinc-500">Check your connection and try again.</div>
+      <div className="text-balance text-sm font-medium text-zinc-300">Couldn’t load the puzzle.</div>
+      <div className="text-pretty text-xs text-zinc-500">Check your connection and try again.</div>
       <HoverButton
         type="button"
         onClick={onRetry}
@@ -141,7 +141,7 @@ export function LoadingScreen({
           <span className="font-sans text-[10px] font-bold tracking-[0.22em] text-[#a0c35a] uppercase">
             Tip
           </span>
-          <p className="max-w-[300px] font-sans text-[12.5px] leading-[1.7] text-zinc-400">
+          <p className="max-w-[300px] text-pretty font-sans text-[12.5px] leading-[1.7] text-zinc-400">
             Want the day’s results and the leaderboard posted here at every reset? Run{" "}
             <span className="rounded-[5px] bg-white/[0.06] px-[5px] py-px font-semibold text-zinc-300">
               /enable-posts

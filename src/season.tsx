@@ -191,10 +191,10 @@ export function StandingsEmpty({ window }: { window: "season" | "all" }) {
     // is fixed by the header/tabs/footer heights — independent of --tile-h).
     <div className="flex min-h-0 flex-1 animate-tab-in flex-col items-center justify-center gap-5 px-6 py-12 text-center min-[800px]:pt-0 min-[800px]:pb-[140px]">
       <div className="flex flex-col gap-1.5">
-        <h3 className="font-display text-[19px] font-semibold leading-tight tracking-[-0.01em] text-[#efefe6]">
+        <h3 className="text-balance font-display text-[19px] font-semibold leading-tight tracking-[-0.01em] text-[#efefe6]">
           First place is open
         </h3>
-        <p className="mx-auto max-w-[32ch] font-sans text-[13px] leading-[1.55] text-zinc-400">
+        <p className="mx-auto max-w-[32ch] text-pretty font-sans text-[13px] leading-[1.55] text-zinc-400">
           No scores on the {allTime ? "all-time" : "season"} board yet — finish
           today’s puzzle to put the first one up.
         </p>

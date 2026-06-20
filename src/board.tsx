@@ -193,7 +193,7 @@ function EndSummary({ game, note }: { game: Game; note?: string | null }) {
                   lines; "Solved"/"Perfect" never reach the cap, so they stay one. */}
               <span
                 className={
-                  "text-right text-[10px] font-semibold uppercase leading-tight tracking-[0.16em] max-[360px]:max-w-[4.5rem] " +
+                  "text-balance text-right text-[10px] font-semibold uppercase leading-tight tracking-[0.16em] max-[360px]:max-w-[4.5rem] " +
                   (won ? "text-emerald-400" : "text-zinc-400")
                 }
               >
@@ -247,7 +247,7 @@ function EndSummary({ game, note }: { game: Game; note?: string | null }) {
         role="status"
         aria-hidden={!showNote}
         className={
-          "absolute inset-0 flex items-center justify-center text-[12.5px] font-bold text-zinc-100 transition-opacity duration-300 ease-out " +
+          "absolute inset-0 flex items-center justify-center text-balance text-[12.5px] font-bold text-zinc-100 transition-opacity duration-300 ease-out " +
           (showNote ? "opacity-100" : "pointer-events-none opacity-0")
         }
       >
@@ -270,8 +270,8 @@ const TILE_TEXT = "block w-full text-center text-[clamp(9px,3vw,17px)]";
 // split, where 18px/16px crowded (and slightly overflowed) the four-line case.
 // Shared by the plain solved bar and the SpoilerBar so the two never drift.
 const BAR_CAT =
-  "font-extrabold uppercase tracking-tight text-[clamp(12px,3.4vw,16px)] leading-tight";
-const BAR_MEMBERS = "uppercase text-[clamp(10px,3vw,13px)] leading-tight";
+  "text-balance font-extrabold uppercase tracking-tight text-[clamp(12px,3.4vw,16px)] leading-tight";
+const BAR_MEMBERS = "text-balance uppercase text-[clamp(10px,3vw,13px)] leading-tight";
 
 // Tile word, auto-fitted to the tile like NYT Connections: short words render at the
 // responsive ceiling; a word that would touch the edges has its font scaled down

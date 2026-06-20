@@ -20,15 +20,16 @@
          Mobile/tablet top padding is exactly --sait — the Discord top-bar + notch
          clearance (index.css) — and no more: just enough that the native bar never
          overlaps the board, which on short viewports hands the freed space to the tiles
-         instead of squishing them. Desktop has no overlay bar (--sait≈0 there), so it
-         drops to pt-6: the same 24px as the bottom padding, keeping the vertical padding
-         SYMMETRIC — my-auto centers within the content box, so unequal padding would sit
-         the board off-center, a visible lean now that scale-to-fit fills short windows
-         to within ~28px. The 800px switch matches DESKTOP_BP / the min-[800px]: classes
-         in components.tsx — the wide layout's one breakpoint. Bottom padding grows to the
-         home-indicator safe area when the webview extends under it (viewport-fit=cover
-         above); GameView's mobile min-h calc mirrors both paddings — keep them in sync. -->
-    <div id="app" class="mx-auto flex min-h-dvh w-full max-w-[940px] flex-col px-4 pb-[max(1.5rem,var(--saib))] pt-[var(--sait)] min-[800px]:pt-6 [&>*]:my-auto"></div>
+         instead of squishing them. Desktop zeroes BOTH vertical paddings: the wide layout
+         has no overlay bar (--sait≈0) and its margin is owned entirely by GameView's
+         scale-to-fit, whose vertical gutter shrinks as the window shortens — so the board
+         spends scarce height on itself, not on padding. (A fixed pt/pb here would fight
+         that: it can't shrink, so it'd strand padding on short windows or force overflow.)
+         The 800px switch matches DESKTOP_BP / the min-[800px]: classes in components.tsx —
+         the wide layout's one breakpoint. Bottom padding grows to the home-indicator safe
+         area when the webview extends under it (viewport-fit=cover above); GameView's
+         mobile min-h calc mirrors both paddings — keep them in sync. -->
+    <div id="app" class="mx-auto flex min-h-dvh w-full max-w-[940px] flex-col px-4 pb-[max(1.5rem,var(--saib))] pt-[var(--sait)] min-[800px]:pt-0 min-[800px]:pb-0 [&>*]:my-auto"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

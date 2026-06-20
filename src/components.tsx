@@ -310,7 +310,17 @@ const MIN_SCALE = 0.62;
 // height on a 1200×600 window). Fixed gutters spend that space on the board: with the
 // wide-layout --tile-h fixed, the board has one natural height, and the scale factor
 // (computed from it) fills the window down to MIN_SCALE — uniform shrink, intact aspect.
+// GUTTER is the HORIZONTAL breathing room (only binds on narrow-but-tall windows). The
+// VERTICAL gutter is sacrificed first when height is scarce — see vGutter() — because
+// on a short window the top/bottom padding should collapse before the board does.
 const GUTTER = 28;
+// Vertical margin per edge: a small fraction of the viewport so a short window spends
+// its height on the board rather than padding (the desktop #app zeroes its own vertical
+// padding so this gutter is the ONLY wide-layout vertical margin). Capped at GUTTER so a
+// tall window still tops out at the same comfortable 28px, floored so the board never
+// kisses the edge. Shrinks ~immediately as the window shortens: at 1000px → 28, 600px →
+// 18, 420px → ~13, 320px → 10.
+const vGutter = (h: number): number => Math.min(GUTTER, Math.max(10, h * 0.03));
 
 function useScaleToFit(ref: RefObject<HTMLElement | null>): number {
   const [scale, setScale] = useState(1);
@@ -326,7 +336,7 @@ function useScaleToFit(ref: RefObject<HTMLElement | null>): number {
       const natH = el.offsetHeight;
       if (!natW || !natH) return;
       const fitW = (window.innerWidth - GUTTER * 2) / natW;
-      const fitH = (window.innerHeight - GUTTER * 2) / natH;
+      const fitH = (window.innerHeight - vGutter(window.innerHeight) * 2) / natH;
       const next = Math.min(fitW, fitH, MAX_SCALE);
       setScale(next < MIN_SCALE ? MIN_SCALE : next);
     };

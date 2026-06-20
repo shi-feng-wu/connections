@@ -398,13 +398,13 @@ export function GameView({
       // centered (matching #app's auto-margin centering). scale(1) is omitted so mobile
       // never gets a needless containing block from the transform.
       style={scale !== 1 ? { transform: `scale(${scale})` } : undefined}
-      className="mx-auto flex min-h-[calc(100dvh_-_var(--sait)_-_max(1.5rem,var(--saib)))] w-full max-w-[480px] animate-fade-in flex-col gap-3 min-[800px]:min-h-0 min-[800px]:max-w-[860px] min-[800px]:flex-row min-[800px]:items-stretch min-[800px]:gap-6"
+      className="mx-auto flex min-h-[calc(100dvh_-_max(0.75rem,var(--sait))_-_max(1.5rem,var(--saib)))] w-full max-w-[480px] animate-fade-in flex-col gap-3 min-[800px]:min-h-0 min-[800px]:max-w-[860px] min-[800px]:flex-row min-[800px]:items-stretch min-[800px]:gap-6"
     >
       {/* main column — board + footer. No header on mobile: Discord shows its own
-          activity header there, so we hide ours; #app's pt-[--sait] already clears that
-          bar, so no extra top padding here. The header sits atop the players rail on
-          desktop instead (below). Desktop: flex-1 — the board fills the left half, snug
-          against the rail. */}
+          activity header there, so we hide ours; #app's top padding (max(0.75rem,--sait))
+          already clears that bar — and floors at 12px when there's none — so no extra top
+          padding here. The header sits atop the players rail on desktop instead (below).
+          Desktop: flex-1 — the board fills the left half, snug against the rail. */}
       <div className="flex w-full min-w-0 flex-col gap-3 min-[800px]:flex-1">
         <Board
           key={gameKey}

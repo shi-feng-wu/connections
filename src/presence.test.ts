@@ -28,10 +28,10 @@ describe("presenceSignature", () => {
 });
 
 describe("buildActivity", () => {
-  it("shows puzzle number, progress, and a live timer while playing", () => {
+  it("shows the Wordle-style headline, progress, and a live timer while playing", () => {
     const a = buildActivity({ ...base, solvedCount: 2, mistakesLeft: 3 });
     expect(a.type).toBe(0);
-    expect(a.details).toBe("Puzzle #123");
+    expect(a.details).toBe("Solving today's puzzle.");
     expect(a.state).toBe("2/4 groups · 3 mistakes left");
     expect(a.timestamps?.start).toBe(Math.floor(base.joinedAt / 1000));
     // the large image rides on VITE_RP_ICON_URL, which is unset here (and in any
@@ -57,7 +57,15 @@ describe("buildActivity", () => {
     expect(a.timestamps).toBeUndefined();
   });
 
-  it("falls back to 'Daily puzzle' when the number is unknown", () => {
-    expect(buildActivity({ ...base, puzzleNo: undefined }).details).toBe("Daily puzzle");
+  it("keeps the Wordle headline while playing, regardless of the number", () => {
+    expect(buildActivity({ ...base, puzzleNo: undefined }).details).toBe(
+      "Solving today's puzzle.",
+    );
+  });
+
+  it("falls back to 'Daily puzzle' on a finished game with no number", () => {
+    expect(buildActivity({ ...base, status: "won", puzzleNo: undefined }).details).toBe(
+      "Daily puzzle",
+    );
   });
 });

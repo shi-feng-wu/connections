@@ -48,7 +48,11 @@ export function presenceSignature(p: PresenceInput): string {
 // playing; once finished it's cleared (timestamps undefined) and the result line
 // carries the time instead. Exported for unit tests.
 export function buildActivity(p: PresenceInput) {
-  const details = p.puzzleNo ? `Puzzle #${p.puzzleNo}` : "Daily puzzle";
+  // Line 1 — the subtitle Discord shows on the activity card and in "Active Now".
+  // Mirror Wordle's static "Solving today's puzzle." while a game is in progress;
+  // once it's done, surface the puzzle number instead.
+  const puzzle = p.puzzleNo ? `Puzzle #${p.puzzleNo}` : "Daily puzzle";
+  const details = p.status === "playing" ? "Solving today's puzzle." : puzzle;
 
   let state: string;
   if (p.status === "won") {

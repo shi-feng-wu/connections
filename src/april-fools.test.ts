@@ -144,6 +144,39 @@ describe("April Fools puzzles", () => {
     expect(puzzle.images).toBeUndefined();
   });
 
+  it("mixed board (mostly text + one image card, e.g. #1028) parses per-card", async () => {
+    // NYT also ships boards with a single image card among text (2026-03-07: the
+    // Connections-logo "THIS GAME"). The image map should hold only that card.
+    const RAW_MIXED = {
+      status: "OK",
+      id: 1028,
+      print_date: "2026-03-07",
+      editor: "Wyna Liu",
+      categories: [
+        { title: "$1", cards: [
+          { content: "BUCK", position: 8 }, { content: "DOLLAR", position: 15 },
+          { content: "ONE", position: 0 }, { content: "SINGLE", position: 6 } ] },
+        { title: "ROMEO", cards: [
+          { content: "ART", position: 9 }, { content: "ROMEO", position: 7 },
+          { content: "THOU", position: 1 }, { content: "WHEREFORE", position: 13 } ] },
+        { title: "CASTLE", cards: [
+          { content: "BOUNCY", position: 10 }, { content: "NEW", position: 4 },
+          { content: "SAND", position: 2 }, { content: "WHITE", position: 12 } ] },
+        { title: "CONNECT", cards: [
+          { position: 3, image_url: "https://x/logo.svg", image_alt_text: "THIS GAME" },
+          { content: "AIRPORT", position: 11 }, { content: "DATING APP", position: 5 },
+          { content: "INTERNET CAFE", position: 14 } ] },
+      ],
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => okResponse(RAW_MIXED)));
+    const puzzle = await fetchPuzzle("2026-03-07", null);
+    expectPlayableBoard(puzzle);
+    expect(Object.keys(puzzle.images ?? {})).toEqual(["THIS GAME"]); // only the image card
+    expect(puzzle.layout[3]).toBe("THIS GAME");
+    const { last } = playToWin(puzzle, "2026-03-07");
+    expect(last).toBe("win");
+  });
+
   it("rejects an unparseable board (blank/duplicate cards) instead of serving it", async () => {
     // A card with neither content nor image_alt_text → a blank, unselectable tile.
     // Under the old parser this was served as 200 OK; now it 404s like a missing date.

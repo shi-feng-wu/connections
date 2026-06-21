@@ -69,14 +69,36 @@ const puzzle: Puzzle = {
   ],
 };
 
-// April-Fools image puzzle (NYT #672, 2025-04-01): every card is an SVG glyph, not
-// text. Real NYT asset URLs; the dev /api/card-image proxy (vite.config.ts) fetches
-// them so the harness renders the actual glyphs. Exercises the image-card render path
-// (tiles, solved bars, spoiler) end to end through the real Board.
+// Image-card puzzles: NYT periodically ships boards where cards are SVG art instead
+// of text — April Fools glyphs (2025-04-01), but also illustration puzzles (Halloween
+// 2025-10-31, "objects with teeth" 2024-12-12, …) and even a MIXED board with a single
+// image card (2026-03-07). All are monochrome black line-art, so they render on the
+// light/colored faces and invert to white on the dark selected tile. Real NYT URLs,
+// fetched via the dev /api/card-image proxy (vite.config.ts); spec rows are
+// [position, word, imageUrl|null] (null = a plain text card, for the mixed case).
 const G = "https://games-assets.storage.googleapis.com/images/connections/";
 const S3 =
   "https://games-phoenix-assets-prd.s3.us-east-1.amazonaws.com/images/connections/";
-const aprilSpec: { cat: string; cards: [number, string, string][] }[] = [
+type ImgSpec = { cat: string; cards: [number, string, string | null][] }[];
+function makeImagePuzzle(id: number, date: string, spec: ImgSpec): Puzzle {
+  const layout: string[] = new Array(16);
+  const images: Record<string, string> = {};
+  for (const grp of spec)
+    for (const [pos, word, url] of grp.cards) {
+      layout[pos] = word;
+      if (url) images[word] = url;
+    }
+  return {
+    id,
+    date,
+    editor: "Wyna Liu",
+    groups: spec.map((g, level) => ({ level, category: g.cat, members: g.cards.map((c) => c[1]) })),
+    layout,
+    images: Object.keys(images).length ? images : undefined,
+  };
+}
+
+const aprilSpec: ImgSpec = [
   { cat: "CURRENCY SYMBOLS", cards: [
     [9, "$", G + "img-672-1741385500318.svg"], [7, "€", G + "img-672-1741385405264.svg"],
     [12, "£", G + "img-672-1741385535485.svg"], [15, "¥", G + "img-672-1741385550960.svg"] ] },
@@ -90,25 +112,18 @@ const aprilSpec: { cat: string; cards: [number, string, string][] }[] = [
     [14, "R", G + "img-672-1741385546677.svg"], [8, "→", G + "img-672-1741385493388.svg"],
     [0, "⊾", S3 + "img-672-1769525276972.svg"], [13, "✔", G + "img-672-1741385542012.svg"] ] },
 ];
-const aprilLayout: string[] = new Array(16);
-const aprilImages: Record<string, string> = {};
-for (const grp of aprilSpec)
-  for (const [pos, alt, url] of grp.cards) {
-    aprilLayout[pos] = alt;
-    aprilImages[alt] = url;
-  }
-const aprilPuzzle: Puzzle = {
-  id: 672,
-  date: "2025-04-01",
-  editor: "Wyna Liu",
-  groups: aprilSpec.map((g, level) => ({
-    level,
-    category: g.cat,
-    members: g.cards.map((c) => c[1]),
-  })),
-  layout: aprilLayout,
-  images: aprilImages,
-};
+const aprilPuzzle = makeImagePuzzle(672, "2025-04-01", aprilSpec);
+
+// Halloween 2025-10-31 #895: detailed line-art illustrations (a chair, a pumpkin, …)
+// — the case that stresses tile/bar image sizing the most (vs. the bold April glyphs).
+const halloweenSpec = [{"cat":"GOLDILOCKS","cards":[[8,"CHAIR",G+"img-895-1757706910364.svg"],[5,"BEAR",G+"img-895-1757706874238.svg"],[13,"PORRIDGE",G+"img-895-1757707251392.svg"],[3,"BED",G+"img-895-1757705840981.svg"]]},{"cat":"CINDERELLA","cards":[[15,"WAND",G+"img-895-1757707281139.svg"],[1,"PUMPKIN",G+"img-895-1757706798830.svg"],[6,"MOUSE",G+"img-895-1757705860939.svg"],[10,"SLIPPER",G+"img-895-1757707309688.svg"]]},{"cat":"POPEYE","cards":[[12,"PIPE",G+"img-895-1757707234261.svg"],[4,"ANCHOR",G+"img-895-1757706858499.svg"],[14,"SPINACH",G+"img-895-1757707269194.svg"],[11,"CAP",G+"img-895-1757705893678.svg"]]},{"cat":"MS. PAC-MAN","cards":[[0,"GHOST",G+"img-895-1757706782308.svg"],[9,"PELLETS",G+"img-895-1758821529822.svg"],[2,"BOW",G+"img-895-1757706839069.svg"],[7,"CHERRIES",G+"img-895-1757706896339.svg"]]}] as ImgSpec;
+const halloweenPuzzle = makeImagePuzzle(895, "2025-10-31", halloweenSpec);
+
+// Mixed 2026-03-07 #1028: 15 text cards + ONE image card ("THIS GAME"). Exercises the
+// per-card fallback — that tile renders the image while its solved bar (not all four
+// members have images) shows plain text.
+const mixedSpec = [{"cat":"$1","cards":[[8,"BUCK",null],[15,"DOLLAR",null],[0,"ONE",null],[6,"SINGLE",null]]},{"cat":'"WHEREFORE ART THOU ROMEO?"',"cards":[[9,"ART",null],[7,"ROMEO",null],[1,"THOU",null],[13,"WHEREFORE",null]]},{"cat":'WORDS BEFORE "CASTLE"',"cards":[[10,"BOUNCY",null],[4,"NEW",null],[2,"SAND",null],[12,"WHITE",null]]},{"cat":"WHERE YOU MIGHT MAKE A CONNECTION","cards":[[3,"THIS GAME",S3+"img-1028-1769015007651.svg"],[11,"AIRPORT",null],[5,"DATING APP",null],[14,"INTERNET CAFE",null]]}] as ImgSpec;
+const mixedPuzzle = makeImagePuzzle(1028, "2026-03-07", mixedSpec);
 
 const solveGroup = (g: Game, members: string[]): void => {
   g.clear();
@@ -153,6 +168,22 @@ april.toggle("+");
 // Same puzzle, won, so the end-screen spoiler/solved bars render their glyph rows.
 const aprilWon = new Game(aprilPuzzle);
 for (const g of aprilPuzzle.groups) solveGroup(aprilWon, g.members);
+
+// Halloween illustration puzzle: one group solved (solved bar of illustrations) + two
+// tiles selected (invert check on detailed line-art), and a won state for all four bars.
+const halloween = new Game(halloweenPuzzle);
+solveGroup(halloween, halloweenPuzzle.groups[0].members);
+halloween.toggle("WAND");
+halloween.toggle("PUMPKIN");
+const halloweenWon = new Game(halloweenPuzzle);
+for (const g of halloweenPuzzle.groups) solveGroup(halloweenWon, g.members);
+
+// Mixed puzzle in progress: the image card ("THIS GAME") sits among text tiles; one
+// text group solved so a plain text bar shows beside the image tile.
+const mixed = new Game(mixedPuzzle);
+solveGroup(mixed, mixedPuzzle.groups[0].members);
+mixed.toggle("THIS GAME");
+mixed.toggle("AIRPORT");
 
 // mock room for the roster sidebar
 const NOW = Date.now();
@@ -1103,6 +1134,9 @@ const STATES = [
   <State key="l" label="Results · lost" game={lost} revealed={[2, 3]} />,
   <State key="ap" label="April · image puzzle · in progress" game={april} />,
   <State key="apw" label="April · image puzzle · won" game={aprilWon} />,
+  <State key="hw" label="Halloween · image puzzle · in progress" game={halloween} />,
+  <State key="hww" label="Halloween · image puzzle · won" game={halloweenWon} />,
+  <State key="mx" label="Mixed · image puzzle · in progress" game={mixed} />,
 ];
 const pick = decodeURIComponent(location.hash.slice(1)).toLowerCase();
 const known = [
@@ -1111,6 +1145,9 @@ const known = [
   "won",
   "lost",
   "april",
+  "halloween",
+  "mixed",
+  "image",
   "loading",
   "error",
   "blocked",
@@ -1263,6 +1300,9 @@ const FILTERS = [
   "won",
   "lost",
   "april",
+  "halloween",
+  "mixed",
+  "image",
   "loading",
   "error",
   "blocked",

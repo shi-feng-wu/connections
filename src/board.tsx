@@ -345,7 +345,7 @@ function TileFace({ word, src, selected }: { word: string; src?: string; selecte
       src={cardImageSrc(src)}
       alt={word}
       draggable={false}
-      className={"pointer-events-none h-[46%] w-[62%] object-contain" + (selected ? " invert" : "")}
+      className={"pointer-events-none h-[60%] w-[72%] object-contain" + (selected ? " invert" : "")}
     />
   );
 }

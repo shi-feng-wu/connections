@@ -45,23 +45,30 @@ describe("buildActivity", () => {
     );
   });
 
-  it("collapses to a single result line and freezes the timer on a win", () => {
+  it("collapses to a single result line (state only, no headline) on a win", () => {
     const a = buildActivity({ ...base, solvedCount: 4, status: "won", durationMs: 272_000 });
-    expect(a.details).toBe("Solved in 4:32");
-    expect(a.state).toBeUndefined();
+    expect(a.state).toBe("Solved in 4:32");
+    expect(a.details).toBeUndefined();
     expect(a.timestamps).toBeUndefined();
   });
 
-  it("collapses to a single result line on a loss", () => {
+  it("collapses to a single result line (state only, no headline) on a loss", () => {
     const a = buildActivity({ ...base, solvedCount: 2, status: "lost", mistakesLeft: 0 });
-    expect(a.details).toBe("2/4 solved · out of guesses");
-    expect(a.state).toBeUndefined();
+    expect(a.state).toBe("2/4 solved · out of guesses");
+    expect(a.details).toBeUndefined();
     expect(a.timestamps).toBeUndefined();
+  });
+
+  it("always sets a state line — Discord needs it to render the card at all", () => {
+    for (const status of ["playing", "won", "lost"] as const) {
+      expect(buildActivity({ ...base, status, durationMs: 30_000 }).state).toBeTruthy();
+    }
   });
 
   it("never puts the puzzle number on the card", () => {
     for (const status of ["playing", "won", "lost"] as const) {
-      expect(buildActivity({ ...base, status, durationMs: 30_000 }).details).not.toContain("#");
+      const a = buildActivity({ ...base, status, durationMs: 30_000 });
+      expect(`${a.details ?? ""} ${a.state}`).not.toContain("#");
     }
   });
 });

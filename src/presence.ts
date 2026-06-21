@@ -49,36 +49,43 @@ export function presenceSignature(p: PresenceInput): string {
 // playing; once finished it's cleared (timestamps undefined) and the result line
 // carries the time instead. Exported for unit tests.
 export function buildActivity(p: PresenceInput) {
-  // The card shows at most two short lines then the player icons — no puzzle number,
-  // which only made it taller.
-  //   details (line 1) — the status headline: "Solving today's puzzle." mid-game, the
-  //     result once finished.
-  //   state (line 2)   — this player's live progress, shown only while playing (so a
-  //     finished card collapses to a single line).
-  let details: string;
-  let state: string | undefined;
+  // The activity card builds its text block from `state`, so `state` is ALWAYS set —
+  // it's the status line. `details` is an optional headline shown only while playing;
+  // a finished game is a single `state` line (no puzzle number, which made it too tall).
+  // (Leaving `state` empty makes Discord render just the bare app name — that's the bug
+  // that hid the finished card.)
+  let details: string | undefined;
+  let state: string;
   if (p.status === "won") {
-    details = `Solved in ${fmtDuration(p.durationMs ?? 0)}`;
+    state = `Solved in ${fmtDuration(p.durationMs ?? 0)}`;
   } else if (p.status === "lost") {
-    details = `${p.solvedCount}/${p.total} solved · out of guesses`;
+    state = `${p.solvedCount}/${p.total} solved · out of guesses`;
   } else {
     details = "Solving today's puzzle.";
     const left = p.mistakesLeft;
     state = `${p.solvedCount}/${p.total} groups · ${left} ${left === 1 ? "mistake" : "mistakes"} left`;
   }
 
-  return {
-    type: 0,
-    details,
-    state,
-    // Live "for MM:SS" only mid-game, counting from when this player joined this
-    // session; undefined when done so the timer freezes.
-    timestamps:
-      p.status === "playing" ? { start: Math.floor(p.joinedAt / 1000) } : undefined,
-    assets: ICON_URL
-      ? { large_image: ICON_URL, large_text: "NYT Connections" }
-      : undefined,
-  };
+  // Attach only the keys we actually use. A present-but-undefined optional field can
+  // make the Discord client drop the presence, so build incrementally rather than
+  // spreading `undefined`s.
+  const activity: {
+    type: number;
+    state: string;
+    details?: string;
+    timestamps?: { start: number };
+    assets?: { large_image: string; large_text: string };
+  } = { type: 0, state };
+  if (details) activity.details = details;
+  // Live "for MM:SS" only mid-game, counting from when this player joined this
+  // session; omitted once done so the timer freezes.
+  if (p.status === "playing") {
+    activity.timestamps = { start: Math.floor(p.joinedAt / 1000) };
+  }
+  if (ICON_URL) {
+    activity.assets = { large_image: ICON_URL, large_text: "NYT Connections" };
+  }
+  return activity;
 }
 
 // Push the current game state to the profile card. Swallows everything: if the SDK

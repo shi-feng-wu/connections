@@ -9,6 +9,10 @@ export type Puzzle = {
   editor: string;
   groups: Group[];
   layout: string[]; // 16 words in the official board order
+  // Word → image URL for the April-Fools image-card format (e.g. 2025-04-01),
+  // where each card is an SVG glyph rather than text. Absent on normal puzzles.
+  // The word (a card's image_alt_text) stays the identity; this is render-only.
+  images?: Record<string, string>;
 };
 
 export type SubmitResult =

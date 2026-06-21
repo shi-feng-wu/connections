@@ -28,7 +28,7 @@ describe("presenceSignature", () => {
 });
 
 describe("buildActivity", () => {
-  it("shows the Wordle-style headline, progress, and a live timer while playing", () => {
+  it("shows the headline, live progress, and a timer while playing", () => {
     const a = buildActivity({ ...base, solvedCount: 2, mistakesLeft: 3 });
     expect(a.type).toBe(0);
     expect(a.details).toBe("Solving today's puzzle.");
@@ -45,27 +45,23 @@ describe("buildActivity", () => {
     );
   });
 
-  it("freezes the timer and shows solve time on a win", () => {
+  it("collapses to a single result line and freezes the timer on a win", () => {
     const a = buildActivity({ ...base, solvedCount: 4, status: "won", durationMs: 272_000 });
-    expect(a.state).toBe("Solved in 4:32");
+    expect(a.details).toBe("Solved in 4:32");
+    expect(a.state).toBeUndefined();
     expect(a.timestamps).toBeUndefined();
   });
 
-  it("shows partial progress and no timer on a loss", () => {
+  it("collapses to a single result line on a loss", () => {
     const a = buildActivity({ ...base, solvedCount: 2, status: "lost", mistakesLeft: 0 });
-    expect(a.state).toBe("2/4 solved · out of guesses");
+    expect(a.details).toBe("2/4 solved · out of guesses");
+    expect(a.state).toBeUndefined();
     expect(a.timestamps).toBeUndefined();
   });
 
-  it("keeps the Wordle headline while playing, regardless of the number", () => {
-    expect(buildActivity({ ...base, puzzleNo: undefined }).details).toBe(
-      "Solving today's puzzle.",
-    );
-  });
-
-  it("falls back to 'Daily puzzle' on a finished game with no number", () => {
-    expect(buildActivity({ ...base, status: "won", puzzleNo: undefined }).details).toBe(
-      "Daily puzzle",
-    );
+  it("never puts the puzzle number on the card", () => {
+    for (const status of ["playing", "won", "lost"] as const) {
+      expect(buildActivity({ ...base, status, durationMs: 30_000 }).details).not.toContain("#");
+    }
   });
 });

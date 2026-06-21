@@ -13,9 +13,14 @@ export type Puzzle = {
   editor: string;
   groups: Group[];
   layout: string[];
+  // Word → image URL, only for the April-Fools "image puzzle" format (e.g.
+  // 2025-04-01), whose cards are SVG glyphs instead of text. Absent on normal
+  // text puzzles, so those cache exactly as before. The client renders these
+  // through the same-origin /api/card-image proxy (Discord-iframe CSP safe).
+  images?: Record<string, string>;
 };
 
-type RawCard = { content: string; position: number };
+type RawCard = { content?: string; image_url?: string; image_alt_text?: string; position: number };
 type RawCategory = { title: string; cards: RawCard[] };
 type RawPuzzle = {
   status: string;
@@ -74,19 +79,44 @@ export async function fetchPuzzle(dateStr: string, dbOverride?: SupabaseClient |
     throw new Error('NOT_FOUND');
   }
 
+  // A card's text/identity: normal puzzles carry it in `content`; the April-Fools
+  // image format (e.g. 2025-04-01) omits `content` and puts the glyph in
+  // image_alt_text ("$", "&", "→"). Using that as the word keeps the card a plain
+  // string everywhere downstream (board dedup, Set/Map identity, server replay,
+  // presence, scoring) — only the board UI cares that an image exists.
+  const cardText = (c: RawCard): string => (c.content ?? c.image_alt_text ?? '').trim();
+
   const groups: Group[] = raw.categories.map((cat, level) => ({
     level,
     category: cat.title,
-    members: cat.cards.map((c) => c.content),
+    members: cat.cards.map(cardText),
   }));
   const layout: string[] = new Array(16);
+  const images: Record<string, string> = {};
   raw.categories.forEach((cat) =>
     cat.cards.forEach((card) => {
-      layout[card.position] = card.content;
+      const word = cardText(card);
+      layout[card.position] = word;
+      if (card.image_url) images[word] = card.image_url;
     }),
   );
 
+  // Reject anything that isn't a real, playable board before caching/serving it: 16
+  // distinct, non-empty cards filling every slot 0–15. This is what catches the image
+  // format under the old parser (cards had no `content`, so every word was undefined —
+  // a blank, unselectable board served as 200 OK and pinned in L2) and any future shape
+  // that would collapse to duplicate/empty tiles the Game model can't distinguish.
+  const allWords = groups.flatMap((g) => g.members);
+  const dense = Array.from({ length: 16 }, (_, i) => layout[i]); // materialize holes as undefined
+  const playable =
+    allWords.length === 16 &&
+    new Set(allWords).size === 16 &&
+    allWords.every((w) => w.length > 0) &&
+    dense.every((w) => typeof w === 'string' && w.length > 0);
+  if (!playable) throw new Error('NOT_FOUND');
+
   const puzzle: Puzzle = { id: raw.id, date: raw.print_date, editor: raw.editor, groups, layout };
+  if (Object.keys(images).length) puzzle.images = images;
   cache.set(dateStr, puzzle);
   // Persist to L2 best-effort — the caller already holds a valid puzzle and L1 covers this
   // instance, so a write hiccup must never fail the fetch. Keyed by the requested dateStr

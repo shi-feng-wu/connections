@@ -328,6 +328,58 @@ function FitText({ text }: { text: string }) {
     </span>
   );
 }
+
+// April-Fools "image puzzle" support (e.g. 2025-04-01): some cards are SVG glyphs,
+// not text. The word stays the card's identity everywhere; only these faces render
+// the image. Routed through the same-origin /api/card-image proxy so it loads inside
+// Discord's iframe CSP (external NYT hosts are blocked there) and in a plain browser.
+const cardImageSrc = (url: string): string => `/api/card-image?u=${encodeURIComponent(url)}`;
+
+// One tile's face: the card image if this word has one, else the auto-fit word. The
+// glyph SVGs are bare black paths, so they read on the light/colored faces as-is and
+// invert to white on the dark selected tile — matching NYT.
+function TileFace({ word, src, selected }: { word: string; src?: string; selected: boolean }) {
+  if (!src) return <FitText text={word} />;
+  return (
+    <img
+      src={cardImageSrc(src)}
+      alt={word}
+      draggable={false}
+      className={"pointer-events-none h-[46%] w-[62%] object-contain" + (selected ? " invert" : "")}
+    />
+  );
+}
+
+// The four answers on a solved/spoiler bar: a row of glyph images for an image
+// puzzle (NYT shows the images there too), else the plain comma-joined words. A
+// solved bar spans the full board width, so its category always fits one line —
+// leaving room to size the glyphs up well above the tiny BAR_MEMBERS text and set
+// them in equal cells so the row reads as an even, deliberate strip (a bare h-auto
+// row leaves wide glyphs like → crowding their neighbors). Every dimension (cell
+// size, gap, top offset) is a fraction of the bar height (--tile-h), NOT the
+// viewport — so the strip keeps the same proportions, and the same balance against
+// the title, on mobile and desktop alike (both pin --tile-h at 80px). Sizing off vw
+// instead made glyphs shrink on narrow screens and threw the balance off.
+function MemberFaces({ members, images }: { members: string[]; images?: Record<string, string> }) {
+  if (!images || !members.every((m) => images[m])) return <>{members.join(", ")}</>;
+  return (
+    <span className="mt-[calc(var(--tile-h)*0.05)] flex items-center justify-center gap-[calc(var(--tile-h)*0.13)]">
+      {members.map((m) => (
+        <span
+          key={m}
+          className="flex h-[calc(var(--tile-h)*0.4)] w-[calc(var(--tile-h)*0.4)] items-center justify-center"
+        >
+          <img
+            src={cardImageSrc(images[m])}
+            alt={m}
+            draggable={false}
+            className="max-h-full max-w-full object-contain"
+          />
+        </span>
+      ))}
+    </span>
+  );
+}
 // Hover is a subtle opacity dim (per the redesign — no lift/scale), and it rides on
 // JS pointer events (mouse-only), NOT CSS :hover — a tap on a touch/hybrid device
 // sets :hover and never clears it, which would strand the tile dimmed. Driving it
@@ -394,10 +446,12 @@ function SpoilerBar({
   level,
   category,
   members,
+  images,
   dim = false,
   defaultRevealed = false,
   onReveal,
 }: Group & {
+  images?: Record<string, string>;
   dim?: boolean;
   defaultRevealed?: boolean;
   onReveal?: () => void;
@@ -436,7 +490,7 @@ function SpoilerBar({
       {/* the REAL category name, shown blurred until tapped (see .spoiler-cat) */}
       <div className={"spoiler-cat " + BAR_CAT}>{category}</div>
       <div className={"relative z-[3] " + BAR_MEMBERS}>
-        {members.join(", ")}
+        <MemberFaces members={members} images={images} />
       </div>
     </button>
   );
@@ -918,6 +972,7 @@ export function Board({
                 <SpoilerBar
                   key={lvl}
                   {...g}
+                  images={game.puzzle.images}
                   dim={autoRevealed}
                   defaultRevealed={spoilerSeen.current!.has(lvl)}
                   onReveal={() => {
@@ -935,7 +990,9 @@ export function Board({
                 style={{ background: LEVELS[lvl].color }}
               >
                 <div className={BAR_CAT}>{g.category}</div>
-                <div className={BAR_MEMBERS}>{g.members.join(", ")}</div>
+                <div className={BAR_MEMBERS}>
+                  <MemberFaces members={g.members} images={game.puzzle.images} />
+                </div>
               </div>
             );
           })}
@@ -961,7 +1018,7 @@ export function Board({
                       setHover((h) => (h === w ? null : h));
                   }}
                 >
-                  <FitText text={w} />
+                  <TileFace word={w} src={game.puzzle.images?.[w]} selected={sel} />
                 </button>
               );
             })}

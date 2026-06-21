@@ -69,6 +69,47 @@ const puzzle: Puzzle = {
   ],
 };
 
+// April-Fools image puzzle (NYT #672, 2025-04-01): every card is an SVG glyph, not
+// text. Real NYT asset URLs; the dev /api/card-image proxy (vite.config.ts) fetches
+// them so the harness renders the actual glyphs. Exercises the image-card render path
+// (tiles, solved bars, spoiler) end to end through the real Board.
+const G = "https://games-assets.storage.googleapis.com/images/connections/";
+const S3 =
+  "https://games-phoenix-assets-prd.s3.us-east-1.amazonaws.com/images/connections/";
+const aprilSpec: { cat: string; cards: [number, string, string][] }[] = [
+  { cat: "CURRENCY SYMBOLS", cards: [
+    [9, "$", G + "img-672-1741385500318.svg"], [7, "€", G + "img-672-1741385405264.svg"],
+    [12, "£", G + "img-672-1741385535485.svg"], [15, "¥", G + "img-672-1741385550960.svg"] ] },
+  { cat: "AND/TOGETHER WITH", cards: [
+    [1, "&", G + "img-672-1741385375789.svg"], [11, "+", G + "img-672-1741385524739.svg"],
+    [4, "N", G + "img-672-1741385471593.svg"], [2, "X", G + "img-672-1741385381316.svg"] ] },
+  { cat: "EMOTICON MOUTHS", cards: [
+    [10, "(", G + "img-672-1741385519456.svg"], [3, ")", G + "img-672-1741385387026.svg"],
+    [5, "O", G + "img-672-1741385482138.svg"], [6, "P", G + "img-672-1741385400407.svg"] ] },
+  { cat: '"RIGHT"', cards: [
+    [14, "R", G + "img-672-1741385546677.svg"], [8, "→", G + "img-672-1741385493388.svg"],
+    [0, "⊾", S3 + "img-672-1769525276972.svg"], [13, "✔", G + "img-672-1741385542012.svg"] ] },
+];
+const aprilLayout: string[] = new Array(16);
+const aprilImages: Record<string, string> = {};
+for (const grp of aprilSpec)
+  for (const [pos, alt, url] of grp.cards) {
+    aprilLayout[pos] = alt;
+    aprilImages[alt] = url;
+  }
+const aprilPuzzle: Puzzle = {
+  id: 672,
+  date: "2025-04-01",
+  editor: "Wyna Liu",
+  groups: aprilSpec.map((g, level) => ({
+    level,
+    category: g.cat,
+    members: g.cards.map((c) => c[1]),
+  })),
+  layout: aprilLayout,
+  images: aprilImages,
+};
+
 const solveGroup = (g: Game, members: string[]): void => {
   g.clear();
   for (const m of members) g.toggle(m);
@@ -101,6 +142,17 @@ solveGroup(lost, puzzle.groups[1].members);
   ["SPINE", "RACK", "SASH", "CUE"],
   ["SOAK", "RACK", "TAR", "CUE"],
 ].forEach((guess) => solveGroup(lost, guess));
+
+// April-Fools image puzzle, in progress: currency group solved (so a solved bar shows
+// the glyph row), and two tiles selected (so the dark-tile white-invert shows).
+const april = new Game(aprilPuzzle);
+solveGroup(april, aprilPuzzle.groups[0].members);
+april.toggle("&");
+april.toggle("+");
+
+// Same puzzle, won, so the end-screen spoiler/solved bars render their glyph rows.
+const aprilWon = new Game(aprilPuzzle);
+for (const g of aprilPuzzle.groups) solveGroup(aprilWon, g.members);
 
 // mock room for the roster sidebar
 const NOW = Date.now();
@@ -1049,6 +1101,8 @@ const STATES = [
   <State key="pf" label="Results · won · perfect" game={perfect} />,
   <State key="w" label="Results · won" game={won} />,
   <State key="l" label="Results · lost" game={lost} revealed={[2, 3]} />,
+  <State key="ap" label="April · image puzzle · in progress" game={april} />,
+  <State key="apw" label="April · image puzzle · won" game={aprilWon} />,
 ];
 const pick = decodeURIComponent(location.hash.slice(1)).toLowerCase();
 const known = [
@@ -1056,6 +1110,7 @@ const known = [
   "perfect",
   "won",
   "lost",
+  "april",
   "loading",
   "error",
   "blocked",
@@ -1207,6 +1262,7 @@ const FILTERS = [
   "perfect",
   "won",
   "lost",
+  "april",
   "loading",
   "error",
   "blocked",

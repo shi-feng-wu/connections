@@ -38,7 +38,8 @@ export type PresenceInput = {
 
 // A short key for "has the visible card changed?" — lets the caller skip redundant
 // setActivity calls (Discord rate-limits them, and the board emits a snapshot on
-// every tap). Selection/elapsed changes don't appear here, so taps don't spam.
+// every tap). A solve, a mistake, the finish, or a new puzzle move the card;
+// selection/elapsed churn doesn't appear here, so taps don't spam.
 export function presenceSignature(p: PresenceInput): string {
   return `${p.status}|${p.solvedCount}|${p.mistakesLeft}|${p.puzzleNo ?? ""}`;
 }
@@ -48,18 +49,20 @@ export function presenceSignature(p: PresenceInput): string {
 // playing; once finished it's cleared (timestamps undefined) and the result line
 // carries the time instead. Exported for unit tests.
 export function buildActivity(p: PresenceInput) {
-  // Line 1 — the subtitle Discord shows on the activity card and in "Active Now".
-  // Mirror Wordle's static "Solving today's puzzle." while a game is in progress;
-  // once it's done, surface the puzzle number instead.
-  const puzzle = p.puzzleNo ? `Puzzle #${p.puzzleNo}` : "Daily puzzle";
-  const details = p.status === "playing" ? "Solving today's puzzle." : puzzle;
-
-  let state: string;
+  // The card shows at most two short lines then the player icons — no puzzle number,
+  // which only made it taller.
+  //   details (line 1) — the status headline: "Solving today's puzzle." mid-game, the
+  //     result once finished.
+  //   state (line 2)   — this player's live progress, shown only while playing (so a
+  //     finished card collapses to a single line).
+  let details: string;
+  let state: string | undefined;
   if (p.status === "won") {
-    state = `Solved in ${fmtDuration(p.durationMs ?? 0)}`;
+    details = `Solved in ${fmtDuration(p.durationMs ?? 0)}`;
   } else if (p.status === "lost") {
-    state = `${p.solvedCount}/${p.total} solved · out of guesses`;
+    details = `${p.solvedCount}/${p.total} solved · out of guesses`;
   } else {
+    details = "Solving today's puzzle.";
     const left = p.mistakesLeft;
     state = `${p.solvedCount}/${p.total} groups · ${left} ${left === 1 ? "mistake" : "mistakes"} left`;
   }

@@ -114,8 +114,10 @@ describe("routeInteraction", () => {
 // subtext stat block; the ✅/❌ in the subtext carries the outcome. These cover that structure.
 type Container = { type: number; components: { type: number; content?: string }[] };
 const card = (g: Game, opts?: Parameters<typeof shareCard>[1]) => shareCard(g, opts)[0] as Container;
-// The two TextDisplay blocks inside the container: [0] title+grid, [last] the subtext stats.
-const body = (c: Container) => c.components.find((b) => b.content?.includes("Connections"))?.content ?? "";
+// The TextDisplay blocks inside the container: a plain title, the grid, and the subtext stats —
+// each its own block (with spacers between) so Wordle-style spacing sits between them.
+const title = (c: Container) => c.components.find((b) => b.content?.startsWith("Connections"))?.content ?? "";
+const grid = (c: Container) => c.components.find((b) => /🟨|🟩|🟦|🟪/.test(b.content ?? ""))?.content ?? "";
 const statline = (c: Container) => c.components.filter((b) => b.content?.startsWith("-#")).at(-1)?.content ?? "";
 
 describe("shareCard", () => {
@@ -135,15 +137,15 @@ describe("shareCard", () => {
   const play = (guesses: string[][]): Game => Game.fromGuesses(puzzle, guesses);
   const solveAll: string[][] = [["A0", "B0", "C0", "D0"], ["A1", "B1", "C1", "D1"], ["A2", "B2", "C2", "D2"], ["A3", "B3", "C3", "D3"]];
 
-  it("wraps a plain Wordle-style title + one grid row per guess in a bordered container", () => {
+  it("puts a plain Wordle-style title and the grid in a bordered container, as separate blocks", () => {
     const c = card(play([["A0", "B0", "C0", "A1"], ...solveAll]), { puzzleNo: puzzle.id }); // one wrong, then a sweep
     expect(c.type).toBe(17); // CONTAINER
-    const lines = body(c).split("\n");
-    expect(lines[0]).toBe("Connections #1106 4/4"); // plain text, groups-solved fraction (a win → 4/4)
+    expect(title(c)).toBe("Connections #1106 4/4"); // plain text, groups-solved fraction (a win → 4/4)
+    const rows = grid(c).split("\n");
     // The mixed first guess colours each word by its own group; the four solves are mono rows.
-    expect(lines[1]).toBe(LEVELS[0].emoji.repeat(3) + LEVELS[1].emoji);
-    expect(lines[2]).toBe(LEVELS[0].emoji.repeat(4));
-    expect(lines).toHaveLength(6); // title + (1 wrong + 4 solves)
+    expect(rows[0]).toBe(LEVELS[0].emoji.repeat(3) + LEVELS[1].emoji);
+    expect(rows[1]).toBe(LEVELS[0].emoji.repeat(4));
+    expect(rows).toHaveLength(5); // 1 wrong + 4 solves (grid block only; title is separate)
   });
 
   it("shows four remaining dots on a flawless win, plus time + points", () => {
@@ -179,7 +181,7 @@ describe("shareCard", () => {
 
   it("drops the '#number' from the title when unknown (keeps the x/4), and drops a zero duration", () => {
     const c = card(play(solveAll), { durationMs: 0 });
-    expect(body(c).split("\n")[0]).toBe("Connections 4/4"); // no "#1106", still the fraction
+    expect(title(c)).toBe("Connections 4/4"); // no "#1106", still the fraction
     expect(statline(c)).not.toMatch(/\d+s|\d+:\d\d/); // no time token
   });
 });

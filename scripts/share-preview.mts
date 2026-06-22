@@ -145,7 +145,8 @@ const innerW = Math.max(headW, gridW, statW);
 const cardW = innerW + pad * 2;
 
 const headH = 22, gridH = GRID.length * sqSize + (GRID.length - 1) * sqGap;
-const cardH = pad + headH + 10 + gridH + 16 + 1 + 16 + 16 + pad;
+const titleGap = 18; // Wordle-style breathing room under the title (the line-less spacer)
+const cardH = pad + headH + titleGap + gridH + 16 + 1 + 16 + 16 + pad;
 
 // Card background + plain border (no accent stripe — matches Wordle's frame).
 ctx.fillStyle = CARD_BG;
@@ -164,7 +165,7 @@ ctx.font = '500 15px "Libre Franklin"';
 ctx.fillStyle = TEXT_HEAD;
 ctx.textBaseline = 'top';
 ctx.fillText(TITLE, ix, iy);
-iy += headH + 10;
+iy += headH + titleGap;
 
 // Grid squares.
 for (const row of GRID) {

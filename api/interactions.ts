@@ -271,11 +271,15 @@ export function shareCard(
   const title = ["Connections", opts.puzzleNo ? `#${opts.puzzleNo}` : null, `${game.groupsSolved}/4`]
     .filter(Boolean)
     .join(" ");
+  // Title, grid, and stats are separate blocks so spacers sit between them: a line-less gap under
+  // the title (Wordle's breathing room) and a thin divider above the stat line.
   return [
     {
       type: CONTAINER,
       components: [
-        { type: TEXT_DISPLAY, content: `${title}\n${game.shareGrid()}` },
+        { type: TEXT_DISPLAY, content: title },
+        { type: SEPARATOR, divider: false, spacing: 1 },
+        { type: TEXT_DISPLAY, content: game.shareGrid() },
         { type: SEPARATOR, divider: true, spacing: 1 },
         { type: TEXT_DISPLAY, content: `-# ${stats.join(" · ")}` },
       ],
@@ -331,31 +335,22 @@ async function shareResponse(body: LaunchInteraction): Promise<object> {
     );
   }
 
-  // Best-effort time + points from the scored row for the room being shared in (the scope the
-  // result was recorded under). Absent (shared from a different room, or never scored) → the
-  // line just drops time/points; the grid still posts. Never blocks the share.
+  // Best-effort time + points from the player's scored row for today. The scores table keeps ONE
+  // row per (puzzle, user) — pinned to the scope where they FIRST finished — so we look it up by
+  // user + date only, NOT by the room /share runs in: those can differ, and filtering by scope
+  // would miss the row (the bug where time/points silently dropped). Absent (never scored) → the
+  // line just omits time/points; the grid still posts. Never blocks the share.
   let durationMs: number | null = null;
   let score: number | null = null;
-  const guildId = typeof body.guild_id === "string" ? body.guild_id : null;
-  const channelId =
-    typeof body.channel_id === "string"
-      ? body.channel_id
-      : typeof body.channel?.id === "string"
-        ? body.channel.id
-        : null;
-  const scope = canonicalScope(guildId, channelId);
-  if (scope) {
-    const { data: row } = await db
-      .from("scores")
-      .select("score, duration_ms")
-      .eq("user_id", u.id)
-      .eq("puzzle_date", date)
-      .eq("scope_id", scope)
-      .maybeSingle();
-    if (row) {
-      score = typeof row.score === "number" ? row.score : null;
-      durationMs = typeof row.duration_ms === "number" ? row.duration_ms : null;
-    }
+  const { data: row } = await db
+    .from("scores")
+    .select("score, duration_ms")
+    .eq("user_id", u.id)
+    .eq("puzzle_date", date)
+    .maybeSingle();
+  if (row) {
+    score = typeof row.score === "number" ? row.score : null;
+    durationMs = typeof row.duration_ms === "number" ? row.duration_ms : null;
   }
 
   return {

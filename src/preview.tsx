@@ -1398,17 +1398,12 @@ const COVER = (
     <ArtBar color={C4[3]} s={{ bottom: -28, right: 232, width: 168, height: 84, transform: "rotate(8deg)" }} />
     <ArtTile label="NITRO" s={{ bottom: 56, right: 78, width: 156, height: 104, transform: "rotate(8deg)", opacity: 0.95 }} />
     <ArtTile label="TWITCH" s={{ bottom: 168, right: -30, width: 156, height: 104, transform: "rotate(-7deg)", opacity: 0.8 }} />
-    {/* center lockup */}
+    {/* center lockup — wordmark + tagline only (no emblem) */}
     <div className="absolute inset-0 flex flex-col items-center justify-center">
-      <div className="mb-7 grid grid-cols-2 gap-2">
-        {C4.map((c) => (
-          <div key={c} className="h-[38px] w-[38px] rounded-[10px]" style={{ background: c }} />
-        ))}
-      </div>
-      <h1 className="font-display text-[96px] font-bold leading-none tracking-[-0.025em]">
+      <h1 className="font-display text-[104px] font-bold leading-none tracking-[-0.025em]">
         Connections
       </h1>
-      <p className="mt-5 font-sans text-[24px] font-medium tracking-tight text-zinc-400">
+      <p className="mt-6 font-sans text-[25px] font-medium tracking-tight text-zinc-400">
         The daily puzzle, played together.
       </p>
     </div>

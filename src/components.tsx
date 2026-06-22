@@ -361,6 +361,7 @@ export function GameView({
   selfId,
   season,
   allTime,
+  roomKey,
   scope,
   onScopeChange,
   onAddBot,
@@ -375,6 +376,8 @@ export function GameView({
   selfId: string;
   season: Standings;
   allTime: Standings;
+  // stable room id keying the standings position-change snapshot; forwarded to Roster.
+  roomKey?: string | null;
   // shared Channel/Server toggle (guild launches only); omitted → no toggle.
   scope?: RosterScope;
   onScopeChange?: (s: RosterScope) => void;
@@ -465,6 +468,7 @@ export function GameView({
               onScopeChange={onScopeChange}
               season={season}
               allTime={allTime}
+              roomKey={roomKey}
               nextPuzzle={done}
               onAddBot={done ? onAddBot : undefined}
             />

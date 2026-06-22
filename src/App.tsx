@@ -873,6 +873,8 @@ export function App({
         selfId={meRef.current.id}
         season={season}
         allTime={allTime}
+        // stable room id for the standings position-change snapshot (null standalone).
+        roomKey={scopeRef.current}
         // Channel/Server toggle only in a guild — a DM/group (c: scope) has no distinction.
         scope={guildIdRef.current ? scopeMode : undefined}
         onScopeChange={guildIdRef.current ? setScopeMode : undefined}

@@ -1,8 +1,9 @@
-import { Flame, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Flame, X } from "lucide-react";
 import { useState, type Ref } from "react";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import { FlipList } from "./fliplist";
 import { colorFor, initials } from "./roster";
+import { rankDelta } from "./standings-snapshot";
 
 // End-screen room leaderboard: two tabs ("This season" = the month, "All-time")
 // over the same scores rows, differing only by window. Dense table per tab
@@ -68,6 +69,27 @@ function Streak({ n }: { n: number }) {
   );
 }
 
+// Position change since you last opened this board: a green up-arrow when the player
+// climbed (fewer = better rank), red down-arrow when they slipped, with the number of
+// places moved. Nothing for an unchanged player, a brand-new one (no prior rank), or the
+// first-ever visit — delta is null/0 in all those cases.
+function RankDelta({ delta }: { delta: number | null }) {
+  if (!delta) return null;
+  const up = delta > 0;
+  const Icon = up ? ChevronUp : ChevronDown;
+  return (
+    <span
+      className={
+        "inline-flex items-center gap-px text-[11px] font-bold tabular-nums " +
+        (up ? "text-emerald-400" : "text-rose-400")
+      }
+    >
+      <Icon size={11} strokeWidth={3} aria-hidden />
+      {Math.abs(delta)}
+    </span>
+  );
+}
+
 function ScoreCell({ v }: { v: number }) {
   return (
     <span className="font-extrabold tabular-nums tracking-[-0.01em] text-[#efefe6]">
@@ -86,14 +108,17 @@ function ScoreCell({ v }: { v: number }) {
 // desktop rail — names stay readable instead of truncating to a couple of letters.
 // Phones get a 5-column track: Played and Avg ✗ drop out (hidden cells below) and
 // the gap tightens, otherwise the fixed columns swallow the name entirely at 360px.
+// The 22px after rank is the position-change column (RankDelta: arrow + 1–2 digits).
 const LGRID =
-  "grid grid-cols-[22px_minmax(0,1fr)_62px_32px_48px] items-center gap-1.5 min-[800px]:grid-cols-[22px_minmax(0,1fr)_64px_44px_52px_32px] min-[800px]:gap-2";
+  "grid grid-cols-[22px_22px_minmax(0,1fr)_62px_32px_48px] items-center gap-1.5 min-[800px]:grid-cols-[22px_22px_minmax(0,1fr)_64px_44px_52px_32px] min-[800px]:gap-2";
 
 type LedgerEntry = {
   id: string;
   name: string;
   avatar: string | null;
   rank: number;
+  // places moved since this board was last opened: + climbed, − slipped, null = no prior
+  delta: number | null;
   total: number;
   streak: number;
   plays: number;
@@ -134,6 +159,9 @@ function LedgerRow({
           {e.rank}
         </div>
       )}
+      <div className="flex justify-center">
+        <RankDelta delta={e.delta} />
+      </div>
       {/* pl-1 on mobile widens just the rank→avatar gap (matching the live roster);
           the legend's "Player" label gets the same pad so they stay aligned. */}
       <div className="flex min-w-0 items-center gap-2.5 pl-1 min-[800px]:pl-0">
@@ -165,11 +193,12 @@ function LedgerRow({
   );
 }
 
-const toEntry = (r: BoardRow, rank: number): LedgerEntry => ({
+const toEntry = (r: BoardRow, rank: number, delta: number | null): LedgerEntry => ({
   id: r.user_id,
   name: r.name,
   avatar: r.avatar,
   rank,
+  delta,
   total: r.total,
   streak: r.streak,
   plays: r.plays,
@@ -213,6 +242,7 @@ export function LedgerBody({
   query = "",
   fill = false,
   selfRowRef,
+  prevRanks,
 }: {
   data: Standings;
   selfId: string;
@@ -221,6 +251,9 @@ export function LedgerBody({
   fill?: boolean;
   // attached to your row (when you place on the board) for the locate arrow.
   selfRowRef?: Ref<HTMLDivElement>;
+  // {user_id -> rank} from the last time this board was opened, for the position-change
+  // arrows. Absent (preview/live) → no arrows. See src/standings-snapshot.ts.
+  prevRanks?: Record<string, number> | null;
 }) {
   const { board } = data;
   if (!board.length) {
@@ -231,7 +264,9 @@ export function LedgerBody({
     );
   }
   const q = query.trim().toLowerCase();
-  const all = board.map((r, i) => toEntry(r, i + 1));
+  const all = board.map((r, i) =>
+    toEntry(r, i + 1, rankDelta(prevRanks, r.user_id, i + 1)),
+  );
   const rows = q ? all.filter((e) => e.name.toLowerCase().includes(q)) : all;
 
   return (
@@ -271,6 +306,7 @@ export function LedgerBody({
           " mt-1.5 border-t border-white/[0.05] px-2.5 pt-2.5 text-[9.5px] font-semibold uppercase tracking-[0.09em] text-zinc-500 min-[800px]:px-3"
         }
       >
+        <span />
         <span />
         <span className="pl-1 text-left min-[800px]:pl-0">Player</span>
         <span className="text-right">Score</span>

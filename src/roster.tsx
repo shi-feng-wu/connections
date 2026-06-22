@@ -13,6 +13,7 @@ import type { PlayerState } from "./player";
 import { HoverButton } from "./hoverbutton";
 import { FlipList } from "./fliplist";
 import { LedgerBody, StandingsEmpty, type Standings } from "./season";
+import { useRankSnapshot } from "./standings-snapshot";
 
 const EMPTY_STANDINGS: Standings = { board: [], self: null };
 
@@ -556,6 +557,7 @@ export function Roster({
   onScopeChange,
   season,
   allTime,
+  roomKey,
   nextPuzzle,
   onAddBot,
 }: {
@@ -570,6 +572,9 @@ export function Roster({
   // cumulative standings behind the Season / All-time tabs; tabs hidden when absent.
   season?: Standings;
   allTime?: Standings;
+  // stable room id (g:<guild> / c:<channel>) keying the per-board position-change
+  // snapshot; null standalone/preview → no movement arrows.
+  roomKey?: string | null;
   // your run is over → pin the next-puzzle countdown under the list (the footer's
   // score summary stays clean; this is the quiet "rail footer" slot of the redesign).
   nextPuzzle?: boolean;
@@ -585,6 +590,11 @@ export function Roster({
   const standings = (view === "season" || view === "all") && seasonAvailable;
   const standingsData =
     view === "all" ? allTime ?? EMPTY_STANDINGS : season ?? EMPTY_STANDINGS;
+  // Position-change arrows: snapshot keyed per room + Channel/Server scope + window, so
+  // each board tracks its own movement. Null on the live tab (or standalone) → no arrows.
+  const snapshotKey =
+    view !== "live" && roomKey ? `${roomKey}:${scope ?? "x"}:${view}` : null;
+  const prevRanks = useRankSnapshot(snapshotKey, standingsData.board);
   // Remount key for the active panel: changing the tab OR the Channel/Server scope swaps it,
   // so animate-tab-in re-fires and the new list fades up the same way a tab switch does.
   const panelKey = `${view}:${scope ?? ""}`;
@@ -636,6 +646,7 @@ export function Roster({
               data={standingsData}
               selfId={selfId}
               selfRowRef={selfRowRef}
+              prevRanks={prevRanks}
               fill
             />
           </div>

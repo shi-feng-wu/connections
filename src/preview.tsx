@@ -32,7 +32,7 @@ import LibreFranklin700 from "./preview-assets/LibreFranklin-700.ttf?url";
 import LibreFranklin800 from "./preview-assets/LibreFranklin-800.ttf?url";
 import Newsreader700 from "./preview-assets/Newsreader-700.ttf?url";
 import { Roster } from "./roster";
-import type { Standings } from "./season";
+import { LedgerBody, type Standings } from "./season";
 
 const puzzle: Puzzle = {
   id: 123,
@@ -1319,10 +1319,20 @@ const DEMO = (
 // Just the room leaderboard (Roster's Live / Season / All-time tabs), centered and
 // framed to match #demo's board — scene B of the activity preview reel ("…and climb
 // the leaderboard"). Uncontrolled so the recorder can click between tabs.
+// Prior-visit ranks for the position-change arrows, exercising every case against
+// SEASON's order (jun 1, aria 2, theo 3, mei 4, noa 5): jun climbed (▲1), aria slipped
+// (▼1), theo unchanged (no arrow), mei jumped (▲2), noa absent → new (no arrow).
+const PREV_RANKS: Record<string, number> = {
+  "p-jun": 2,
+  "p-aria": 1,
+  "p-theo": 3,
+  "p-mei": 6,
+};
+
 const STANDINGS = (
   // top-aligned (not centered) so switching tabs — which changes the list height —
   // never shifts the tab row, keeping the recorder's capture clip stable.
-  <div className="flex min-h-dvh w-full justify-center px-4 pt-[120px]">
+  <div className="flex min-h-dvh w-full flex-col items-center gap-10 px-4 pt-[120px]">
     <div className="w-full max-w-[460px]">
       <Roster
         players={ROSTER}
@@ -1330,6 +1340,15 @@ const STANDINGS = (
         season={SEASON}
         allTime={ALLTIME}
       />
+    </div>
+    {/* Direct LedgerBody with a fixed prevRanks so the position-change arrows render
+        deterministically (the Roster above keys off localStorage, so it shows none on a
+        first visit). */}
+    <div className="flex w-full max-w-[460px] flex-col">
+      <div className="mb-3 px-1 text-xs font-semibold uppercase tracking-wide text-amber-400">
+        Position changes (prevRanks fixture)
+      </div>
+      <LedgerBody data={SEASON} selfId={SELF_ID} prevRanks={PREV_RANKS} />
     </div>
   </div>
 );

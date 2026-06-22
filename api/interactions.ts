@@ -41,6 +41,11 @@ const PONG = 1;
 const CHANNEL_MESSAGE_WITH_SOURCE = 4;
 const LAUNCH_ACTIVITY = 12;
 const EPHEMERAL = 64; // message flag
+const IS_COMPONENTS_V2 = 1 << 15; // message flag: render via the component tree, not content/embeds
+// Components V2 component type numbers (the framed share card below is built from these).
+const CONTAINER = 17; // the bordered box (Wordle-style frame); carries an optional accent bar
+const TEXT_DISPLAY = 10; // a markdown text block
+const SEPARATOR = 14; // a divider/spacer between blocks
 
 // Command names that should open the Activity. Both the Entry Point command (App Launcher)
 // and the chat-input command arrive as APPLICATION_COMMAND interactions named `connections`.
@@ -236,28 +241,24 @@ function formatShareDuration(ms?: number | null): string {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 }
 
-// Accent-bar colours for the share embed's left edge — the only colour the frame carries, so
-// it doubles as the outcome cue. Win → the Connections "green" group colour; loss → muted slate.
-const SHARE_WIN_COLOR = 0xa0c35a;
-const SHARE_LOSS_COLOR = 0x80848e;
-
-// The /share result as a framed embed — Discord's bordered card, mirroring Wordle's share box:
-// a "Connections · Puzzle #N" title, the colour-square grid (one row per guess, from
-// Game.shareGrid) as the body, an outcome-tinted accent bar, and a small footer stat line.
-// Pure and finished-game-only — shareResponse gates on game.status before calling it.
-// duration/score come from the scored row when present and are simply omitted otherwise.
-// Exported for tests.
-export function shareEmbed(
+// The /share result as a Components V2 card — a plain bordered Container (Wordle's framed box, no
+// accent stripe) holding the "Connections · Puzzle #N" title and the colour-square grid (one row
+// per guess, from Game.shareGrid), a divider, and a small subtext stat line. The ✅/❌ in that
+// line is the only win/loss cue (the frame is uncoloured by design). Returns the message
+// `components` array (one container); the response pairs it with the IS_COMPONENTS_V2 flag — a V2
+// message carries NO content/embeds. Pure and finished-game-only — shareResponse gates on
+// game.status before calling it. duration/score come from the scored row when present and are
+// simply omitted otherwise. Exported for tests.
+export function shareCard(
   game: Game,
   opts: { puzzleNo?: number; durationMs?: number | null; score?: number | null } = {},
-): object {
-  const won = game.status === "won";
+): object[] {
   const mistakes = MAX_MISTAKES - game.mistakesLeft;
-  // Footer leads with the outcome, then the human-interesting facts. A win highlights a flawless
-  // grid; a loss reports how far they got (mistakes on a loss are always MAX, so the group count
-  // is the meaningful number). The accent bar already carries win/loss as colour.
+  // The subtext leads with the outcome, then the human-interesting facts. A win highlights a
+  // flawless grid; a loss reports how far they got (mistakes on a loss are always MAX, so the
+  // group count is the meaningful number).
   const stats: string[] = [
-    won
+    game.status === "won"
       ? `✅ Solved · ${mistakes === 0 ? "no mistakes 🎯" : `${mistakes} mistake${mistakes === 1 ? "" : "s"}`}`
       : `❌ ${game.groupsSolved}/4 groups`,
   ];
@@ -265,12 +266,17 @@ export function shareEmbed(
   if (dur) stats.push(dur);
   if (typeof opts.score === "number") stats.push(`${opts.score} pts`);
 
-  return {
-    title: opts.puzzleNo ? `Connections · Puzzle #${opts.puzzleNo}` : "Connections",
-    description: game.shareGrid(),
-    color: won ? SHARE_WIN_COLOR : SHARE_LOSS_COLOR,
-    footer: { text: stats.join(" · ") },
-  };
+  const title = opts.puzzleNo ? `Connections · Puzzle #${opts.puzzleNo}` : "Connections";
+  return [
+    {
+      type: CONTAINER,
+      components: [
+        { type: TEXT_DISPLAY, content: `### ${title}\n${game.shareGrid()}` },
+        { type: SEPARATOR, divider: true, spacing: 1 },
+        { type: TEXT_DISPLAY, content: `-# ${stats.join(" · ")}` },
+      ],
+    },
+  ];
 }
 
 // Build the /share interaction response from the player's own stored guesses. A public message
@@ -350,7 +356,10 @@ async function shareResponse(body: LaunchInteraction): Promise<object> {
 
   return {
     type: CHANNEL_MESSAGE_WITH_SOURCE,
-    data: { embeds: [shareEmbed(game, { puzzleNo: puzzle.id, durationMs, score })] },
+    data: {
+      flags: IS_COMPONENTS_V2,
+      components: shareCard(game, { puzzleNo: puzzle.id, durationMs, score }),
+    },
   };
 }
 

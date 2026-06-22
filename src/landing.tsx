@@ -321,7 +321,7 @@ const DEMO_ALLTIME: Standings = {
   self: null,
 };
 
-function DemoRoster() {
+export function DemoRoster() {
   const still = useMemo(reducedMotion, []);
   // Freeze a mid-race frame under reduced motion; otherwise tick the script.
   const [tick, setTick] = useState(still ? 9 : 0);

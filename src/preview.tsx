@@ -15,7 +15,7 @@ import {
 } from "./card-draw";
 import { DayTurnover, GameView, LoadingScreen } from "./components";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
-import { DemoBoard, Landing } from "./landing";
+import { DemoBoard, DemoRoster, Landing } from "./landing";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import { PipThumbnail } from "./pip";
 import type { PlayerState } from "./player";
@@ -1162,6 +1162,7 @@ const known = [
   "landing",
   "demo",
   "standings",
+  "room",
 ];
 // #simulate and #feedback both isolate the Simulate playground (#feedback also
 // auto-fires a one-away guess to surface the header feedback pill); #card isolates the
@@ -1183,8 +1184,10 @@ const onlyLanding = pick === "landing";
 // centered on the dark stage — the clean source for recording a gameplay demo video
 // (the Discord activity store preview, à la Wordle). No page chrome, no labels.
 const onlyDemo = pick === "demo";
-// #standings isolates the leaderboard panel full-frame — scene B of the preview reel.
+// #standings isolates the static leaderboard panel; #room isolates the self-playing
+// LIVE room (rows reordering past each other) — scene B of the preview reel.
 const onlyStandings = pick === "standings";
+const onlyRoom = pick === "room";
 const shown =
   known.includes(pick) && !onlySim && !onlyCard && !onlyPip
     ? STATES.filter((s) => String(s.props.label).toLowerCase().includes(pick))
@@ -1312,6 +1315,17 @@ const STANDINGS = (
         season={SEASON}
         allTime={ALLTIME}
       />
+    </div>
+  </div>
+);
+
+// The self-playing LIVE room (landing.tsx DemoRoster): players' grids fill in and
+// their rows reorder past each other tick by tick — scene B of the preview reel
+// (the live multiplayer hook Wordle can't show). Bare/centered for a clean capture.
+const ROOM = (
+  <div className="flex min-h-dvh w-full items-center justify-center px-4">
+    <div className="w-full max-w-[460px]">
+      <DemoRoster />
     </div>
   </div>
 );
@@ -1461,6 +1475,8 @@ createRoot(document.getElementById("preview")!).render(
     DEMO
   ) : onlyStandings ? (
     STANDINGS
+  ) : onlyRoom ? (
+    ROOM
   ) : (
     <div className="flex flex-col items-center gap-16 py-10">
       {onlyLanding && LANDING}

@@ -529,7 +529,7 @@ export function Board({
   const busy = useRef<boolean>(false);
   // word under the mouse, for the hover dim (mouse-only — see TILE_HOVER).
   const [hover, setHover] = useState<string | null>(null);
-  // Transient guess feedback ("One away…", "Guessed"): a chip that pops
+  // Transient guess feedback ("One away…", "Guessed…"): a chip that pops
   // into the footer's empty middle, between the mistake dots and the shuffle
   // button. It used to ride the Submit pill's label (and before that the header
   // meta line — easy to miss, hidden on mobile), but morphing the button made the
@@ -538,7 +538,7 @@ export function Board({
   // slot is gone, so the end footer shows the hint instead (EndSummary's note
   // face — the "couldn’t save" warning can land there). Reverts after `ms`
   // (default 1.6s). `hintN` bumps on every flash so a repeat of the same message
-  // (a second "Guessed") still replays the pop.
+  // (a second "Guessed…") still replays the pop.
   const [hint, setHint] = useState<string | null>(null);
   const [hintN, setHintN] = useState(0);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
@@ -907,7 +907,7 @@ export function Board({
     }
 
     if (result.type === "duplicate") {
-      flashHint("Guessed");
+      flashHint("Guessed…");
       busy.current = false;
       return;
     }

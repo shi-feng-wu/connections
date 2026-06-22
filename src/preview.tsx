@@ -1379,34 +1379,21 @@ function ArtBar({ color, s }: { color: string; s: CSSProperties }) {
   );
 }
 
-// Cover Art — the Activity Shelf hero: title + background art, centered.
+// Cover Art — Wordle-style: light, minimal, centered. The brick logo, the serif
+// (Newsreader) wordmark, a small muted subtitle. No scattered art.
 const COVER = (
-  <div className="relative h-dvh w-full overflow-hidden bg-[#0a0a0b] text-[#efefe6]">
-    <div
-      className="pointer-events-none absolute inset-0"
-      style={{
-        background:
-          "radial-gradient(820px 520px at 12% -12%, rgba(249,223,109,0.13), transparent 60%)," +
-          "radial-gradient(920px 560px at 104% 66%, rgba(186,129,197,0.17), transparent 60%)," +
-          "radial-gradient(760px 520px at 58% 124%, rgba(160,195,90,0.10), transparent 62%)",
-      }}
+  <div className="flex h-dvh w-full flex-col items-center justify-center bg-[#f3f3ec] text-[#121212]">
+    <img
+      src="/connections-icon.png"
+      alt=""
+      className="mb-9 h-[104px] w-[104px] object-contain"
     />
-    {/* corner art (kept off-center so the title stays clean) */}
-    <ArtBar color={C4[0]} s={{ top: -30, left: 232, width: 168, height: 84, transform: "rotate(-10deg)" }} />
-    <ArtTile label="SERVER" s={{ top: 56, left: 78, width: 156, height: 104, transform: "rotate(-9deg)", opacity: 0.95 }} />
-    <ArtTile label="RIVER" s={{ top: 168, left: -30, width: 156, height: 104, transform: "rotate(7deg)", opacity: 0.8 }} />
-    <ArtBar color={C4[3]} s={{ bottom: -28, right: 232, width: 168, height: 84, transform: "rotate(8deg)" }} />
-    <ArtTile label="NITRO" s={{ bottom: 56, right: 78, width: 156, height: 104, transform: "rotate(8deg)", opacity: 0.95 }} />
-    <ArtTile label="TWITCH" s={{ bottom: 168, right: -30, width: 156, height: 104, transform: "rotate(-7deg)", opacity: 0.8 }} />
-    {/* center lockup — wordmark + tagline only (no emblem) */}
-    <div className="absolute inset-0 flex flex-col items-center justify-center">
-      <h1 className="font-display text-[104px] font-bold leading-none tracking-[-0.025em]">
-        Connections
-      </h1>
-      <p className="mt-6 font-sans text-[25px] font-medium tracking-tight text-zinc-400">
-        The daily puzzle, played together.
-      </p>
-    </div>
+    <h1 className="font-display text-[118px] font-bold leading-[0.9] tracking-[-0.02em]">
+      Connections
+    </h1>
+    <p className="mt-7 font-display text-[27px] font-medium tracking-tight text-[#5d5d54]">
+      Play live with friends. Climb the season leaderboard.
+    </p>
   </div>
 );
 

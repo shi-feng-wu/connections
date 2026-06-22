@@ -271,8 +271,9 @@ export function shareCard(
   const title = ["Connections", opts.puzzleNo ? `#${opts.puzzleNo}` : null, `${game.groupsSolved}/4`]
     .filter(Boolean)
     .join(" ");
-  // Title, grid, and stats are separate blocks so spacers sit between them: a line-less gap under
-  // the title (Wordle's breathing room) and a thin divider above the stat line.
+  // Title, grid, and stats are separate blocks so spacers sit between them: equal line-less gaps
+  // above AND below the grid (Wordle's breathing room, symmetric), then a thin divider before the
+  // stat line.
   return [
     {
       type: CONTAINER,
@@ -280,6 +281,7 @@ export function shareCard(
         { type: TEXT_DISPLAY, content: title },
         { type: SEPARATOR, divider: false, spacing: 1 },
         { type: TEXT_DISPLAY, content: game.shareGrid() },
+        { type: SEPARATOR, divider: false, spacing: 1 },
         { type: SEPARATOR, divider: true, spacing: 1 },
         { type: TEXT_DISPLAY, content: `-# ${stats.join(" · ")}` },
       ],

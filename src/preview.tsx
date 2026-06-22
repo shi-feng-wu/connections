@@ -1,4 +1,11 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 // The card's font (the app UI uses different fonts). These live under src/, NOT
@@ -15,7 +22,7 @@ import {
 } from "./card-draw";
 import { DayTurnover, GameView, LoadingScreen } from "./components";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
-import { DemoBoard, DemoRoster, Landing } from "./landing";
+import { DemoBoard, DemoGame, DemoRoster, Landing } from "./landing";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import { PipThumbnail } from "./pip";
 import type { PlayerState } from "./player";
@@ -1163,6 +1170,9 @@ const known = [
   "demo",
   "standings",
   "room",
+  "reel",
+  "cover",
+  "bg",
 ];
 // #simulate and #feedback both isolate the Simulate playground (#feedback also
 // auto-fires a one-away guess to surface the header feedback pill); #card isolates the
@@ -1188,6 +1198,11 @@ const onlyDemo = pick === "demo";
 // LIVE room (rows reordering past each other) — scene B of the preview reel.
 const onlyStandings = pick === "standings";
 const onlyRoom = pick === "room";
+// #reel isolates the self-playing desktop view (board + live room) for the 16:9 preview.
+const onlyReel = pick === "reel";
+// #cover and #bg isolate the Discord App-Directory still art (1024×576).
+const onlyCover = pick === "cover";
+const onlyBg = pick === "bg";
 const shown =
   known.includes(pick) && !onlySim && !onlyCard && !onlyPip
     ? STATES.filter((s) => String(s.props.label).toLowerCase().includes(pick))
@@ -1327,6 +1342,116 @@ const ROOM = (
     <div className="w-full max-w-[460px]">
       <DemoRoster />
     </div>
+  </div>
+);
+
+// The full self-playing desktop view (board solving + live room reordering, side by
+// side) — source for the 16:9 Discord activity Video Preview (640×360). Centered on
+// the dark stage; GameView scales itself to fill the viewport.
+const REEL = (
+  <div className="flex min-h-dvh w-full items-center justify-center overflow-hidden px-6">
+    <div className="w-full max-w-[1100px]">
+      <DemoGame />
+    </div>
+  </div>
+);
+
+// ——— Discord App-Directory still art (16:9, 1024×576), rendered to PNG ———
+// Same brand system as the game: dark stage, the four category colors, off-white
+// tiles, the Newsreader (font-display) wordmark.
+const C4 = ["#f9df6d", "#a0c35a", "#b0c4ef", "#ba81c5"];
+function ArtTile({ label, s }: { label: string; s: CSSProperties }) {
+  return (
+    <div
+      style={s}
+      className="absolute flex items-center justify-center rounded-[14px] bg-[#efefe6] font-sans text-[16px] font-extrabold uppercase tracking-tight text-[#121212] shadow-[0_22px_48px_rgba(0,0,0,0.55)]"
+    >
+      {label}
+    </div>
+  );
+}
+function ArtBar({ color, s }: { color: string; s: CSSProperties }) {
+  return (
+    <div
+      style={{ ...s, background: color }}
+      className="absolute rounded-[14px] shadow-[0_22px_48px_rgba(0,0,0,0.45)]"
+    />
+  );
+}
+
+// Cover Art — the Activity Shelf hero: title + background art, centered.
+const COVER = (
+  <div className="relative h-dvh w-full overflow-hidden bg-[#0a0a0b] text-[#efefe6]">
+    <div
+      className="pointer-events-none absolute inset-0"
+      style={{
+        background:
+          "radial-gradient(820px 520px at 12% -12%, rgba(249,223,109,0.13), transparent 60%)," +
+          "radial-gradient(920px 560px at 104% 66%, rgba(186,129,197,0.17), transparent 60%)," +
+          "radial-gradient(760px 520px at 58% 124%, rgba(160,195,90,0.10), transparent 62%)",
+      }}
+    />
+    {/* corner art (kept off-center so the title stays clean) */}
+    <ArtBar color={C4[0]} s={{ top: -30, left: 232, width: 168, height: 84, transform: "rotate(-10deg)" }} />
+    <ArtTile label="SERVER" s={{ top: 56, left: 78, width: 156, height: 104, transform: "rotate(-9deg)", opacity: 0.95 }} />
+    <ArtTile label="RIVER" s={{ top: 168, left: -30, width: 156, height: 104, transform: "rotate(7deg)", opacity: 0.8 }} />
+    <ArtBar color={C4[3]} s={{ bottom: -28, right: 232, width: 168, height: 84, transform: "rotate(8deg)" }} />
+    <ArtTile label="NITRO" s={{ bottom: 56, right: 78, width: 156, height: 104, transform: "rotate(8deg)", opacity: 0.95 }} />
+    <ArtTile label="TWITCH" s={{ bottom: 168, right: -30, width: 156, height: 104, transform: "rotate(-7deg)", opacity: 0.8 }} />
+    {/* center lockup */}
+    <div className="absolute inset-0 flex flex-col items-center justify-center">
+      <div className="mb-7 grid grid-cols-2 gap-2">
+        {C4.map((c) => (
+          <div key={c} className="h-[38px] w-[38px] rounded-[10px]" style={{ background: c }} />
+        ))}
+      </div>
+      <h1 className="font-display text-[96px] font-bold leading-none tracking-[-0.025em]">
+        Connections
+      </h1>
+      <p className="mt-5 font-sans text-[24px] font-medium tracking-tight text-zinc-400">
+        The daily puzzle, played together.
+      </p>
+    </div>
+  </div>
+);
+
+// Background — grid-view overlay: art clustered at the edges, center left clear.
+const BG = (
+  <div className="relative h-dvh w-full overflow-hidden bg-[#0a0a0b]">
+    <div
+      className="pointer-events-none absolute inset-0"
+      style={{
+        background:
+          "radial-gradient(680px 460px at 0% 0%, rgba(249,223,109,0.12), transparent 55%)," +
+          "radial-gradient(680px 460px at 100% 0%, rgba(160,195,90,0.12), transparent 55%)," +
+          "radial-gradient(680px 460px at 0% 100%, rgba(176,196,239,0.12), transparent 55%)," +
+          "radial-gradient(680px 460px at 100% 100%, rgba(186,129,197,0.14), transparent 55%)",
+      }}
+    />
+    {/* TL */}
+    <ArtBar color={C4[0]} s={{ top: -42, left: 36, width: 210, height: 88, transform: "rotate(-14deg)" }} />
+    <ArtTile label="SERVER" s={{ top: 66, left: -40, width: 150, height: 102, transform: "rotate(-12deg)", opacity: 0.95 }} />
+    <ArtTile label="EMOTE" s={{ top: 150, left: 78, width: 150, height: 102, transform: "rotate(8deg)", opacity: 0.82 }} />
+    {/* TR */}
+    <ArtBar color={C4[1]} s={{ top: -42, right: 36, width: 210, height: 88, transform: "rotate(14deg)" }} />
+    <ArtTile label="RIVER" s={{ top: 66, right: -40, width: 150, height: 102, transform: "rotate(12deg)", opacity: 0.95 }} />
+    <ArtTile label="LAVA" s={{ top: 150, right: 78, width: 150, height: 102, transform: "rotate(-8deg)", opacity: 0.82 }} />
+    {/* BL */}
+    <ArtBar color={C4[2]} s={{ bottom: -42, left: 36, width: 210, height: 88, transform: "rotate(14deg)" }} />
+    <ArtTile label="CHAT" s={{ bottom: 66, left: -40, width: 150, height: 102, transform: "rotate(12deg)", opacity: 0.95 }} />
+    <ArtTile label="CALL" s={{ bottom: 150, left: 78, width: 150, height: 102, transform: "rotate(-8deg)", opacity: 0.82 }} />
+    {/* BR */}
+    <ArtBar color={C4[3]} s={{ bottom: -42, right: 36, width: 210, height: 88, transform: "rotate(-14deg)" }} />
+    <ArtTile label="NITRO" s={{ bottom: 66, right: -40, width: 150, height: 102, transform: "rotate(-12deg)", opacity: 0.95 }} />
+    <ArtTile label="PING" s={{ bottom: 150, right: 78, width: 150, height: 102, transform: "rotate(8deg)", opacity: 0.82 }} />
+    {/* keep the center clear for the UI */}
+    <div
+      className="pointer-events-none absolute inset-0"
+      style={{
+        background:
+          "radial-gradient(closest-side at 50% 50%, rgba(10,10,11,0.97) 36%, rgba(10,10,11,0.6) 58%, transparent 82%)",
+      }}
+    />
   </div>
 );
 
@@ -1477,6 +1602,12 @@ createRoot(document.getElementById("preview")!).render(
     STANDINGS
   ) : onlyRoom ? (
     ROOM
+  ) : onlyReel ? (
+    REEL
+  ) : onlyCover ? (
+    COVER
+  ) : onlyBg ? (
+    BG
   ) : (
     <div className="flex flex-col items-center gap-16 py-10">
       {onlyLanding && LANDING}

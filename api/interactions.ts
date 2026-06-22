@@ -242,36 +242,40 @@ function formatShareDuration(ms?: number | null): string {
 }
 
 // The /share result as a Components V2 card — a plain bordered Container (Wordle's framed box, no
-// accent stripe) holding the "Connections · Puzzle #N" title and the colour-square grid (one row
-// per guess, from Game.shareGrid), a divider, and a small subtext stat line. The ✅/❌ in that
-// line is the only win/loss cue (the frame is uncoloured by design). Returns the message
-// `components` array (one container); the response pairs it with the IS_COMPONENTS_V2 flag — a V2
-// message carries NO content/embeds. Pure and finished-game-only — shareResponse gates on
-// game.status before calling it. duration/score come from the scored row when present and are
-// simply omitted otherwise. Exported for tests.
+// accent stripe) holding a Wordle-style plain title line ("Connections #N x/4", x = groups solved
+// out of four) above the colour-square grid (one row per guess, from Game.shareGrid), then a
+// divider and a small subtext stat line. The ✅/❌ in that line is the only win/loss cue (the
+// frame is uncoloured by design). Returns the message `components` array (one container); the
+// response pairs it with the IS_COMPONENTS_V2 flag — a V2 message carries NO content/embeds. Pure
+// and finished-game-only — shareResponse gates on game.status before calling it. duration/score
+// come from the scored row when present and are simply omitted otherwise. Exported for tests.
 export function shareCard(
   game: Game,
   opts: { puzzleNo?: number; durationMs?: number | null; score?: number | null } = {},
 ): object[] {
   const mistakes = MAX_MISTAKES - game.mistakesLeft;
-  // The subtext leads with the outcome, then the human-interesting facts. A win highlights a
-  // flawless grid; a loss reports how far they got (mistakes on a loss are always MAX, so the
-  // group count is the meaningful number).
-  const stats: string[] = [
-    game.status === "won"
-      ? `✅ Solved · ${mistakes === 0 ? "no mistakes 🎯" : `${mistakes} mistake${mistakes === 1 ? "" : "s"}`}`
-      : `❌ ${game.groupsSolved}/4 groups`,
-  ];
+  // Mistakes as the in-game 4-dot tracker: one circle per slot, light ⚪ for a remaining mistake
+  // and dark ⚫ for a spent one (mirrors the board's light=remaining/dark=spent dots, remaining
+  // first). So mistakes-remaining-out-of-4 reads at a glance: a flawless win is ⚪⚪⚪⚪, a loss
+  // ⚫⚫⚫⚫. Then time, then score — no ✅/❌ (the title's x/4 already says win vs loss). On
+  // Discord's dark theme the spent ⚫ dots sit faint against the card; the remaining ⚪ dots carry
+  // the count.
+  const dots = "⚪".repeat(game.mistakesLeft) + "⚫".repeat(mistakes);
+  const stats: string[] = [dots];
   const dur = formatShareDuration(opts.durationMs);
   if (dur) stats.push(dur);
   if (typeof opts.score === "number") stats.push(`${opts.score} pts`);
 
-  const title = opts.puzzleNo ? `Connections · Puzzle #${opts.puzzleNo}` : "Connections";
+  // Plain text, like Wordle's "Wordle 1828 4/6" — no bold/heading. groupsSolved excludes a loss's
+  // forced back-fill, so a win is 4/4 and a loss is however many groups were actually deduced.
+  const title = ["Connections", opts.puzzleNo ? `#${opts.puzzleNo}` : null, `${game.groupsSolved}/4`]
+    .filter(Boolean)
+    .join(" ");
   return [
     {
       type: CONTAINER,
       components: [
-        { type: TEXT_DISPLAY, content: `### ${title}\n${game.shareGrid()}` },
+        { type: TEXT_DISPLAY, content: `${title}\n${game.shareGrid()}` },
         { type: SEPARATOR, divider: true, spacing: 1 },
         { type: TEXT_DISPLAY, content: `-# ${stats.join(" · ")}` },
       ],

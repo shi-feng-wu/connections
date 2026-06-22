@@ -7,6 +7,12 @@ import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
 
+const OUT = process.argv[2] ?? '/tmp/share-v2-preview.png';
+// In-game 4-dot mistake tracker: light = remaining (⚪), dark = spent (⚫). Example: a 2-mistake win.
+const REMAINING = 2;
+const DOT_LIGHT = '#c4c9ce'; // ⚪ remaining — visible on the dark card
+const DOT_DARK = '#31373d'; // ⚫ spent — Twemoji dark slate; sits faint against the dark card
+
 for (const w of [500, 600, 700, 800]) {
   GlobalFonts.registerFromPath(fileURLToPath(new URL(`../api/_assets/LibreFranklin-${w}.ttf`, import.meta.url)), 'Libre Franklin');
 }
@@ -127,12 +133,14 @@ const pad = 16;
 const sqSize = 22, sqGap = 4;
 const gridW = 4 * sqSize + 3 * sqGap;
 
+// Plain Wordle-style title (normal weight, no bold), e.g. "Connections #1106 4/4".
+const TITLE = 'Connections #1106 4/4';
 // Measure widest text line to size the container.
-ctx.font = '700 16px "Libre Franklin"';
-const headW = ctx.measureText('Connections · Puzzle #1106').width;
+ctx.font = '500 15px "Libre Franklin"';
+const headW = ctx.measureText(TITLE).width;
+const STAT_TAIL = ' ·  1:34 · 380 pts';
 ctx.font = '500 13px "Libre Franklin"';
-const statText = 'Solved · 2 mistakes · 1:34 · 380 pts';
-const statW = 20 + ctx.measureText(statText).width; // + check glyph
+const statW = 4 * (14 + 5) + ctx.measureText(STAT_TAIL).width; // 4-dot tracker + tail
 const innerW = Math.max(headW, gridW, statW);
 const cardW = innerW + pad * 2;
 
@@ -151,11 +159,11 @@ ctx.stroke();
 let iy = y + pad;
 const ix = cx + pad;
 
-// Heading (### …).
-ctx.font = '700 16px "Libre Franklin"';
+// Title — plain normal-weight text (like Wordle's "Wordle 1828 4/6").
+ctx.font = '500 15px "Libre Franklin"';
 ctx.fillStyle = TEXT_HEAD;
 ctx.textBaseline = 'top';
-ctx.fillText('Connections · Puzzle #1106', ix, iy);
+ctx.fillText(TITLE, ix, iy);
 iy += headH + 10;
 
 // Grid squares.
@@ -179,26 +187,22 @@ ctx.lineTo(cx + cardW - pad, iy + 0.5);
 ctx.stroke();
 iy += 16;
 
-// Subtext stat line with a drawn ✅ check.
-ctx.save();
-ctx.fillStyle = '#3ba55d';
-rr(ix, iy, 15, 15, 4);
-ctx.fill();
-ctx.strokeStyle = '#fff';
-ctx.lineWidth = 2;
-ctx.lineCap = 'round';
-ctx.lineJoin = 'round';
-ctx.beginPath();
-ctx.moveTo(ix + 3.5, iy + 8);
-ctx.lineTo(ix + 6.5, iy + 11);
-ctx.lineTo(ix + 11.5, iy + 4.5);
-ctx.stroke();
-ctx.restore();
+// Subtext stat line: the in-game 4-dot mistake tracker (light ⚪ remaining, then dark ⚫ spent),
+// then time, then score. The spent ⚫ are drawn at Twemoji's true dark slate so the preview is
+// honest about their low contrast on the dark card.
+ctx.textBaseline = 'middle';
+const dotR = 7, dotGap = 5;
+let fx = ix;
+for (let i = 0; i < 4; i++) {
+  ctx.fillStyle = i < REMAINING ? DOT_LIGHT : DOT_DARK;
+  ctx.beginPath();
+  ctx.arc(fx + dotR, iy + 8, dotR, 0, Math.PI * 2);
+  ctx.fill();
+  fx += dotR * 2 + dotGap;
+}
 ctx.font = '500 13px "Libre Franklin"';
 ctx.fillStyle = TEXT_MUTE;
-ctx.textBaseline = 'middle';
-ctx.fillText(statText, ix + 22, iy + 8);
+ctx.fillText(STAT_TAIL, fx - dotGap, iy + 8);
 
-const out = '/tmp/share-v2-preview.png';
-writeFileSync(out, canvas.toBuffer('image/png'));
-console.log(out, 'written', `${W}x${H} @${S}x`);
+writeFileSync(OUT, canvas.toBuffer('image/png'));
+console.log(OUT, 'written', `${W}x${H} @${S}x`);

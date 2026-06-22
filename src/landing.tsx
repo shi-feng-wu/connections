@@ -9,6 +9,7 @@ import {
   type RecapData,
   recapLayout,
 } from "./card-draw";
+import { GameView } from "./components";
 import { Game, type Puzzle } from "./game";
 import type { PlayerState } from "./player";
 import { Roster, type RosterView } from "./roster";
@@ -367,6 +368,94 @@ export function DemoRoster() {
         onViewChange={noop}
         season={DEMO_SEASON}
         allTime={DEMO_ALLTIME}
+      />
+    </div>
+  );
+}
+
+// ——— Self-playing desktop view ————————————————————————————————————————
+// The real GameView (board + live roster rail, the 50/50 desktop layout) driving
+// itself: the board self-solves while the room's rows reorder past each other beside
+// it. Used to record the 16:9 Discord activity "Video Preview" — gameplay AND live
+// multiplayer in one frame. Not on the landing page itself; harness/recording only.
+export function DemoGame() {
+  const still = useMemo(reducedMotion, []);
+  const ref = useRef<HTMLDivElement>(null);
+  const [key, setKey] = useState(0);
+  const game = useMemo(() => new Game(DEMO_PUZZLE), [key]);
+  const cycleStart = useRef(Date.now());
+  const [tick, setTick] = useState(0);
+  const players = useMemo(() => roomAtTick(tick, cycleStart.current), [tick]);
+
+  // Snappy, recording-only pacing so a full solve + several roster reshuffles fit a
+  // short clip at NATURAL speed — no post-hoc speed-up, no frame interpolation.
+  const ROOM_TICK = 800;
+
+  // tick the room (rows reorder)
+  useEffect(() => {
+    if (still) return;
+    const id = setInterval(() => setTick((t) => t + 1), ROOM_TICK);
+    return () => clearInterval(id);
+  }, [key, still]);
+
+  // drive the board solve through the GameView's DOM (same technique as DemoBoard)
+  useEffect(() => {
+    if (still) return;
+    let alive = true;
+    const root = ref.current;
+    const tile = (w: string): HTMLElement | null | undefined =>
+      root?.querySelector<HTMLElement>(`[data-flip="${CSS.escape(w)}"]`);
+    const submitBtn = (): HTMLButtonElement | undefined =>
+      [...(root?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+        (b) => b.textContent?.trim() === "Submit",
+      );
+    const tilesLeft = (): number =>
+      root?.querySelectorAll('[data-flip]:not([data-flip^="bar-"])').length ?? 0;
+    const until = async (cond: () => boolean, t = 6000): Promise<void> => {
+      const s = performance.now();
+      while (alive && !cond() && performance.now() - s < t) await sleep(80);
+    };
+    void (async () => {
+      await sleep(300);
+      for (const grp of DEMO_PUZZLE.groups) {
+        if (!alive) return;
+        const before = tilesLeft();
+        for (const w of grp.members) {
+          tile(w)?.click();
+          await sleep(60);
+        }
+        await sleep(70);
+        await until(() => {
+          const b = submitBtn();
+          return b != null && !b.disabled;
+        });
+        submitBtn()?.click();
+        await until(() => tilesLeft() <= before - 4);
+        await sleep(100);
+      }
+      await sleep(1600); // hold the finished board + standings, then restart
+      if (alive) {
+        cycleStart.current = Date.now();
+        setTick(0);
+        setKey((k) => k + 1);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [key, still]);
+
+  return (
+    <div ref={ref} aria-hidden data-demo-game className="pointer-events-none select-none">
+      <GameView
+        game={game}
+        gameKey={String(key)}
+        players={players}
+        selfId=""
+        season={DEMO_SEASON}
+        allTime={DEMO_ALLTIME}
+        onPresence={noop}
+        onFinish={noop}
       />
     </div>
   );

@@ -135,32 +135,32 @@ describe("shareCard", () => {
   const play = (guesses: string[][]): Game => Game.fromGuesses(puzzle, guesses);
   const solveAll: string[][] = [["A0", "B0", "C0", "D0"], ["A1", "B1", "C1", "D1"], ["A2", "B2", "C2", "D2"], ["A3", "B3", "C3", "D3"]];
 
-  it("wraps the title + one grid row per guess in a bordered container", () => {
+  it("wraps a plain Wordle-style title + one grid row per guess in a bordered container", () => {
     const c = card(play([["A0", "B0", "C0", "A1"], ...solveAll]), { puzzleNo: puzzle.id }); // one wrong, then a sweep
     expect(c.type).toBe(17); // CONTAINER
     const lines = body(c).split("\n");
-    expect(lines[0]).toBe("### Connections · Puzzle #1106");
+    expect(lines[0]).toBe("Connections #1106 4/4"); // plain text, groups-solved fraction (a win → 4/4)
     // The mixed first guess colours each word by its own group; the four solves are mono rows.
     expect(lines[1]).toBe(LEVELS[0].emoji.repeat(3) + LEVELS[1].emoji);
     expect(lines[2]).toBe(LEVELS[0].emoji.repeat(4));
     expect(lines).toHaveLength(6); // title + (1 wrong + 4 solves)
   });
 
-  it("celebrates a flawless win in the subtext and includes time + points", () => {
+  it("shows four remaining dots on a flawless win, plus time + points", () => {
     const c = card(play(solveAll), { puzzleNo: 1106, durationMs: 94_000, score: 380 });
     const line = statline(c);
-    expect(line).toContain("✅ Solved");
-    expect(line).toContain("no mistakes");
+    expect(line).toContain("⚪⚪⚪⚪"); // 4 remaining, 0 spent
+    expect(line).not.toContain("⚫"); // no spent dots on a clean grid
     expect(line).toContain("1:34"); // 94s → m:ss
     expect(line).toContain("380 pts");
   });
 
-  it("counts mistakes on a win and pluralises", () => {
+  it("renders the 4-dot tracker (remaining ⚪ then spent ⚫) on a win", () => {
     const c = card(play([["A0", "B0", "C0", "A1"], ["A0", "B0", "C0", "A2"], ...solveAll])); // 2 wrong, then solve
-    expect(statline(c)).toContain("2 mistakes");
+    expect(statline(c)).toContain("⚪⚪⚫⚫"); // 2 remaining, 2 spent — always four total
   });
 
-  it("reports groups reached on a loss (no time/points needed)", () => {
+  it("shows all four spent on a loss (time/points optional)", () => {
     // One correct group, then four wrong guesses from the two hardest groups to exhaust mistakes.
     const c = card(
       play([
@@ -172,13 +172,14 @@ describe("shareCard", () => {
       ]),
       { puzzleNo: 1106 },
     );
-    expect(statline(c)).toContain("❌ 1/4 groups");
+    expect(statline(c)).toContain("⚫⚫⚫⚫"); // 0 remaining, 4 spent → a loss
+    expect(statline(c)).not.toContain("⚪"); // no remaining dots
     expect(statline(c)).not.toContain("pts");
   });
 
-  it("falls back to a bare 'Connections' title when the number is unknown, and drops a zero duration", () => {
+  it("drops the '#number' from the title when unknown (keeps the x/4), and drops a zero duration", () => {
     const c = card(play(solveAll), { durationMs: 0 });
-    expect(body(c).split("\n")[0]).toBe("### Connections");
+    expect(body(c).split("\n")[0]).toBe("Connections 4/4"); // no "#1106", still the fraction
     expect(statline(c)).not.toMatch(/\d+s|\d+:\d\d/); // no time token
   });
 });

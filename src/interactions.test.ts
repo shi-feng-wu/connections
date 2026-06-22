@@ -1,6 +1,7 @@
 import { generateKeyPairSync, sign as edSign } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { installNudgePayload, isUserInstallOnly, routeInteraction, verifyDiscordSig } from "../api/interactions";
+import { Game, LEVELS, type Puzzle } from "./game";
+import { installNudgePayload, isUserInstallOnly, routeInteraction, shareContent, verifyDiscordSig } from "../api/interactions";
 
 // api/interactions.ts: Discord signs every interaction (Ed25519); an unverified
 // request must be refused, and the recap's Play button must map to a launch.
@@ -105,6 +106,76 @@ describe("routeInteraction", () => {
     expect(r.type).toBe(4);
     expect(r.data.components).toBeUndefined(); // no button
     expect(r.data.content).toContain("already");
+  });
+});
+
+// /share posts the player's finished result grid (shareContent) publicly. The grid itself is
+// Game.shareGrid; these cover the title/number framing and the outcome-aware subtext stat line.
+describe("shareContent", () => {
+  // A 16-word puzzle whose word names encode their group ("A2" → level 2), mirroring game.test.
+  const puzzle: Puzzle = {
+    id: 1106,
+    date: "2026-06-21",
+    editor: "Test",
+    groups: [
+      { level: 0, category: "L0", members: ["A0", "B0", "C0", "D0"] },
+      { level: 1, category: "L1", members: ["A1", "B1", "C1", "D1"] },
+      { level: 2, category: "L2", members: ["A2", "B2", "C2", "D2"] },
+      { level: 3, category: "L3", members: ["A3", "B3", "C3", "D3"] },
+    ],
+    layout: ["A0", "B0", "C0", "D0", "A1", "B1", "C1", "D1", "A2", "B2", "C2", "D2", "A3", "B3", "C3", "D3"],
+  };
+  const play = (guesses: string[][]): Game => Game.fromGuesses(puzzle, guesses);
+  const solveAll: string[][] = [["A0", "B0", "C0", "D0"], ["A1", "B1", "C1", "D1"], ["A2", "B2", "C2", "D2"], ["A3", "B3", "C3", "D3"]];
+
+  it("titles with the puzzle number and renders one grid row per guess", () => {
+    const g = play([["A0", "B0", "C0", "A1"], ...solveAll]); // one wrong guess, then a clean sweep
+    const lines = shareContent(g, { puzzleNo: puzzle.id }).split("\n");
+    expect(lines[0]).toBe("**Connections**");
+    expect(lines[1]).toBe("Puzzle #1106");
+    // The mixed first guess colours each word by its own group; the four solves are mono rows.
+    expect(lines[2]).toBe(LEVELS[0].emoji.repeat(3) + LEVELS[1].emoji);
+    expect(lines[3]).toBe(LEVELS[0].emoji.repeat(4));
+    expect(lines.at(-1)).toMatch(/^-# /); // a subtext stat line closes the message
+  });
+
+  it("celebrates a flawless win and includes time + points when scored", () => {
+    const g = play(solveAll);
+    const line = shareContent(g, { puzzleNo: 1106, durationMs: 94_000, score: 380 }).split("\n").at(-1);
+    expect(line).toContain("✅ Solved");
+    expect(line).toContain("no mistakes");
+    expect(line).toContain("1:34"); // 94s → m:ss
+    expect(line).toContain("380 pts");
+  });
+
+  it("counts mistakes on a win and pluralises", () => {
+    const g = play([["A0", "B0", "C0", "A1"], ["A0", "B0", "C0", "A2"], ...solveAll]); // 2 wrong, then solve
+    expect(g.status).toBe("won");
+    const line = shareContent(g).split("\n").at(-1);
+    expect(line).toContain("2 mistakes");
+  });
+
+  it("reports groups reached on a loss (no time/points needed)", () => {
+    // One correct group, then four wrong guesses from the two hardest groups to exhaust mistakes.
+    const g = play([
+      ["A0", "B0", "C0", "D0"],
+      ["A2", "B2", "C2", "A3"],
+      ["A2", "B2", "B3", "C3"],
+      ["A2", "A3", "B3", "C3"],
+      ["B2", "C2", "D2", "D3"],
+    ]);
+    expect(g.status).toBe("lost");
+    const line = shareContent(g, { puzzleNo: 1106 }).split("\n").at(-1);
+    expect(line).toContain("❌ 1/4 groups");
+    expect(line).not.toContain("pts");
+  });
+
+  it("omits the puzzle number line when unknown, and drops a zero/absent duration", () => {
+    const g = play(solveAll);
+    const out = shareContent(g, { durationMs: 0 });
+    expect(out).not.toContain("Puzzle #");
+    expect(out.split("\n")[1]).toMatch(/🟨|🟩|🟦|🟪/); // grid starts right after the title
+    expect(out).not.toMatch(/\d+s|\d+:\d\d/); // no time token
   });
 });
 

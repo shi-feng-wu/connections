@@ -15,7 +15,7 @@ import {
 } from "./card-draw";
 import { DayTurnover, GameView, LoadingScreen } from "./components";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
-import { Landing } from "./landing";
+import { DemoBoard, Landing } from "./landing";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import { PipThumbnail } from "./pip";
 import type { PlayerState } from "./player";
@@ -1160,6 +1160,8 @@ const known = [
   "turnover",
   "device",
   "landing",
+  "demo",
+  "standings",
 ];
 // #simulate and #feedback both isolate the Simulate playground (#feedback also
 // auto-fires a one-away guess to surface the header feedback pill); #card isolates the
@@ -1177,6 +1179,12 @@ const onlyTurnover = pick === "turnover";
 // #landing isolates the public landing page (src/landing.tsx) — what a plain
 // browser visit to the production deployment gets instead of the game.
 const onlyLanding = pick === "landing";
+// #demo isolates JUST the self-playing board (landing.tsx DemoBoard), full-bleed and
+// centered on the dark stage — the clean source for recording a gameplay demo video
+// (the Discord activity store preview, à la Wordle). No page chrome, no labels.
+const onlyDemo = pick === "demo";
+// #standings isolates the leaderboard panel full-frame — scene B of the preview reel.
+const onlyStandings = pick === "standings";
 const shown =
   known.includes(pick) && !onlySim && !onlyCard && !onlyPip
     ? STATES.filter((s) => String(s.props.label).toLowerCase().includes(pick))
@@ -1278,6 +1286,34 @@ const LANDING = (
     </div>
     <Landing />
   </section>
+);
+
+// Just the self-playing board, centered full-screen — recorded into the activity's
+// gameplay preview video. Bare (no amber label) so the capture is clean.
+const DEMO = (
+  <div className="flex min-h-dvh w-full items-center justify-center p-4">
+    <div className="w-full max-w-[460px]">
+      <DemoBoard />
+    </div>
+  </div>
+);
+
+// Just the room leaderboard (Roster's Live / Season / All-time tabs), centered and
+// framed to match #demo's board — scene B of the activity preview reel ("…and climb
+// the leaderboard"). Uncontrolled so the recorder can click between tabs.
+const STANDINGS = (
+  // top-aligned (not centered) so switching tabs — which changes the list height —
+  // never shifts the tab row, keeping the recorder's capture clip stable.
+  <div className="flex min-h-dvh w-full justify-center px-4 pt-[120px]">
+    <div className="w-full max-w-[460px]">
+      <Roster
+        players={ROSTER}
+        selfId={SELF_ID}
+        season={SEASON}
+        allTime={ALLTIME}
+      />
+    </div>
+  </div>
 );
 
 const RECAPS = (
@@ -1421,6 +1457,10 @@ const fullPage = (
 createRoot(document.getElementById("preview")!).render(
   pick === "" ? (
     fullPage
+  ) : onlyDemo ? (
+    DEMO
+  ) : onlyStandings ? (
+    STANDINGS
   ) : (
     <div className="flex flex-col items-center gap-16 py-10">
       {onlyLanding && LANDING}

@@ -161,3 +161,34 @@ if (enable) {
   const cmd = await createRes.json();
   console.log(`Registered chat command /${cmd.name} (id ${cmd.id}).`);
 }
+
+// --- 4) share chat-input command --------------------------------------------------
+// /share posts the player's result grid for today's puzzle (one row of category-colour
+// squares per guess, Wordle-style) to the channel. The response is built in
+// api/interactions.ts (shareResponse); this only registers the name. Same contexts +
+// integration types as the launch command so it's available in user-install servers too —
+// the share posts as an interaction response, which needs no bot in the guild.
+const SHARE = 'share';
+const SHARE_DESCRIPTION = "Share your Connections result grid for today's puzzle";
+const share = commands.find((c) => c.type === CHAT_INPUT && c.name === SHARE);
+if (share) {
+  console.log(`Chat command /${SHARE} already registered (id ${share.id}).`);
+} else {
+  const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({
+      name: SHARE,
+      description: SHARE_DESCRIPTION,
+      type: CHAT_INPUT,
+      contexts: CONTEXTS,
+      integration_types: INTEGRATION_TYPES,
+    }),
+  });
+  if (!createRes.ok) {
+    console.error(`Failed to register /${SHARE}: ${createRes.status} ${await createRes.text()}`);
+    process.exit(1);
+  }
+  const cmd = await createRes.json();
+  console.log(`Registered chat command /${cmd.name} (id ${cmd.id}).`);
+}

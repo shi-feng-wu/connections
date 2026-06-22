@@ -105,7 +105,7 @@ try {
 // a human-ish stagger, submit, wait for the morph, repeat; hold the end screen,
 // then remount and loop. The wrapper is pointer-events-none, so visitors can
 // watch but not play.
-function DemoBoard() {
+export function DemoBoard() {
   const [key, setKey] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
   // Reduced motion: skip the driver entirely and show the finished board.

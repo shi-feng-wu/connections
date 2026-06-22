@@ -1,7 +1,7 @@
 import { waitUntil } from "@vercel/functions";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createPublicKey, verify as edVerify } from "node:crypto";
-import type { Puzzle } from "../src/game.js";
+import { Game, MAX_MISTAKES, type Puzzle } from "../src/game.js";
 import { canonicalScope } from "../src/scope.js";
 import { admin } from "./_admin.js";
 import type { CardPlayer } from "./_card.js";
@@ -51,6 +51,10 @@ const LAUNCH_COMMANDS = new Set(["connections", "play"]);
 // The "/enable-posts" command: in a server without the bot it replies (privately) with a
 // one-click "Add to Server" button — the only way recaps and the live card can post there.
 const ENABLE_POSTS_COMMAND = "enable-posts";
+// The "/share" command (mirrors Wordle's share): posts the player's finished result grid —
+// one row of category-colour squares per guess — publicly to the channel. Computed from the
+// player's stored guesses (a DB read), so it's handled off the pure router (see shareResponse).
+const SHARE_COMMAND = "share";
 // Guild-install permissions for that button's URL — KEEP IN SYNC with scripts/configure-install.mjs
 // (View Channel | Send Messages | Embed Links | Attach Files | Read Message History).
 const INSTALL_PERMISSIONS = "117760";
@@ -116,6 +120,13 @@ function isLaunchCommand(body: Interaction): boolean {
 function isPlayButton(body: Interaction): boolean {
   return (
     body.type === MESSAGE_COMPONENT && body.data?.custom_id === PLAY_CUSTOM_ID
+  );
+}
+
+// The "/share" slash command — posts the player's result grid for today's puzzle.
+function isShareCommand(body: Interaction): boolean {
+  return (
+    body.type === APPLICATION_COMMAND && body.data?.name === SHARE_COMMAND
   );
 }
 
@@ -213,6 +224,128 @@ export function routeInteraction(body: Interaction): object {
   return {
     type: CHANNEL_MESSAGE_WITH_SOURCE,
     data: { content: "Unsupported interaction.", flags: EPHEMERAL },
+  };
+}
+
+// "1:34" for a minute-plus solve, "42s" under a minute, "" when no duration is known.
+// (The scored row carries duration_ms; an unscored finish leaves the time off the line.)
+function formatShareDuration(ms?: number | null): string {
+  if (ms == null || !Number.isFinite(ms) || ms <= 0) return "";
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+}
+
+// The /share message body: the NYT-style title + puzzle number, the result grid (one row of
+// category-colour squares per guess, from Game.shareGrid), and a subtext stat line. Pure and
+// finished-game-only — shareResponse gates on game.status before calling it. duration/score
+// come from the scored row when present and are simply omitted otherwise. Exported for tests.
+export function shareContent(
+  game: Game,
+  opts: { puzzleNo?: number; durationMs?: number | null; score?: number | null } = {},
+): string {
+  const won = game.status === "won";
+  const mistakes = MAX_MISTAKES - game.mistakesLeft;
+  // Lead the subtext with the outcome, then the human-interesting facts. A win highlights a
+  // flawless grid; a loss reports how far they got (mistakes on a loss are always MAX, so the
+  // group count is the meaningful number).
+  const stats: string[] = [
+    won
+      ? `✅ Solved · ${mistakes === 0 ? "no mistakes 🎯" : `${mistakes} mistake${mistakes === 1 ? "" : "s"}`}`
+      : `❌ ${game.groupsSolved}/4 groups`,
+  ];
+  const dur = formatShareDuration(opts.durationMs);
+  if (dur) stats.push(dur);
+  if (typeof opts.score === "number") stats.push(`${opts.score} pts`);
+
+  return [
+    "**Connections**",
+    opts.puzzleNo ? `Puzzle #${opts.puzzleNo}` : null,
+    game.shareGrid(),
+    `-# ${stats.join(" · ")}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+// Build the /share interaction response from the player's own stored guesses. A public message
+// (CHANNEL_MESSAGE_WITH_SOURCE, no EPHEMERAL flag) on success — Discord posts it on the app's
+// behalf, so it works even where the bot isn't installed (user-install share). Anything that
+// isn't a finished game returns an ephemeral nudge only the invoker sees, so a half-played or
+// not-yet-played /share never spams the channel. Identity comes from the (Discord-verified)
+// interaction, so there's no OAuth round-trip; the grid is replayed from the same append-only
+// `progress` record /api/score trusts, so it can't be faked from the request.
+async function shareResponse(body: LaunchInteraction): Promise<object> {
+  const ephemeral = (content: string) => ({
+    type: CHANNEL_MESSAGE_WITH_SOURCE,
+    data: { content, flags: EPHEMERAL },
+  });
+
+  const u = body.member?.user ?? body.user;
+  if (!u?.id) return ephemeral("Couldn’t read your Discord account — try again.");
+
+  const db = admin();
+  if (!db) return ephemeral("Sharing is unavailable right now — try again in a bit.");
+
+  const date = todayET();
+  const { data: progress } = await db
+    .from("progress")
+    .select("guesses")
+    .eq("user_id", u.id)
+    .eq("puzzle_date", date)
+    .maybeSingle();
+  const committed: unknown = progress?.guesses;
+  if (!Array.isArray(committed) || committed.length === 0) {
+    return ephemeral(
+      "You haven’t played today’s Connections yet. Launch it with `/connections`, then `/share` your grid.",
+    );
+  }
+
+  let puzzle: Puzzle;
+  try {
+    puzzle = await fetchPuzzle(date);
+  } catch {
+    return ephemeral("Couldn’t load today’s puzzle just now — try `/share` again in a moment.");
+  }
+  const game = Game.fromGuesses(puzzle, committed);
+  if (game.status === "playing") {
+    const left = game.mistakesLeft;
+    return ephemeral(
+      `You’re still mid-puzzle — ${game.groupsSolved}/4 groups, ${left} mistake${left === 1 ? "" : "s"} left. ` +
+        "Finish it, then `/share` your grid.",
+    );
+  }
+
+  // Best-effort time + points from the scored row for the room being shared in (the scope the
+  // result was recorded under). Absent (shared from a different room, or never scored) → the
+  // line just drops time/points; the grid still posts. Never blocks the share.
+  let durationMs: number | null = null;
+  let score: number | null = null;
+  const guildId = typeof body.guild_id === "string" ? body.guild_id : null;
+  const channelId =
+    typeof body.channel_id === "string"
+      ? body.channel_id
+      : typeof body.channel?.id === "string"
+        ? body.channel.id
+        : null;
+  const scope = canonicalScope(guildId, channelId);
+  if (scope) {
+    const { data: row } = await db
+      .from("scores")
+      .select("score, duration_ms")
+      .eq("user_id", u.id)
+      .eq("puzzle_date", date)
+      .eq("scope_id", scope)
+      .maybeSingle();
+    if (row) {
+      score = typeof row.score === "number" ? row.score : null;
+      durationMs = typeof row.duration_ms === "number" ? row.duration_ms : null;
+    }
+  }
+
+  return {
+    type: CHANNEL_MESSAGE_WITH_SOURCE,
+    data: { content: shareContent(game, { puzzleNo: puzzle.id, durationMs, score }) },
   };
 }
 
@@ -603,6 +736,28 @@ export default async function handler(
     body = JSON.parse(raw) as LaunchInteraction;
   } catch {
     res.status(400).json({ error: "bad body" });
+    return;
+  }
+
+  // "/share" needs the player's stored guesses (a DB read), so it can't go through the pure
+  // synchronous router. Build its response (the result grid, or an ephemeral nudge) and reply
+  // — comfortably inside the 3s deadline: one indexed `progress` read + a cached puzzle fetch.
+  // A thrown error degrades to an ephemeral apology rather than a dead "did not respond".
+  if (isShareCommand(body)) {
+    let response: object;
+    try {
+      response = await shareResponse(body);
+    } catch (e) {
+      console.error("[share] threw", e instanceof Error ? e.message : e);
+      response = {
+        type: CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          content: "Couldn’t build your share just now — try `/share` again.",
+          flags: EPHEMERAL,
+        },
+      };
+    }
+    res.status(200).json(response);
     return;
   }
 

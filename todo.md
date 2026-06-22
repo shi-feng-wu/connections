@@ -10,3 +10,4 @@
 - recap suggestions pushes up the no one in leaderboard text
 - keyboard commands
 - footer
+- in the recap cards, special symbols don't show up right, emojis probably don't either. look at zzz in recap card

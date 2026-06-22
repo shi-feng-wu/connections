@@ -558,6 +558,7 @@ export function Roster({
   season,
   allTime,
   roomKey,
+  today,
   nextPuzzle,
   onAddBot,
 }: {
@@ -575,6 +576,8 @@ export function Roster({
   // stable room id (g:<guild> / c:<channel>) keying the per-board position-change
   // snapshot; null standalone/preview → no movement arrows.
   roomKey?: string | null;
+  // current ET puzzle-day (YYYY-MM-DD); the position-change baseline resets when it rolls.
+  today?: string | null;
   // your run is over → pin the next-puzzle countdown under the list (the footer's
   // score summary stays clean; this is the quiet "rail footer" slot of the redesign).
   nextPuzzle?: boolean;
@@ -594,7 +597,7 @@ export function Roster({
   // each board tracks its own movement. Null on the live tab (or standalone) → no arrows.
   const snapshotKey =
     view !== "live" && roomKey ? `${roomKey}:${scope ?? "x"}:${view}` : null;
-  const prevRanks = useRankSnapshot(snapshotKey, standingsData.board);
+  const prevRanks = useRankSnapshot(snapshotKey, standingsData.board, today ?? null);
   // Remount key for the active panel: changing the tab OR the Channel/Server scope swaps it,
   // so animate-tab-in re-fires and the new list fades up the same way a tab switch does.
   const panelKey = `${view}:${scope ?? ""}`;

@@ -362,6 +362,7 @@ export function GameView({
   season,
   allTime,
   roomKey,
+  today,
   scope,
   onScopeChange,
   onAddBot,
@@ -378,6 +379,8 @@ export function GameView({
   allTime: Standings;
   // stable room id keying the standings position-change snapshot; forwarded to Roster.
   roomKey?: string | null;
+  // current ET puzzle-day; the position-change baseline resets when it rolls. Forwarded to Roster.
+  today?: string | null;
   // shared Channel/Server toggle (guild launches only); omitted → no toggle.
   scope?: RosterScope;
   onScopeChange?: (s: RosterScope) => void;
@@ -469,6 +472,7 @@ export function GameView({
               season={season}
               allTime={allTime}
               roomKey={roomKey}
+              today={today}
               nextPuzzle={done}
               onAddBot={done ? onAddBot : undefined}
             />

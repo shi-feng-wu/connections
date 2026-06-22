@@ -1,17 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import type { BoardRow } from "./leaderboard";
 
-// "Position change since you last looked" for the standings tabs. The board itself
+// "Position change since today's puzzle dropped" for the standings tabs. The board itself
 // carries no rank — it arrives ordered richest-first and rank is just the row index
-// (see season.tsx). So to show a player moving up or down we keep a per-device snapshot
-// of {user_id -> rank} from the last time this exact board (room + scope + window) was
-// opened, and diff the current ranks against it. Per-device by design (localStorage):
-// the agreed zero-backend implementation, so arrows can differ across devices and reset
-// if storage is cleared.
+// (see season.tsx). So to show movement we keep a per-device baseline of {user_id -> rank}
+// captured at the start of the current ET puzzle-day, and diff the current ranks against
+// it. The baseline is frozen for the whole day and recaptured at the next midnight-ET
+// rollover (when the new Connections is released), so arrows accumulate across the day and
+// reset daily. Per-device by design (localStorage): the agreed zero-backend implementation,
+// so arrows can differ across devices and reset if storage is cleared.
 
 const PREFIX = "connections:standingsRank:";
 
 type RankSnapshot = Record<string, number>;
+
+// A day's baseline ranking: the standings as of the start of ET day `date`.
+export type Baseline = { date: string; ranks: RankSnapshot };
 
 // {user_id -> 1-based rank} from the board's order. Mirrors season.tsx's `i + 1`.
 export function rankMap(board: BoardRow[]): RankSnapshot {
@@ -34,47 +38,72 @@ export function rankDelta(
   return was != null ? was - rank : null;
 }
 
-function readSnapshot(key: string): RankSnapshot | null {
+// Today's baseline given what's stored. Same ET day → reuse the stored baseline (so it
+// stays frozen and arrows accumulate); a new day, a first-ever view, or a legacy/garbled
+// value → today's current ranks become the baseline and must be persisted (arrows reset to
+// none until scores shift). Pure, so the daily-reset logic is unit-testable.
+export function resolveBaseline(
+  stored: Baseline | null,
+  today: string,
+  current: RankSnapshot,
+): { baseline: RankSnapshot; persist: Baseline | null } {
+  if (stored && stored.date === today) {
+    return { baseline: stored.ranks, persist: null };
+  }
+  return { baseline: current, persist: { date: today, ranks: current } };
+}
+
+function readBaseline(key: string): Baseline | null {
   try {
     const raw = localStorage.getItem(PREFIX + key);
     if (!raw) return null;
-    const v = JSON.parse(raw) as unknown;
-    return v && typeof v === "object" ? (v as RankSnapshot) : null;
+    const v = JSON.parse(raw) as Partial<Baseline> | null;
+    // A legacy bare-map value (no `date`) reads as no baseline → treated as a fresh day.
+    return v && typeof v === "object" && typeof v.date === "string" && v.ranks
+      ? { date: v.date, ranks: v.ranks }
+      : null;
   } catch {
     return null; // storage blocked / bad JSON — just show no arrows
   }
 }
 
-function writeSnapshot(key: string, snap: RankSnapshot): void {
+function writeBaseline(key: string, base: Baseline): void {
   try {
-    localStorage.setItem(PREFIX + key, JSON.stringify(snap));
+    localStorage.setItem(PREFIX + key, JSON.stringify(base));
   } catch {
     /* storage blocked — fine, next open simply finds nothing to diff against */
   }
 }
 
-// Returns the ranks from the LAST time `key` was opened (frozen for this visit), then
-// records the current ranks for next time. Keyed only on `key`, so mid-visit board churn
-// (someone finishes a game and the order shifts) does NOT re-snapshot — arrows stay
-// stable while you look and reflect movement *between* visits. A null key (e.g. the live
-// tab, or no room) is a no-op that returns null, so the hook stays unconditional.
+// Returns the baseline ranks for the current ET day `today` (the standings at the day's
+// start), recapturing them at each midnight-ET rollover. Keyed on `[key, today]`: a `today`
+// change at the rollover re-fires the effect and resets the baseline, while mid-day board
+// churn (someone finishes and the order shifts) does NOT — the baseline stays frozen so
+// arrows accumulate across the day. A null `key` or `today` (live tab, no room, standalone)
+// is a no-op returning null, so the hook stays unconditional.
 export function useRankSnapshot(
   key: string | null,
   board: BoardRow[],
+  today: string | null,
 ): RankSnapshot | null {
   const [prev, setPrev] = useState<RankSnapshot | null>(null);
-  // Latest board without making it an effect dep — we snapshot at open, not on churn.
+  // Latest board without making it an effect dep — we snapshot at the day boundary, not on churn.
   const boardRef = useRef(board);
   boardRef.current = board;
 
   useEffect(() => {
-    if (!key) {
+    if (!key || !today) {
       setPrev(null);
       return;
     }
-    setPrev(readSnapshot(key)); // freeze the previous visit's ranks for this session
-    writeSnapshot(key, rankMap(boardRef.current)); // ...then persist current for next time
-  }, [key]);
+    const { baseline, persist } = resolveBaseline(
+      readBaseline(key),
+      today,
+      rankMap(boardRef.current),
+    );
+    setPrev(baseline);
+    if (persist) writeBaseline(key, persist);
+  }, [key, today]);
 
   return prev;
 }

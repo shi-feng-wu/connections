@@ -875,6 +875,8 @@ export function App({
         allTime={allTime}
         // stable room id for the standings position-change snapshot (null standalone).
         roomKey={scopeRef.current}
+        // current ET day — the position-change baseline resets at the midnight-ET rollover.
+        today={etDate()}
         // Channel/Server toggle only in a guild — a DM/group (c: scope) has no distinction.
         scope={guildIdRef.current ? scopeMode : undefined}
         onScopeChange={guildIdRef.current ? setScopeMode : undefined}

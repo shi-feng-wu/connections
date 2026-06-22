@@ -1,7 +1,7 @@
 import { generateKeyPairSync, sign as edSign } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { Game, LEVELS, type Puzzle } from "./game";
-import { installNudgePayload, isUserInstallOnly, routeInteraction, shareContent, verifyDiscordSig } from "../api/interactions";
+import { installNudgePayload, isUserInstallOnly, routeInteraction, shareEmbed, verifyDiscordSig } from "../api/interactions";
 
 // api/interactions.ts: Discord signs every interaction (Ed25519); an unverified
 // request must be refused, and the recap's Play button must map to a launch.
@@ -109,9 +109,11 @@ describe("routeInteraction", () => {
   });
 });
 
-// /share posts the player's finished result grid (shareContent) publicly. The grid itself is
-// Game.shareGrid; these cover the title/number framing and the outcome-aware subtext stat line.
-describe("shareContent", () => {
+// /share posts the player's finished result as a framed embed (shareEmbed) — a bordered card
+// like Wordle's. The grid itself is Game.shareGrid in the embed description; these cover the
+// title/number framing, the outcome-tinted accent bar, and the footer stat line.
+type ShareEmbed = { title: string; description: string; color: number; footer: { text: string } };
+describe("shareEmbed", () => {
   // A 16-word puzzle whose word names encode their group ("A2" → level 2), mirroring game.test.
   const puzzle: Puzzle = {
     id: 1106,
@@ -126,56 +128,54 @@ describe("shareContent", () => {
     layout: ["A0", "B0", "C0", "D0", "A1", "B1", "C1", "D1", "A2", "B2", "C2", "D2", "A3", "B3", "C3", "D3"],
   };
   const play = (guesses: string[][]): Game => Game.fromGuesses(puzzle, guesses);
+  const embed = (g: Game, opts?: Parameters<typeof shareEmbed>[1]): ShareEmbed => shareEmbed(g, opts) as ShareEmbed;
   const solveAll: string[][] = [["A0", "B0", "C0", "D0"], ["A1", "B1", "C1", "D1"], ["A2", "B2", "C2", "D2"], ["A3", "B3", "C3", "D3"]];
 
-  it("titles with the puzzle number and renders one grid row per guess", () => {
-    const g = play([["A0", "B0", "C0", "A1"], ...solveAll]); // one wrong guess, then a clean sweep
-    const lines = shareContent(g, { puzzleNo: puzzle.id }).split("\n");
-    expect(lines[0]).toBe("**Connections**");
-    expect(lines[1]).toBe("Puzzle #1106");
+  it("titles with the puzzle number and renders one grid row per guess in the description", () => {
+    const e = embed(play([["A0", "B0", "C0", "A1"], ...solveAll]), { puzzleNo: puzzle.id }); // one wrong, then a sweep
+    expect(e.title).toBe("Connections · Puzzle #1106");
+    const rows = e.description.split("\n");
     // The mixed first guess colours each word by its own group; the four solves are mono rows.
-    expect(lines[2]).toBe(LEVELS[0].emoji.repeat(3) + LEVELS[1].emoji);
-    expect(lines[3]).toBe(LEVELS[0].emoji.repeat(4));
-    expect(lines.at(-1)).toMatch(/^-# /); // a subtext stat line closes the message
+    expect(rows[0]).toBe(LEVELS[0].emoji.repeat(3) + LEVELS[1].emoji);
+    expect(rows[1]).toBe(LEVELS[0].emoji.repeat(4));
+    expect(rows).toHaveLength(5); // 1 wrong + 4 solves
   });
 
-  it("celebrates a flawless win and includes time + points when scored", () => {
-    const g = play(solveAll);
-    const line = shareContent(g, { puzzleNo: 1106, durationMs: 94_000, score: 380 }).split("\n").at(-1);
-    expect(line).toContain("✅ Solved");
-    expect(line).toContain("no mistakes");
-    expect(line).toContain("1:34"); // 94s → m:ss
-    expect(line).toContain("380 pts");
+  it("celebrates a flawless win in the footer, tints the bar green, includes time + points", () => {
+    const e = embed(play(solveAll), { puzzleNo: 1106, durationMs: 94_000, score: 380 });
+    expect(e.color).toBe(0xa0c35a); // green accent on a win
+    expect(e.footer.text).toContain("✅ Solved");
+    expect(e.footer.text).toContain("no mistakes");
+    expect(e.footer.text).toContain("1:34"); // 94s → m:ss
+    expect(e.footer.text).toContain("380 pts");
   });
 
   it("counts mistakes on a win and pluralises", () => {
-    const g = play([["A0", "B0", "C0", "A1"], ["A0", "B0", "C0", "A2"], ...solveAll]); // 2 wrong, then solve
-    expect(g.status).toBe("won");
-    const line = shareContent(g).split("\n").at(-1);
-    expect(line).toContain("2 mistakes");
+    const e = embed(play([["A0", "B0", "C0", "A1"], ["A0", "B0", "C0", "A2"], ...solveAll])); // 2 wrong, then solve
+    expect(e.footer.text).toContain("2 mistakes");
   });
 
-  it("reports groups reached on a loss (no time/points needed)", () => {
+  it("reports groups reached on a loss with a muted bar (no time/points needed)", () => {
     // One correct group, then four wrong guesses from the two hardest groups to exhaust mistakes.
-    const g = play([
-      ["A0", "B0", "C0", "D0"],
-      ["A2", "B2", "C2", "A3"],
-      ["A2", "B2", "B3", "C3"],
-      ["A2", "A3", "B3", "C3"],
-      ["B2", "C2", "D2", "D3"],
-    ]);
-    expect(g.status).toBe("lost");
-    const line = shareContent(g, { puzzleNo: 1106 }).split("\n").at(-1);
-    expect(line).toContain("❌ 1/4 groups");
-    expect(line).not.toContain("pts");
+    const e = embed(
+      play([
+        ["A0", "B0", "C0", "D0"],
+        ["A2", "B2", "C2", "A3"],
+        ["A2", "B2", "B3", "C3"],
+        ["A2", "A3", "B3", "C3"],
+        ["B2", "C2", "D2", "D3"],
+      ]),
+      { puzzleNo: 1106 },
+    );
+    expect(e.color).toBe(0x80848e); // muted slate on a loss
+    expect(e.footer.text).toContain("❌ 1/4 groups");
+    expect(e.footer.text).not.toContain("pts");
   });
 
-  it("omits the puzzle number line when unknown, and drops a zero/absent duration", () => {
-    const g = play(solveAll);
-    const out = shareContent(g, { durationMs: 0 });
-    expect(out).not.toContain("Puzzle #");
-    expect(out.split("\n")[1]).toMatch(/🟨|🟩|🟦|🟪/); // grid starts right after the title
-    expect(out).not.toMatch(/\d+s|\d+:\d\d/); // no time token
+  it("falls back to a bare 'Connections' title when the number is unknown, and drops a zero duration", () => {
+    const e = embed(play(solveAll), { durationMs: 0 });
+    expect(e.title).toBe("Connections");
+    expect(e.footer.text).not.toMatch(/\d+s|\d+:\d\d/); // no time token
   });
 });
 

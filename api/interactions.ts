@@ -236,19 +236,26 @@ function formatShareDuration(ms?: number | null): string {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 }
 
-// The /share message body: the NYT-style title + puzzle number, the result grid (one row of
-// category-colour squares per guess, from Game.shareGrid), and a subtext stat line. Pure and
-// finished-game-only — shareResponse gates on game.status before calling it. duration/score
-// come from the scored row when present and are simply omitted otherwise. Exported for tests.
-export function shareContent(
+// Accent-bar colours for the share embed's left edge — the only colour the frame carries, so
+// it doubles as the outcome cue. Win → the Connections "green" group colour; loss → muted slate.
+const SHARE_WIN_COLOR = 0xa0c35a;
+const SHARE_LOSS_COLOR = 0x80848e;
+
+// The /share result as a framed embed — Discord's bordered card, mirroring Wordle's share box:
+// a "Connections · Puzzle #N" title, the colour-square grid (one row per guess, from
+// Game.shareGrid) as the body, an outcome-tinted accent bar, and a small footer stat line.
+// Pure and finished-game-only — shareResponse gates on game.status before calling it.
+// duration/score come from the scored row when present and are simply omitted otherwise.
+// Exported for tests.
+export function shareEmbed(
   game: Game,
   opts: { puzzleNo?: number; durationMs?: number | null; score?: number | null } = {},
-): string {
+): object {
   const won = game.status === "won";
   const mistakes = MAX_MISTAKES - game.mistakesLeft;
-  // Lead the subtext with the outcome, then the human-interesting facts. A win highlights a
-  // flawless grid; a loss reports how far they got (mistakes on a loss are always MAX, so the
-  // group count is the meaningful number).
+  // Footer leads with the outcome, then the human-interesting facts. A win highlights a flawless
+  // grid; a loss reports how far they got (mistakes on a loss are always MAX, so the group count
+  // is the meaningful number). The accent bar already carries win/loss as colour.
   const stats: string[] = [
     won
       ? `✅ Solved · ${mistakes === 0 ? "no mistakes 🎯" : `${mistakes} mistake${mistakes === 1 ? "" : "s"}`}`
@@ -258,14 +265,12 @@ export function shareContent(
   if (dur) stats.push(dur);
   if (typeof opts.score === "number") stats.push(`${opts.score} pts`);
 
-  return [
-    "**Connections**",
-    opts.puzzleNo ? `Puzzle #${opts.puzzleNo}` : null,
-    game.shareGrid(),
-    `-# ${stats.join(" · ")}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  return {
+    title: opts.puzzleNo ? `Connections · Puzzle #${opts.puzzleNo}` : "Connections",
+    description: game.shareGrid(),
+    color: won ? SHARE_WIN_COLOR : SHARE_LOSS_COLOR,
+    footer: { text: stats.join(" · ") },
+  };
 }
 
 // Build the /share interaction response from the player's own stored guesses. A public message
@@ -345,7 +350,7 @@ async function shareResponse(body: LaunchInteraction): Promise<object> {
 
   return {
     type: CHANNEL_MESSAGE_WITH_SOURCE,
-    data: { content: shareContent(game, { puzzleNo: puzzle.id, durationMs, score }) },
+    data: { embeds: [shareEmbed(game, { puzzleNo: puzzle.id, durationMs, score })] },
   };
 }
 

@@ -12,10 +12,11 @@ import {
   useEffect,
   useRef,
   useState,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { APP_VERSION, CHANGELOG } from "./changelog";
 import { HoverButton } from "./hoverbutton";
 
 // Info links from the redesign ("Desktop/Mobile Connections" handoff). Desktop surfaces
@@ -27,8 +28,10 @@ import { HoverButton } from "./hoverbutton";
 // (what's specific to playing on Discord — scoring, leaderboards, recap/live cards), and
 // Send feedback. Structure mirrors the design files; the content is ours.
 
-// Current version — the latest CHANGELOG entry. Shown at the foot of the bar/sheet.
-export const APP_VERSION = "v1.6";
+// Current version + the changelog entries are derived from changelog.md (see ./changelog),
+// where the latest release sets APP_VERSION. Re-exported so existing importers of this
+// module keep resolving it here.
+export { APP_VERSION };
 
 type LinkId = "changelog" | "faq" | "feedback";
 type LinkDef = {
@@ -44,9 +47,20 @@ type LinkDef = {
 };
 
 const LINKS: LinkDef[] = [
-  { key: "changelog", label: "Changelog", Icon: FileText, badge: true, page: "changelog" },
+  {
+    key: "changelog",
+    label: "Changelog",
+    Icon: FileText,
+    badge: true,
+    page: "changelog",
+  },
   { key: "faq", label: "FAQ", Icon: CircleHelp, page: "faq" },
-  { key: "feedback", label: "Send feedback", Icon: MessageCircle, page: "feedback" },
+  {
+    key: "feedback",
+    label: "Send feedback",
+    Icon: MessageCircle,
+    page: "feedback",
+  },
   {
     key: "kofi",
     label: "Ko-fi",
@@ -72,74 +86,6 @@ const META: Record<LinkId, { eyebrow: string; title: string }> = {
     title: "Bugs, Ideas, General Thoughts",
   },
 };
-
-// ---- changelog, rolled up from the commit history (newest first) ----
-type Release = { v: string; d: string; isNew?: boolean; items: string[] };
-const CHANGELOG: Release[] = [
-  {
-    v: "v1.6",
-    d: "Jun 23, 2026",
-    isNew: true,
-    items: [
-      "Your season standings now show arrows for how many spots you’ve moved since the day’s puzzle dropped.",
-      "Added a built-in FAQ and a way to send feedback without leaving the game.",
-      "Run /donate if you’d like to chip in for server costs — Connections stays free and ad-free.",
-    ],
-  },
-  {
-    v: "v1.5",
-    d: "Jun 21, 2026",
-    items: [
-      "Added /share, so you can post a spoiler-free grid of your result.",
-      "Friends can see “Solving today’s puzzle” on your profile while you play now.",
-      "Image-puzzle days work properly now too.",
-    ],
-  },
-  {
-    v: "v1.4",
-    d: "Jun 12, 2026",
-    items: [
-      "The board fills big windows now, and stays square when they’re short.",
-      "Made a little landing page for anyone who opens the link outside Discord.",
-      "New server dashboard, a fresher logo, and smoother transitions.",
-    ],
-  },
-  {
-    v: "v1.3",
-    d: "Jun 9, 2026",
-    items: [
-      "Tap to reveal the last group and try to guess it before it spoils.",
-      "The end screen now shows how your score broke down.",
-      "Run /enable-posts to get the day’s results posted in a channel.",
-    ],
-  },
-  {
-    v: "v1.2",
-    d: "Jun 6, 2026",
-    items: [
-      "Season and all-time standings, across every channel and server you play in.",
-      "A daily recap card posts yesterday’s results next to the standings.",
-      "The live list now shows everyone in the room as they solve.",
-    ],
-  },
-  {
-    v: "v1.1",
-    d: "Jun 4, 2026",
-    items: [
-      "Watch the whole room solve together, live.",
-      "A “who’s playing” card pops into the channel when a game kicks off.",
-      "Added scoring, streaks, and a 24-hour window on each puzzle.",
-    ],
-  },
-  {
-    v: "v1.0",
-    d: "Jun 2, 2026",
-    items: [
-      "Connections, the daily NYT puzzle, right inside Discord.",
-      "Your progress saves, so you can wander off and finish later.",
-    ],
-  },
-];
 
 // ---- content screens ----
 
@@ -182,18 +128,12 @@ function Faq(): ReactNode {
     "rounded-[5px] bg-white/[0.06] px-[5px] py-px font-semibold text-zinc-300";
   const SCORE_LINES: ReactNode[] = [
     <>
-      <b className={BOLD}>Groups solved:</b> 20 × groups², so{" "}
-      <b className={BOLD}>20</b>, <b className={BOLD}>80</b>,{" "}
-      <b className={BOLD}>180</b>, or <b className={BOLD}>320</b> points for one
-      through four.
+      <b className={BOLD}>Solving the puzzle:</b> a flat{" "}
+      <b className={BOLD}>+400</b> for getting all four groups.
     </>,
     <>
-      <b className={BOLD}>Solve bonus:</b> a flat <b className={BOLD}>+120</b>{" "}
-      for getting all four.
-    </>,
-    <>
-      <b className={BOLD}>Speed:</b> up to <b className={BOLD}>+60</b>, full for
-      an instant solve and fading to zero by ten minutes in.
+      <b className={BOLD}>Speed:</b> up to <b className={BOLD}>+100</b>, full
+      for a fast solve and fading to zero by about ten minutes in.
     </>,
     <>
       <b className={BOLD}>Mistakes:</b> <b className={BOLD}>−30</b> each, but
@@ -217,14 +157,14 @@ function Faq(): ReactNode {
           ))}
         </ul>
         <p className="m-0">
-          Solve everything instantly with a clean board and you hit the cap of{" "}
+          Solve it fast with a clean board and you hit the cap of{" "}
           <b className={BOLD}>500</b>. Run out of guesses and you still keep
-          your groups-solved points, so even a rough day is worth up to{" "}
+          partial credit for the groups you found — 20 × groups², so up to{" "}
           <b className={BOLD}>80</b>.
         </p>
       </QA>
 
-      <QA q="How do we get on a leaderboard?">
+      <QA q="How do I join a server/channel's leaderboard?">
         <p className="m-0">
           Just play there once. Your first solve in a channel puts you on its
           leaderboard, and the server’s, and you’ll keep showing up every time
@@ -236,7 +176,7 @@ function Faq(): ReactNode {
         </p>
       </QA>
 
-      <QA q="Can we get results posted in our server?">
+      <QA q="How do we enable the who's playing cards and nightly recaps?">
         <p className="m-0">
           Yep. Run <span className={cmd}>/enable-posts</span> to add the bot
           (one tap, though it needs Manage Server, so grab an admin if that’s
@@ -557,7 +497,8 @@ function UtilitySheet({
     if (d.dragging) {
       const off = Math.max(0, dy);
       d.dy = off;
-      if (sheetRef.current) sheetRef.current.style.transform = `translateY(${off}px)`;
+      if (sheetRef.current)
+        sheetRef.current.style.transform = `translateY(${off}px)`;
       if (scrimRef.current)
         scrimRef.current.style.opacity = String(Math.max(0.15, 1 - off / 320));
     }
@@ -570,7 +511,8 @@ function UtilitySheet({
     if (!el) return;
     const dismiss = d.dy > 80 || (d.vy > 0.6 && d.dy > 24);
     el.style.transition = "transform 0.22s ease-out";
-    if (scrimRef.current) scrimRef.current.style.transition = "opacity 0.22s ease-out";
+    if (scrimRef.current)
+      scrimRef.current.style.transition = "opacity 0.22s ease-out";
     if (dismiss) {
       el.style.transform = "translateY(110%)";
       if (scrimRef.current) scrimRef.current.style.opacity = "0";
@@ -607,7 +549,12 @@ function UtilitySheet({
         <div className="mx-auto mb-3 mt-1 h-1.5 w-10 rounded-full bg-zinc-600" />
         <div className="flex flex-col gap-0.5">
           {LINKS.map((l) => (
-            <SheetRow key={l.key} l={l} showBadge={showBadge} onSelect={onSelect} />
+            <SheetRow
+              key={l.key}
+              l={l}
+              showBadge={showBadge}
+              onSelect={onSelect}
+            />
           ))}
         </div>
       </div>
@@ -759,7 +706,11 @@ export function useInfoLinks(
 
   return {
     footer: (className = "") => (
-      <LinkBar showBadge={showBadge} onSelect={selectFromFooter} className={className} />
+      <LinkBar
+        showBadge={showBadge}
+        onSelect={selectFromFooter}
+        className={className}
+      />
     ),
     overlays: (
       <>

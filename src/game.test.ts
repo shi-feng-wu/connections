@@ -206,7 +206,14 @@ describe("Game · deducedLevels", () => {
 });
 
 describe("Game · score", () => {
-  const base = SCORING.completionPerGroupSq * 16 + SCORING.solveBonus;
+  const base = SCORING.solveBase;
+  // A perfect win finished at `durationMs`, for exercising the speed/grace curve.
+  const perfectAt = (durationMs: number): Game => {
+    const g = newGame();
+    for (const lvl of [0, 1, 2, 3]) guess(g, group(lvl));
+    g.durationMs = durationMs;
+    return g;
+  };
 
   it("is zero while still playing", () => {
     const g = newGame();
@@ -214,11 +221,27 @@ describe("Game · score", () => {
     expect(g.score).toBe(0);
   });
 
-  it("a perfect, instant win earns base + full speed bonus", () => {
-    const g = newGame();
-    for (const lvl of [0, 1, 2, 3]) guess(g, group(lvl));
-    g.durationMs = 0; // pin the clock; deterministic speed term
-    expect(g.score).toBe(base + SCORING.speedMax);
+  it("caps a perfect win at 500", () => {
+    expect(perfectAt(0).score).toBe(500);
+    expect(base + SCORING.speedMax).toBe(500);
+  });
+
+  it("gives full speed for any solve within the grace window", () => {
+    // The whole point of the grace: a real human-fastest solve (~18s) still hits
+    // the cap, not just an impossible instant one.
+    expect(perfectAt(SCORING.speedGraceSec * 1000).score).toBe(base + SCORING.speedMax);
+    expect(perfectAt(18_000).score).toBe(base + SCORING.speedMax);
+    expect(perfectAt(0).score).toBe(base + SCORING.speedMax);
+  });
+
+  it("decays the speed bonus past the grace, then floors at zero", () => {
+    // Inside grace = full; one full target window past the grace edge = zero.
+    const full = perfectAt(SCORING.speedGraceSec * 1000).score;
+    const half = perfectAt((SCORING.speedGraceSec + SCORING.speedTargetSec / 2) * 1000).score;
+    const none = perfectAt((SCORING.speedGraceSec + SCORING.speedTargetSec + 60) * 1000).score;
+    expect(full).toBeGreaterThan(half);
+    expect(half).toBeGreaterThan(none);
+    expect(none).toBe(base); // perfect, no speed left
   });
 
   it("subtracts a penalty per mistake on a win", () => {
@@ -230,11 +253,14 @@ describe("Game · score", () => {
     expect(g.score).toBe(base + SCORING.speedMax - SCORING.mistakePenalty);
   });
 
-  it("drops the speed bonus once the solve is slower than the target", () => {
+  it("bottoms a win out at 310 — three mistakes, no speed", () => {
     const g = newGame();
+    for (const w of FOUR_WRONG.slice(0, 3)) guess(g, w); // 3 mistakes
     for (const lvl of [0, 1, 2, 3]) guess(g, group(lvl));
-    g.durationMs = (SCORING.speedTargetSec + 60) * 1000; // past target
-    expect(g.score).toBe(base); // perfect, no speed
+    g.durationMs = (SCORING.speedGraceSec + SCORING.speedTargetSec + 60) * 1000; // no speed
+    expect(g.status).toBe("won");
+    expect(g.score).toBe(base - 3 * SCORING.mistakePenalty);
+    expect(g.score).toBe(310);
   });
 
   it("scores a loss by convex partial credit for groups reached", () => {

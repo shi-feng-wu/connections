@@ -423,40 +423,42 @@ body {
   }
 }
 
-/* ---- End-screen score breakdown: the run-summary bar FADES UP to the points makeup ----
-   The whole footer bar is the hover/tap target (see EndSummary). On open the summary
-   face fades out in place while the breakdown face fades in and rises a few px into its
-   spot — the gentle "fade up" reveal from the redesign (Desktop Connections.html). The
-   summary stays in normal flow so it alone fixes the row height; the breakdown is
-   absolutely overlaid and only the incoming face moves (a small transform, never a
-   reflow), so the board below never shifts. It's a single-direction rise + fade on the
-   snappy hero/tab curve, so it reads of a piece with the roster tab swap (tabIn) — not
-   the counter-rise that shimmered before (see [[simple-fades-no-text-translate]]). */
-.sb-front {
-  transition: opacity 0.16s ease;
-}
-.sb-break {
-  position: absolute;
-  inset: 0;
+/* ---- End-screen score breakdown: a popover that POPS UP above the score ----
+   Tapping the score cluster (see EndSummary) reveals the points makeup in a floating
+   card anchored above the bar's right edge, a caret pointing back down at the ⓘ. The
+   summary row stays put underneath — no cross-fade — so the bar never reflows. The card
+   scales + rises in on a gentle overshoot (the SPRING curve the solved bars pop on), so
+   it reads as a quick "pop" rather than a slow fade. */
+.sb-pop {
   opacity: 0;
+  transform: translateY(6px) scale(0.96);
+  transform-origin: bottom right;
   pointer-events: none;
-  transform: translateY(4px);
   transition:
-    opacity 0.18s ease,
-    transform 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
+    opacity 0.15s ease,
+    transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-.sb-open .sb-front {
-  opacity: 0;
-  pointer-events: none;
-}
-.sb-open .sb-break {
+.sb-pop-open {
   opacity: 1;
-  pointer-events: auto;
   transform: none;
+  pointer-events: auto;
 }
-/* Reduced motion: keep the fade, drop the rise. */
+/* The caret: a small rotated square seam-matched to the card's fill + lower-right border,
+   tucked under the card's bottom edge so only the point shows, aligned beneath the score. */
+.sb-pop-caret {
+  position: absolute;
+  right: 11px;
+  bottom: -5px;
+  height: 10px;
+  width: 10px;
+  transform: rotate(45deg);
+  background: #1c1c1e;
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+/* Reduced motion: keep the fade, drop the rise/scale. */
 @media (prefers-reduced-motion: reduce) {
-  .sb-break {
+  .sb-pop {
     transform: none;
   }
 }

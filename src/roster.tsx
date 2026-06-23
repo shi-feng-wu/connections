@@ -80,11 +80,15 @@ const bankedOf = (p: PlayerState): number =>
 // The Live tab's order, one comparator:
 //   1. everyone ranks by points — the final score for finished runs (what the
 //      Leaderboard tab shows), banked-so-far (above) for live ones. Any win
-//      (≥350) outranks any live run (banked tops out at 180), so winners hold
+//      (≥250) outranks any live run (banked tops out at 80), so winners hold
 //      their podium until someone actually finishes above them;
 //   2. at equal points a live run outranks a finished one — it's still climbing,
 //      the finished score is capped there;
 //   3. remaining ties run the progress race: fastest, then fewest mistakes.
+// Rule 3 is load-bearing among FINISHED winners now: the speed grace flattens
+// every sub-20s clean solve to an identical 500 (and near-ties just above), so
+// score alone can't separate the fastest runs — the elapsed tier is what keeps
+// the quicker solve on top, then fewer mistakes breaks any remaining tie.
 // Between two LIVE runs this whole comparator collapses to the hierarchical race
 // sort — most groups solved, then fastest, then fewest mistakes — because banked
 // points are a pure function of groups solved (20·g²): equal groups → equal

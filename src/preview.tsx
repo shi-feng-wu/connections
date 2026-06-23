@@ -1031,7 +1031,8 @@ function DeviceFrame({
 }
 
 // The end screen at Android's narrow widths — the layout most prone to horizontal
-// overflow (the "Out of guesses" footer is the widest). 320px is the small-device floor.
+// overflow (the lost footer's status label sits beside the score). 320px is the
+// small-device floor.
 function DeviceFrames() {
   return (
     <section className="w-full max-w-[940px] px-4">

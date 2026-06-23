@@ -22,8 +22,7 @@ export type SubmitResult =
 // Itemized end-screen score (see Game.scoreBreakdown). All point fields are
 // non-negative; `penalty` is the amount mistakes subtract. `total` === Game.score.
 export type ScoreBreakdown = {
-  completion: number; // "Categories" — full-clear on a win, convex partial credit on a loss
-  solveBonus: number; // flat reward for clearing all four (wins only)
+  completion: number; // a win's flat solve reward ("Solved"), or convex partial credit on a loss ("Categories")
   speed: number; // time bonus, 0–speedMax (wins only)
   penalty: number; // points lost to mistakes (wins only)
   mistakes: number; // mistake count, for the tooltip's sub-label
@@ -46,20 +45,43 @@ export const LEVELS = [
 
 export const MAX_MISTAKES = 4;
 
-// Leaderboard score. Convex in groups solved, so finishing >> partial. Losses
-// score purely by groups reached: a loss always spends MAX_MISTAKES, so a
-// mistake penalty would double-count. groupsSolved tops out at 2 on a loss —
-// once 3 are solved the last four words are forced, so you can't miss again.
-// Tuned so a perfect win (4 groups, no mistakes, instant) tops out at 500:
-//   20·4² + 120 + 60 = 500. The four point values scale together; speedTargetSec
-// is a time threshold (seconds), not points, so it's unscaled.
+// Leaderboard score.
+//
+// A win is one event ("you solved it") — the last group is forced once three are
+// out, so we don't pretend to price four separate groups. It's a flat solveBase,
+// plus a speed bonus, minus a mistake penalty. Wins span 310–500: finishing fast
+// and clean reads above scraping one, while a perfect run caps at a round 500
+// (400 + 100). The mistake penalty is deliberately gentle — two-thirds of winners
+// make at least one mistake, and a wrong guess already costs you on the clock, so
+// −30 is a light touch on top of that, not a second charge for the lost time.
+//
+// Losses score purely by groups reached — convex (20·g²), so 2 groups (80) is
+// worth far more than 1 (20). No mistake penalty on a loss: a loss always spends
+// MAX_MISTAKES, so a penalty would double-count. groupsSolved tops out at 2 on a
+// loss — once 3 are solved the last four words are forced, so you can't miss
+// again. Best loss (80) sits well under the worst win (310).
+//
+// Speed grace: the clock starts at puzzle open and includes reading + the forced
+// solve animations, so no human clears the board in under ~18s (the fastest real
+// solve on record is 18.6s). speedGraceSec zeroes that unreachable head of the
+// curve, so a genuine speed-limit solve actually reaches 500 instead of stalling
+// at ~498. Past the grace, speed decays linearly to zero over speedTargetSec.
 export const SCORING = {
+  solveBase: 400, // flat reward for solving the puzzle (wins) — finish + speed − penalty caps at 500
   completionPerGroupSq: 20, // loss credit = this × groupsSolved² (max 2² = 80)
-  solveBonus: 120, // flat reward for completing every group
-  mistakePenalty: 30, // subtracted per mistake on a win
-  speedMax: 60, // largest speed bonus on a win (only at an instant solve)
-  speedTargetSec: 600, // speed bonus decays linearly from full to zero over 10 min
+  mistakePenalty: 30, // subtracted per mistake on a win (0–90 over 0–3 mistakes)
+  speedMax: 100, // largest speed bonus on a win (full anywhere inside the grace)
+  speedTargetSec: 600, // after the grace, speed decays linearly from full to zero over 10 min
+  speedGraceSec: 20, // solves at/under this get full speed — the human floor (fastest real solve ≈ 18.6s)
 };
+
+// Speed bonus for a winning solve of `durationMs`. Full inside the grace window,
+// then a linear decay to zero over speedTargetSec. Shared by both score paths.
+function speedBonus(durationMs: number): number {
+  const eff = Math.max(0, durationMs / 1000 - SCORING.speedGraceSec);
+  const frac = Math.max(0, Math.min(1, (SCORING.speedTargetSec - eff) / SCORING.speedTargetSec));
+  return Math.round(SCORING.speedMax * frac);
+}
 
 export function shuffle<T>(arr: T[]): T[] {
   const a = arr.slice();
@@ -219,28 +241,23 @@ export class Game {
   }
 
   // Itemized score, the single source of truth the `score` total is summed from —
-  // also fed to the end-screen breakdown tooltip. `completion` is the "Categories"
-  // line: full-clear credit on a win, convex partial credit on a loss. Wins add a
-  // flat solveBonus + a speed term and subtract a mistake `penalty`; losses carry
-  // none of those (a loss always spends MAX_MISTAKES, so a penalty would
-  // double-count — see the SCORING note above). `total` clamps at 0 and equals
-  // `score`.
+  // also fed to the end-screen breakdown tooltip. On a win `completion` is the flat
+  // solveBase ("Solved"), plus a speed term, minus a mistake `penalty`. On a loss
+  // it's convex partial credit for groups reached ("Categories"), with no speed or
+  // penalty (a loss always spends MAX_MISTAKES, so a penalty would double-count —
+  // see the SCORING note above). `total` clamps at 0 and equals `score`.
   get scoreBreakdown(): ScoreBreakdown {
     const mistakes = MAX_MISTAKES - this.mistakesLeft;
     if (this.status !== 'won') {
       // playing → 0; lost → convex partial credit for groups reached.
       const g = this.status === 'lost' ? this.groupsSolved : 0;
       const completion = SCORING.completionPerGroupSq * g * g;
-      return { completion, solveBonus: 0, speed: 0, penalty: 0, mistakes, total: completion };
+      return { completion, speed: 0, penalty: 0, mistakes, total: completion };
     }
-    const totalGroups = this.puzzle.groups.length;
-    const sec = (this.durationMs ?? 0) / 1000;
-    const t = SCORING.speedTargetSec;
-    const speed = Math.round(SCORING.speedMax * Math.max(0, Math.min(1, (t - sec) / t)));
-    const completion = SCORING.completionPerGroupSq * totalGroups * totalGroups;
+    const speed = speedBonus(this.durationMs ?? 0);
     const penalty = SCORING.mistakePenalty * mistakes;
-    const total = Math.max(0, completion + SCORING.solveBonus + speed - penalty);
-    return { completion, solveBonus: SCORING.solveBonus, speed, penalty, mistakes, total };
+    const total = Math.max(0, SCORING.solveBase + speed - penalty);
+    return { completion: SCORING.solveBase, speed, penalty, mistakes, total };
   }
 
   // 0 while playing. Wins reward fewer mistakes + speed; losses get convex
@@ -265,11 +282,7 @@ export function finishedScore(
   mistakesLeft: number,
   durationMs: number,
 ): number {
-  const completion = SCORING.completionPerGroupSq * groupsSolved * groupsSolved;
-  if (done === 'lost') return completion;
-  const sec = durationMs / 1000;
-  const t = SCORING.speedTargetSec;
-  const speed = Math.round(SCORING.speedMax * Math.max(0, Math.min(1, (t - sec) / t)));
+  if (done === 'lost') return SCORING.completionPerGroupSq * groupsSolved * groupsSolved;
   const penalty = SCORING.mistakePenalty * (MAX_MISTAKES - mistakesLeft);
-  return Math.max(0, completion + SCORING.solveBonus + speed - penalty);
+  return Math.max(0, SCORING.solveBase + speedBonus(durationMs) - penalty);
 }

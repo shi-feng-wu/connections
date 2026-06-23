@@ -1,4 +1,11 @@
-import { Clock, Eraser, Shuffle as ShuffleIcon } from "lucide-react";
+import {
+  Clock,
+  Copy,
+  Eraser,
+  Share,
+  Share2,
+  Shuffle as ShuffleIcon,
+} from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
@@ -25,11 +32,98 @@ const fmtClock = (ms: number | null): string => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
-// One additive column of the breakdown the end-screen bar fades up to reveal: a tiny
-// caption stacked over its signed point value, the row reading left→right as an
-// equation. `neg` greys the mistakes deduction; `total` is the sum the rest add up to —
-// right-aligned in the serif score voice, set off by a hairline divider.
-function BreakItem({
+// Where a shared grid points friends to come play: the public landing page, which carries
+// the "Add to Discord" button. Bare domain reads cleaner than a full URL and the major
+// share targets (Discord, X, iMessage) still linkify it.
+const PLAY_URL = "disconnections.app";
+
+// The shareable result as plain text — same shape as the /share Discord card
+// (api/interactions.ts shareCard): a Wordle-style title line, the spoiler-free emoji grid
+// (one row per guess, no group names), dots · time · score, then the play URL so a recipient
+// knows where it's from and can come play. Fed to the OS share sheet or copied to the
+// clipboard by the end-screen Share button.
+function buildShareText(game: Game): string {
+  const mistakes = MAX_MISTAKES - game.mistakesLeft;
+  const dots = "⚪".repeat(game.mistakesLeft) + "⚫".repeat(mistakes);
+  const title = `Connections #${game.puzzle.id} ${game.groupsSolved}/4`;
+  const stats = [dots, fmtClock(game.durationMs), `${game.score.toLocaleString()} pts`].join(" · ");
+  return `${title}\n${game.shareGrid()}\n${stats}\n\n${PLAY_URL}`;
+}
+
+// Copy with a legacy fallback: the async Clipboard API is the happy path, but the
+// Activity iframe can lack clipboard-write permission, so fall back to a throwaway
+// <textarea> + execCommand. Returns whether the copy landed.
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through to the execCommand path */
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+// Which platform's native share glyph the action button should wear, so it reads as the
+// familiar icon for the device's own share sheet: a forward arrow on Windows, the
+// box-and-up-arrow on Apple (macOS/iOS), and the connected-nodes share on Android (also the
+// generic default). Cosmetic, so best-effort UA sniffing is fine.
+type SharePlatform = "windows" | "apple" | "android" | "other";
+function detectSharePlatform(): SharePlatform {
+  if (typeof navigator === "undefined") return "other";
+  const data = (navigator as Navigator & { userAgentData?: { platform?: string } })
+    .userAgentData;
+  const hint =
+    `${data?.platform ?? ""} ${navigator.platform ?? ""} ${navigator.userAgent ?? ""}`.toLowerCase();
+  if (/android/.test(hint)) return "android";
+  if (/iphone|ipad|ipod|macintosh|mac os/.test(hint)) return "apple";
+  if (/windows|win32|win64/.test(hint)) return "windows";
+  return "other";
+}
+
+// The Windows share glyph (curved arrow swooshing up out of an open box) — lucide has no
+// match, so it's hand-drawn to mirror the OS icon, at the same weight as the lucide icons
+// it sits beside (stroke 2.5, currentColor).
+function WindowsShareIcon() {
+  return (
+    <svg
+      width={18}
+      height={18}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M4 11.5V20h12.5v-3.5" />
+      <path d="M8 16.5C8 10.5 11 8.5 16.5 8.5" />
+      <path d="M13.5 5 20 8.5 13.5 12" />
+    </svg>
+  );
+}
+
+// One row of the breakdown popover: a tiny caption on the left, its signed point value
+// right-aligned. `neg` greys the mistakes deduction (vs the emerald additions); `total`
+// is the sum the rest add up to — set off above by a hairline rule and voiced in the
+// serif score face, the same hierarchy the bar's +score uses.
+function BreakRow({
   caption,
   value,
   neg,
@@ -43,24 +137,24 @@ function BreakItem({
   return (
     <div
       className={
-        "flex min-w-0 flex-col gap-[3px] leading-none " +
-        (total ? "items-end border-l border-white/10 pl-2.5" : "items-start")
+        "flex items-center justify-between gap-8 leading-none " +
+        (total ? "mt-1.5 border-t border-white/10 pt-2" : "")
       }
     >
       <span
         className={
-          "whitespace-nowrap text-[8.5px] font-semibold uppercase leading-none tracking-[0.06em] max-[380px]:text-[7.5px] max-[360px]:tracking-[0.02em] " +
-          (total ? "text-zinc-400" : "text-zinc-500")
+          "text-[10px] font-semibold uppercase tracking-[0.1em] " +
+          (total ? "text-zinc-300" : "text-zinc-500")
         }
       >
         {caption}
       </span>
       <span
         className={
-          "leading-none tabular-nums " +
+          "tabular-nums leading-none " +
           (total
-            ? "font-display text-[17px] font-bold tracking-[-0.01em] text-[#efefe6]"
-            : "text-[14px] font-bold " +
+            ? "font-display text-[20px] font-bold tracking-[-0.01em] text-[#efefe6]"
+            : "text-[13.5px] font-bold " +
               (neg ? "text-zinc-400" : "text-emerald-400"))
         }
       >
@@ -70,39 +164,64 @@ function BreakItem({
   );
 }
 
-// End-screen footer. At rest it's the run summary, two clusters at the far edges with
-// room to breathe: mistake dots (left), then the clock-icon solve-time chip, a hairline
-// divider, the serif score, and the ⓘ affordance (right). The next-puzzle countdown
-// lives under the players list (see Roster), not here. Inspecting doesn't open a
-// floating tooltip: the WHOLE bar FADES UP in place — the summary face fades out while
-// the itemized breakdown (categories, bonus, speed, mistakes → total) fades in and rises
-// a few px into its place, the gentle fade-up reveal from the redesign. The whole bar is
-// the trigger now, not just the score cluster, so a mouse anywhere over it reveals the
-// makeup. Hover is mouse-only — this ships as a Discord Activity where CSS :hover sticks
-// after a tap (same reason as HoverButton) — so a real mouse reveals it on hover, touch
-// toggles it on tap, and a tap/Esc outside closes a pinned-open one.
-// Losses read the same: partial-credit categories, a 0 bonus/speed.
+// End-screen footer. The run summary, two clusters at the far edges with room to breathe:
+// mistake dots (left), and the stats + action (right) — the clock-icon solve-time chip, a
+// hairline divider, the serif score, then the Share button (where the ⓘ used to sit). The
+// next-puzzle countdown lives under the players list (see Roster), not here. Tapping the
+// score pops the itemized breakdown (solved, speed, mistakes → total) as a
+// floating tooltip ABOVE the score — a quick scale/rise pop with a caret pointing back at
+// it — while the summary stays put underneath. On a live finish the breakdown self-reveals
+// a beat after the bar settles (autoOpen), so it's seen without an ⓘ to hunt for; tap the
+// score again, or tap/Esc outside, to dismiss. It never opens on hover (this ships as a
+// Discord Activity where CSS :hover sticks after a tap). The Share button pops up on the
+// right as the bar fades in (see endGame); rehydrated finishes render at rest, closed.
+// Losses read the same: partial-credit categories, a 0 speed.
 // `note` is the transient "Couldn’t save that guess" warning for a commit that fails
 // after the game ends (the final guess's commit usually resolves mid-end-choreography):
 // it rides a face that overlays the bar (and outranks the reveal) because the
 // playing-state Submit pill — the note's home during play — is gone, and the old slot
 // (the desktop header's date) is hidden on mobile, which made the warning invisible
 // exactly where scores matter.
-function EndSummary({ game, note }: { game: Game; note?: string | null }) {
+function EndSummary({
+  game,
+  note,
+  autoOpen,
+}: {
+  game: Game;
+  note?: string | null;
+  // True only on a live finish — the breakdown then self-reveals once the entrance
+  // settles, so the points makeup is seen without a trigger. Off on rehydrated finishes.
+  autoOpen?: boolean;
+}) {
   const b = game.scoreBreakdown;
   const won = game.status === "won";
   const perfect = won && game.mistakesLeft === MAX_MISTAKES;
-  const label = perfect ? "Perfect" : won ? "Solved" : "Out of guesses";
-  const [over, setOver] = useState(false);
+  const label = perfect ? "Perfect" : won ? "Solved" : "Failed";
   const [pinned, setPinned] = useState(false);
+  const [copied, setCopied] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const copiedTimer = useRef<number | null>(null);
+  const autoOpenTimer = useRef<number | null>(null);
   const showNote = note != null;
-  const open = (over || pinned) && !showNote;
+  // Tapping the score toggles the breakdown popover (tap-only, no hover-open: a tap on
+  // touch would strand a sticky :hover). Suppressed while a save-note shows.
+  const open = pinned && !showNote;
+  const shareText = buildShareText(game);
+  // Does a native share sheet exist here? (mobile, Windows/macOS browsers, a Discord iframe
+  // that grants web-share). When it does, the action is a Share button → native sheet. When
+  // it doesn't (Linux, Firefox, a blocked iframe), the same button becomes a plain Copy
+  // button instead — so it always reads as exactly what it'll do.
+  const canNativeShare =
+    typeof navigator !== "undefined" && typeof navigator.share === "function";
+  // Pick the share glyph to match the device's own share sheet (only shown when a native
+  // sheet exists; otherwise the button is a Copy button).
+  const sharePlatform = detectSharePlatform();
   // hold the last note text through the face's fade-out, so the words don't vanish
   // a beat before the opacity does.
   const lastNote = useRef("");
   if (note) lastNote.current = note;
 
+  // Tap/Esc outside the footer closes the breakdown.
   useEffect(() => {
     if (!pinned) return;
     const onDown = (e: PointerEvent): void => {
@@ -119,124 +238,197 @@ function EndSummary({ game, note }: { game: Game; note?: string | null }) {
     };
   }, [pinned]);
 
+  useEffect(
+    () => () => {
+      if (copiedTimer.current != null) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
+
+  // Self-reveal the breakdown a beat after a live finish — once the bar's entrance has
+  // settled — so the points makeup is seen without hunting for a trigger (it replaces the
+  // old ⓘ affordance). Only on a fresh finish; a rehydrated end footer stays closed.
+  useEffect(() => {
+    if (!autoOpen) return;
+    autoOpenTimer.current = window.setTimeout(() => setPinned(true), 650);
+    return () => {
+      if (autoOpenTimer.current != null) clearTimeout(autoOpenTimer.current);
+    };
+  }, [autoOpen]);
+
+  const flashCopied = (ok: boolean): void => {
+    if (!ok) return;
+    setCopied(true);
+    if (copiedTimer.current != null) clearTimeout(copiedTimer.current);
+    copiedTimer.current = window.setTimeout(() => setCopied(false), 1800);
+  };
+
+  // Native share where it exists (must fire in the gesture, so nothing is awaited before
+  // it; a real failure — not a user-dismiss — falls back to copy). Otherwise the button is
+  // already a Copy button, so this just copies the grid and flashes the check.
+  const onShare = (): void => {
+    if (canNativeShare && navigator.share) {
+      navigator.share({ text: shareText }).catch((err: unknown) => {
+        if (err instanceof Error && err.name === "AbortError") return; // user dismissed
+        void copyToClipboard(shareText).then(flashCopied);
+      });
+      return;
+    }
+    void copyToClipboard(shareText).then(flashCopied);
+  };
+
   return (
     <div
       ref={ref}
-      className="relative flex cursor-help select-none items-center [-webkit-tap-highlight-color:transparent]"
-      role="button"
-      tabIndex={0}
-      aria-label="Score breakdown"
-      aria-expanded={open}
-      onPointerEnter={(e) => {
-        if (e.pointerType === "mouse") setOver(true);
-      }}
-      onPointerLeave={(e) => {
-        if (e.pointerType === "mouse") setOver(false);
-      }}
-      onClick={() => setPinned((p) => !p)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          setPinned((p) => !p);
-        }
-      }}
+      className="relative flex items-center [-webkit-tap-highlight-color:transparent]"
     >
-      {/* The fade-up stage spans the whole bar. The summary face sits in normal flow and
-          fixes the row height; the breakdown face is absolutely overlaid and fades up
-          over it on open (.sb-open drives both). The note (below) overlays the whole
-          thing, fading the stage out under it so the reveal never peeks through. */}
+      {/* SUMMARY ROW — always present (it dims under a save-note). Mistake dots on the left;
+          on the right the stats (solve-time · divider · status+score) and the Share button,
+          which now sits where the ⓘ used to. The breakdown is a popover anchored above the
+          score — it self-reveals on finish (see autoOpen), so there's no ⓘ affordance. */}
       <div
         className={
-          "sb-stage relative min-w-0 flex-1 transition-opacity duration-200 ease-out " +
-          (showNote ? "pointer-events-none opacity-0 " : "opacity-100 ") +
-          (open ? "sb-open" : "")
+          "flex min-w-0 flex-1 items-center gap-3 transition-opacity duration-200 ease-out max-[360px]:gap-2 " +
+          (showNote ? "pointer-events-none opacity-0" : "opacity-100")
         }
       >
-        {/* SUMMARY — the run summary. In normal flow, so it alone fixes the row height:
-            mistake dots (left); solve-time chip · divider · status + score · ⓘ (right).
-            Fades out in place on open. */}
-        <div
-          aria-hidden={open || showNote}
-          className="sb-front flex items-center justify-between gap-3 max-[360px]:gap-2"
+        {/* LEFT — mistake dots */}
+        <span
+          className="inline-flex flex-none items-center gap-1.75"
+          aria-label="Mistakes remaining"
         >
+          {Array.from({ length: MAX_MISTAKES }, (_, i) => (
+            <span
+              key={i}
+              className={
+                "inline-block h-3.5 w-3.5 rounded-full " +
+                (i < game.mistakesLeft ? "bg-zinc-300" : "bg-zinc-700")
+              }
+            />
+          ))}
+        </span>
+        {/* COPIED! — the copy confirmation pops here, the dead space between the dots and
+            the stats: the same stage (and cream-chip look) the in-play "One away…" hint
+            uses. The chip is absolute (centred by the flex alignment, so it doesn't widen
+            the row) and nowrap — it overhangs rather than squeezing the stats on narrow
+            layouts; opaque + shadowed + z-raised so it reads over whatever it covers. The
+            sr-only twin announces it. */}
+        <div className="relative flex min-w-0 flex-1 items-center justify-center self-stretch">
           <span
-            className="inline-flex flex-none items-center gap-1.75"
-            aria-label="Mistakes remaining"
+            aria-hidden
+            className={
+              "pointer-events-none absolute z-20 whitespace-nowrap rounded-full bg-[#efefe6] px-3.5 py-2 text-[11px] font-bold uppercase leading-none tracking-[0.08em] text-[#121212] shadow-[0_3px_12px_rgba(0,0,0,0.45)] transition-all duration-200 ease-[cubic-bezier(.34,1.56,.64,1)] max-[420px]:px-3 max-[420px]:text-[10px] max-[420px]:tracking-[0.04em] " +
+              (copied ? "scale-100 opacity-100" : "scale-90 opacity-0")
+            }
           >
-            {Array.from({ length: MAX_MISTAKES }, (_, i) => (
-              <span
-                key={i}
-                className={
-                  "inline-block h-3.5 w-3.5 rounded-full " +
-                  (i < game.mistakesLeft ? "bg-zinc-300" : "bg-zinc-700")
-                }
-              />
-            ))}
+            Copied!
           </span>
-          <div className="flex min-w-0 items-center gap-3.5 self-stretch max-[360px]:gap-2.5">
-            <div className="flex items-center gap-2 text-[15px] font-semibold tabular-nums text-zinc-400">
-              <Clock
-                size={15}
-                strokeWidth={2.25}
-                className="flex-none text-zinc-500"
+          <span className="sr-only" role="status">
+            {copied ? "Copied" : ""}
+          </span>
+        </div>
+        {/* RIGHT — solve-time · divider · status+score, then the Share button. */}
+        <div className="flex min-w-0 flex-none items-center gap-3.5 max-[360px]:gap-2.5">
+          {/* Score cluster — taps to toggle the breakdown. Wrapped so the popover anchors to
+              it (caret points at the score, not the Share button to its right). */}
+          <div className="relative flex min-w-0 items-center self-stretch">
+            <div
+              className="flex min-w-0 cursor-pointer items-center gap-3.5 self-stretch select-none max-[360px]:gap-2.5"
+              role="button"
+              tabIndex={0}
+              aria-label="Score breakdown"
+              aria-expanded={open}
+              onClick={() => setPinned((p) => !p)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setPinned((p) => !p);
+                }
+              }}
+            >
+              <div className="flex items-center gap-2 text-[15px] font-semibold tabular-nums text-zinc-400">
+                <Clock
+                  size={15}
+                  strokeWidth={2.25}
+                  className="flex-none text-zinc-500"
+                  aria-hidden
+                />
+                <span>{fmtClock(game.durationMs)}</span>
+              </div>
+              <span
+                className="my-1 w-px flex-none self-stretch bg-white/10"
                 aria-hidden
               />
-              <span>{fmtClock(game.durationMs)}</span>
+              <div className="flex min-w-0 flex-col items-end gap-0.75">
+                <span
+                  className={
+                    "text-right text-[10px] font-semibold uppercase leading-tight tracking-[0.16em] " +
+                    (won ? "text-emerald-400" : "text-zinc-400")
+                  }
+                >
+                  {label}
+                </span>
+                <span className="font-display text-[26px] font-bold leading-none tracking-[-0.02em] text-[#efefe6]">
+                  +{game.score.toLocaleString()}
+                </span>
+              </div>
             </div>
-            <span
-              className="my-1 w-px flex-none self-stretch bg-white/10"
-              aria-hidden
-            />
-            <div className="flex min-w-0 flex-col items-end gap-0.75">
-              {/* At the narrow-Android floor (<=360px) "Out of guesses" would widen
-                  the stack and push it off the right edge — cap it so it wraps to two
-                  lines; "Solved"/"Perfect" never reach the cap, so they stay one. */}
-              <span
-                className={
-                  "text-balance text-right text-[10px] font-semibold uppercase leading-tight tracking-[0.16em] max-[360px]:max-w-[4.5rem] " +
-                  (won ? "text-emerald-400" : "text-zinc-400")
-                }
-              >
-                {label}
-              </span>
-              <span className="font-display text-[26px] font-bold leading-none tracking-[-0.02em] text-[#efefe6]">
-                +{game.score.toLocaleString()}
-              </span>
-            </div>
-            <span
+            {/* BREAKDOWN POPOVER — pops up above the score: the additive makeup landing on
+                the total, a caret pointing back down at the score. Mounted always;
+                .sb-pop-open drives the scale/rise pop (see index.css). */}
+            <div
+              aria-hidden={!open}
+              role="region"
+              aria-label="Score breakdown"
               className={
-                "inline-grid h-[15px] w-[15px] flex-none place-items-center rounded-full border font-serif text-[10px] font-bold not-italic leading-none transition-colors duration-150 " +
-                (open
-                  ? "border-zinc-400 text-[#efefe6]"
-                  : "border-zinc-600 text-zinc-500")
+                "sb-pop absolute bottom-full right-0 z-30 mb-2.5 w-max min-w-[178px] rounded-xl border border-white/12 bg-[#1c1c1e] px-3.5 py-2.5 shadow-[0_12px_34px_rgba(0,0,0,0.55)] " +
+                (open ? "sb-pop-open" : "")
               }
-              aria-hidden
             >
-              i
-            </span>
+              <div className="flex flex-col gap-2">
+                <BreakRow caption={won ? "Solved" : "Categories"} value={`+${b.completion}`} />
+                <BreakRow caption="Speed" value={won ? `+${b.speed}` : "+0"} />
+                <BreakRow caption="Mistakes" value={won ? `−${b.penalty}` : "−0"} neg />
+                <BreakRow
+                  caption="Total"
+                  value={`+${game.score.toLocaleString()}`}
+                  total
+                />
+              </div>
+              <span className="sb-pop-caret" aria-hidden />
+            </div>
           </div>
-        </div>
-
-        {/* BREAKDOWN — the additive makeup spread across the bar as a left→right
-            equation, landing on the total where the score sat. Absolutely overlaid;
-            fades in and rises a few px into place on open (see .sb-break). */}
-        <div
-          aria-hidden={!open}
-          className="sb-break flex items-center justify-between gap-1.5 px-0.5 max-[360px]:gap-1 max-[360px]:px-0"
-        >
-          <BreakItem caption="Categories" value={`+${b.completion}`} />
-          <BreakItem caption="Bonus" value={`+${b.solveBonus}`} />
-          <BreakItem caption="Speed" value={won ? `+${b.speed}` : "+0"} />
-          <BreakItem
-            caption="Mistakes"
-            value={won ? `−${b.penalty}` : "−0"}
-            neg
-          />
-          <BreakItem
-            caption="Total"
-            value={`+${game.score.toLocaleString()}`}
-            total
-          />
+          {/* SHARE / COPY — the same icon button as the in-play Shuffle/Deselect (BTN_ICON),
+              icon-only. Where a native share sheet exists it's a Share button that opens it,
+              wearing that platform's own share glyph (Windows forward-arrow / Apple box-and-
+              up-arrow / Android nodes); where it doesn't it's a Copy button that copies the
+              grid. A successful copy flashes the "Copied!" chip in the bar's centre (below). */}
+          <HoverButton
+            data-end="share"
+            className={BTN_ICON}
+            hover="opacity-80"
+            onClick={onShare}
+            aria-label={canNativeShare ? "Share your result" : "Copy your result"}
+            title={canNativeShare ? "Share your result" : "Copy your result"}
+          >
+            {!canNativeShare ? (
+              <Copy size={18} strokeWidth={2.5} aria-hidden />
+            ) : sharePlatform === "windows" ? (
+              <WindowsShareIcon />
+            ) : sharePlatform === "apple" ? (
+              <Share size={18} strokeWidth={2.5} aria-hidden />
+            ) : (
+              // Share2 is right-heavy (one node left, two right), so nudge it left a hair to
+              // sit optically centred in the round button.
+              <Share2
+                size={18}
+                strokeWidth={2.5}
+                className="-translate-x-[0.75px]"
+                aria-hidden
+              />
+            )}
+            <span className="sr-only">{canNativeShare ? "Share" : "Copy"}</span>
+          </HoverButton>
         </div>
       </div>
 
@@ -526,6 +718,10 @@ export function Board({
   // dots lag the model one beat: wrong guess plays shake-then-dim.
   const shownMistakes = useRef<number>(game.mistakesLeft);
   const ended = useRef<boolean>(game.status !== "playing");
+  // True once endGame runs (a live finish), driving the breakdown's self-reveal. Stays
+  // false for a rehydrated finished game (ended seeded true at construction), so reopening
+  // a finished puzzle doesn't pop the breakdown every time.
+  const freshFinish = useRef(false);
   const busy = useRef<boolean>(false);
   // word under the mouse, for the hover dim (mouse-only — see TILE_HOVER).
   const [hover, setHover] = useState<string | null>(null);
@@ -867,8 +1063,21 @@ export function Board({
       ],
       { duration: 220, easing: "ease-in", fill: "forwards" },
     ).finished;
+    freshFinish.current = true; // EndSummary mounts with autoOpen → self-reveals the breakdown
     ended.current = true;
     rerenderSync();
+    // Entrance flourish, layered on the bar's fade-up: the mistake dots ride in on the left
+    // (their play spot) while the Share button pops up on the right. Fired here (not in
+    // EndSummary) so it plays only on a live finish; a rehydrated game renders at rest.
+    const shareEl = tailRef.current?.querySelector<HTMLElement>('[data-end="share"]');
+    shareEl?.animate(
+      [
+        { opacity: 0, transform: "scale(.8)" },
+        { opacity: 0, transform: "scale(.8)", offset: 0.3 },
+        { opacity: 1, transform: "scale(1)" },
+      ],
+      { duration: 520, easing: SPRING, fill: "backwards" },
+    );
     await tailRef.current!.animate(
       [
         { opacity: 0, transform: "translateY(12px)" },
@@ -1124,6 +1333,8 @@ export function Board({
   // (hover/tap). The live hint flows in as the note face so a "couldn’t save"
   // warning arriving after the end swap still surfaces. See EndSummary.
   function renderBelowEnd() {
-    return <EndSummary game={game} note={hint} />;
+    return (
+      <EndSummary game={game} note={hint} autoOpen={freshFinish.current} />
+    );
   }
 }

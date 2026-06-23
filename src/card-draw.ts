@@ -442,7 +442,7 @@ export async function drawRoster(
       timeColor = WON_TIME;
       timeWeight = 600;
     } else if (s.done === "lost") {
-      label = "Out of guesses";
+      label = "Failed";
       labelColor = ZINC_500;
       kind = "x";
       timeColor = ZINC_600;

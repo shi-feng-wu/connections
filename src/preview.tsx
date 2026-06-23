@@ -961,6 +961,10 @@ function Simulate() {
           allTime={ALLTIME}
           onPresence={noop}
           onFinish={noop}
+          onShareToDiscord={async (msg) => {
+            console.log("share to discord:", msg);
+            return true;
+          }}
         />
       </div>
     </section>
@@ -991,6 +995,10 @@ function State({
         initialRevealed={revealed}
         onPresence={noop}
         onFinish={noop}
+        onShareToDiscord={async (msg) => {
+          console.log("share to discord:", msg);
+          return true;
+        }}
         // Bot-less-guild path, so the end states show the recap pitch (GameView only
         // renders it once the run is over, so in-progress states stay clean).
         onAddBot={noop}

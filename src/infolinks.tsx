@@ -28,7 +28,7 @@ import { HoverButton } from "./hoverbutton";
 // Send feedback. Structure mirrors the design files; the content is ours.
 
 // Current version — the latest CHANGELOG entry. Shown at the foot of the bar/sheet.
-export const APP_VERSION = "v1.5";
+export const APP_VERSION = "v1.6";
 
 type LinkId = "changelog" | "faq" | "feedback";
 type LinkDef = {
@@ -77,9 +77,18 @@ const META: Record<LinkId, { eyebrow: string; title: string }> = {
 type Release = { v: string; d: string; isNew?: boolean; items: string[] };
 const CHANGELOG: Release[] = [
   {
+    v: "v1.6",
+    d: "Jun 23, 2026",
+    isNew: true,
+    items: [
+      "Your season standings now show arrows for how many spots you’ve moved since the day’s puzzle dropped.",
+      "Added a built-in FAQ and a way to send feedback without leaving the game.",
+      "Run /donate if you’d like to chip in for server costs — Connections stays free and ad-free.",
+    ],
+  },
+  {
     v: "v1.5",
     d: "Jun 21, 2026",
-    isNew: true,
     items: [
       "Added /share, so you can post a spoiler-free grid of your result.",
       "Friends can see “Solving today’s puzzle” on your profile while you play now.",

@@ -358,17 +358,22 @@ function DetailView({
   const m = META[id];
   return createPortal(
     <div className="fixed inset-0 z-50 animate-detail-in bg-zinc-950">
-      {/* Close, pinned top-right. CSS :hover is safe here — closing unmounts the screen on
-        tap, so a stranded touch :hover has nothing to sit on. Esc closes it too (above). */}
+      {/* Close, pinned top-right. We portal to <body>, OUTSIDE #app, so we don't inherit its
+        pt-[max(0.75rem,--sait)] mobile-header clearance — pin the button below the safe area
+        (floored at the original 1rem for desktop/dev where --sait is 0) so Discord's mobile
+        top bar can't cover it. CSS :hover is safe here — closing unmounts the screen on tap,
+        so a stranded touch :hover has nothing to sit on. Esc closes it too (above). */}
       <button
         type="button"
         onClick={onBack}
         aria-label="Close"
-        className="absolute right-4 top-4 z-10 grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] bg-white/[0.05] text-zinc-400 transition-colors hover:bg-white/[0.09] hover:text-zinc-200 min-[800px]:right-5 min-[800px]:top-5"
+        className="absolute right-4 top-[max(1rem,var(--sait))] z-10 grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] bg-white/[0.05] text-zinc-400 transition-colors hover:bg-white/[0.09] hover:text-zinc-200 min-[800px]:right-5 min-[800px]:top-5"
       >
         <X size={18} strokeWidth={2.25} aria-hidden />
       </button>
-      <div className="scrollbar-thin h-full overflow-y-auto px-5 pt-14 pb-[max(2rem,var(--saib))] min-[800px]:pt-16">
+      {/* Content top padding clears the close button AND the same safe area (pt-14 + --sait),
+        so the title never tucks under Discord's mobile header either. */}
+      <div className="scrollbar-thin h-full overflow-y-auto px-5 pt-[calc(3.5rem_+_var(--sait))] pb-[max(2rem,var(--saib))] min-[800px]:pt-16">
         <div className="mx-auto w-full max-w-[600px]">
           {/* centered title card over a hairline; the content below stays left-aligned */}
           <header className="mb-7 flex flex-col items-center border-b border-white/[0.08] pb-7 text-center">

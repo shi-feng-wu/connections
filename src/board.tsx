@@ -186,16 +186,12 @@ function EndSummary({
   game,
   note,
   autoOpen,
-  onShareToDiscord,
 }: {
   game: Game;
   note?: string | null;
   // True only on a live finish — the breakdown then self-reveals once the entrance
   // settles, so the points makeup is seen without a trigger. Off on rehydrated finishes.
   autoOpen?: boolean;
-  // Discord SDK share (the working share path in the activity). When present the Share
-  // button uses it; absent (preview/landing) it falls back to native Web Share, then copy.
-  onShareToDiscord?: (message: string) => Promise<boolean>;
 }) {
   const b = game.scoreBreakdown;
   const won = game.status === "won";
@@ -211,15 +207,14 @@ function EndSummary({
   // touch would strand a sticky :hover). Suppressed while a save-note shows.
   const open = pinned && !showNote;
   const shareText = buildShareText(game);
-  // Can we share at all? In the Discord activity the SDK share modal is the working path
-  // (Web Share is blocked there), so onShareToDiscord drives it. Native Web Share is the
-  // standalone path. With neither, the button is a plain Copy button — so it always reads
-  // as exactly what it'll do.
+  // Does a native share sheet exist here? When it does, the action is a Share button →
+  // native sheet. When it doesn't (Linux, Firefox, the Discord iframe — which blocks Web
+  // Share), the same button becomes a plain Copy button — so it always reads as exactly
+  // what it'll do.
   const canNativeShare =
     typeof navigator !== "undefined" && typeof navigator.share === "function";
-  const canShare = onShareToDiscord != null || canNativeShare;
-  // Pick the share glyph to match the device's own share affordance (only shown when we can
-  // share; otherwise the button is a Copy button).
+  // Pick the share glyph to match the device's own share sheet (only shown when a native
+  // sheet exists; otherwise the button is a Copy button).
   const sharePlatform = detectSharePlatform();
   // hold the last note text through the face's fade-out, so the words don't vanish
   // a beat before the opacity does.
@@ -272,17 +267,9 @@ function EndSummary({
   // it; a real failure — not a user-dismiss — falls back to copy). Otherwise the button is
   // already a Copy button, so this just copies the grid and flashes the check.
   const onShare = (): void => {
-    // In the Discord activity, prefer the SDK share modal — the Web Share API is blocked
-    // there (absent on desktop, present-but-denied on iOS), so trying it just lands on copy.
-    // If the share doesn't go through (errors, unsupported client, or dismissed), fall back
-    // to copying the grid so the button always does something useful.
-    if (onShareToDiscord) {
-      void onShareToDiscord(shareText).then((ok) => {
-        if (!ok) void copyToClipboard(shareText).then(flashCopied);
-      });
-      return;
-    }
-    // Standalone (no SDK): the native OS sheet where it exists, else copy.
+    // Native OS share sheet where it exists; everywhere it doesn't (Linux, Firefox, and the
+    // Discord activity, which blocks Web Share) the button already reads as Copy, so this
+    // just copies the grid. Native must fire in the gesture, so nothing is awaited first.
     if (canNativeShare && navigator.share) {
       navigator.share({ text: shareText }).catch((err: unknown) => {
         // User dismissed the sheet — not a failure, so don't copy. Match on the error
@@ -419,19 +406,19 @@ function EndSummary({
             </div>
           </div>
           {/* SHARE / COPY — the same icon button as the in-play Shuffle/Deselect (BTN_ICON),
-              icon-only. When sharing is available (Discord SDK in the activity, or native
-              Web Share standalone) it's a Share button wearing the platform's own glyph
-              (Windows forward-arrow / Apple box-and-up-arrow / Android nodes); otherwise a
-              Copy button. A successful copy flashes the "Copied!" chip in the bar's centre. */}
+              icon-only. Where a native share sheet exists it's a Share button that opens it,
+              wearing that platform's own glyph (Windows forward-arrow / Apple box-and-up-
+              arrow / Android nodes); where it doesn't (incl. the Discord iframe) it's a Copy
+              button that copies the grid. A successful copy flashes the "Copied!" chip. */}
           <HoverButton
             data-end="share"
             className={BTN_ICON}
             hover="opacity-80"
             onClick={onShare}
-            aria-label={canShare ? "Share your result" : "Copy your result"}
-            title={canShare ? "Share your result" : "Copy your result"}
+            aria-label={canNativeShare ? "Share your result" : "Copy your result"}
+            title={canNativeShare ? "Share your result" : "Copy your result"}
           >
-            {!canShare ? (
+            {!canNativeShare ? (
               <Copy size={18} strokeWidth={2.5} aria-hidden />
             ) : sharePlatform === "windows" ? (
               <WindowsShareIcon />
@@ -447,7 +434,7 @@ function EndSummary({
                 aria-hidden
               />
             )}
-            <span className="sr-only">{canShare ? "Share" : "Copy"}</span>
+            <span className="sr-only">{canNativeShare ? "Share" : "Copy"}</span>
           </HoverButton>
         </div>
       </div>
@@ -713,7 +700,6 @@ export function Board({
   onPresence,
   onCommit,
   onFinish,
-  onShareToDiscord,
   initialRevealed = [],
 }: {
   game: Game;
@@ -723,9 +709,6 @@ export function Board({
   // the game is purely in-memory. See commit-then-reveal in submit().
   onCommit?: (guess: string[]) => Promise<boolean>;
   onFinish: () => void;
-  // Shares the result via Discord's SDK (the end-screen Share button) — the share path
-  // that works inside the activity. Omitted in preview/landing (falls back to native/copy).
-  onShareToDiscord?: (message: string) => Promise<boolean>;
   // seeds revealed-on-loss bars when rehydrating a finished game (preview harness).
   initialRevealed?: number[];
 }) {
@@ -1358,12 +1341,7 @@ export function Board({
   // warning arriving after the end swap still surfaces. See EndSummary.
   function renderBelowEnd() {
     return (
-      <EndSummary
-        game={game}
-        note={hint}
-        autoOpen={freshFinish.current}
-        onShareToDiscord={onShareToDiscord}
-      />
+      <EndSummary game={game} note={hint} autoOpen={freshFinish.current} />
     );
   }
 }

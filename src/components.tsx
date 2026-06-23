@@ -406,7 +406,6 @@ export function GameView({
   onFinish,
   onSubmitFeedback,
   onOpenExternal,
-  onShareToDiscord,
   initialRevealed,
 }: {
   game: Game;
@@ -434,10 +433,6 @@ export function GameView({
   // Opens an external URL (the footer's Ko-fi link). App routes it through the Discord SDK
   // when embedded; omitted in preview/landing, where useInfoLinks falls back to window.open.
   onOpenExternal?: (url: string) => void;
-  // Shares the result via Discord's SDK share modal (the end-screen Share button). The
-  // Web Share API is blocked in the Discord iframe, so this is the working share path;
-  // omitted in preview/landing, where the button falls back to native/copy.
-  onShareToDiscord?: (message: string) => Promise<boolean>;
   initialRevealed?: number[];
 }) {
   // which list the rail/section shows: the live room, or the cumulative season /
@@ -544,7 +539,6 @@ export function GameView({
                       setDone(true);
                       onFinish();
                     }}
-                    onShareToDiscord={onShareToDiscord}
                     initialRevealed={initialRevealed}
                   />
                 </div>

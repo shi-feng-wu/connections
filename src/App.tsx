@@ -891,22 +891,6 @@ export function App({
       window.open(url, "_blank", "noopener,noreferrer");
     }
   };
-  // Share the result through Discord's own share modal (the SDK). This is the share path
-  // that actually works in the activity — the Web Share API is blocked inside the Discord
-  // iframe (absent on desktop, present-but-denied on iOS). Resolves true ONLY on a confirmed
-  // share: shareLink returns { success:false } when it doesn't go through (dismissed, or a
-  // client that silently no-ops), and throws on error / when unsupported — both resolve
-  // false here so the end screen falls back to copying the grid to the clipboard.
-  const shareToDiscord = async (message: string): Promise<boolean> => {
-    const sdk = sdkRef.current;
-    if (!sdk) return false;
-    try {
-      const res = await sdk.commands.shareLink({ message });
-      return res?.success === true;
-    } catch {
-      return false;
-    }
-  };
   // Loading takes precedence (gameRef null until first fetch); error only once a fetch has
   // failed; blocked when opened outside Discord. The DayTurnover veil overlays whichever of
   // these is showing, so the midnight swap (ready → loading → ready) plays out underneath it.
@@ -945,7 +929,6 @@ export function App({
         onFinish={onFinish}
         onSubmitFeedback={submitFeedback}
         onOpenExternal={openExternal}
-        onShareToDiscord={shareToDiscord}
         initialRevealed={revealedLevelsOf(gameRef.current)}
       />
     );

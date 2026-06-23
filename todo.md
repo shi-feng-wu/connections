@@ -11,3 +11,5 @@
 - keyboard commands
 - footer
 - in the recap cards, special symbols don't show up right, emojis probably don't either. look at zzz in recap card
+- season recap
+- remove (you) from leaderboard

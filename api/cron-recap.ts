@@ -26,7 +26,9 @@ import { Game, type Puzzle } from '../src/game.js';
 // historical score). Channels are posted in parallel with a small concurrency cap (CONCURRENCY
 // below) — one canvas render + Discord upload per channel, across hundreds of channels, would
 // blow the function budget run serially. Needs DISCORD_BOT_TOKEN and the bot's Send Messages /
-// Attach Files permission in that channel. maxDuration is bumped in vercel.json for headroom.
+// Attach Files permission in that channel. maxDuration is bumped to 300s in vercel.json so the
+// midnight run clears every channel in one invocation (a 60s cap was killing it mid-run once the
+// channel count outgrew what 60s could post, spilling the remainder to the 05:00 twin at 1am ET).
 //
 // A channel the bot was removed from (or a deleted channel) just 403s/404s at post time and
 // is skipped for that day. A per-(scope, date, channel) ledger row is claimed before posting,
@@ -38,10 +40,13 @@ import { Game, type Puzzle } from '../src/game.js';
 // the route can't be triggered by anyone else.
 
 const SEASON_LIMIT = 5;
-// How many channels to post concurrently. High enough to clear hundreds inside the function
-// budget (~tens of seconds), low enough to stay under Discord's ~50 req/s global limit and
-// keep memory modest (one in-flight canvas render per slot). See the note above postOne.
-const CONCURRENCY = 8;
+// How many channels to post concurrently. High enough to clear the full channel set (now many
+// hundreds) well inside the 300s budget below — at ~1.2s per channel this drains ~600 channels
+// in ~60s — low enough to stay under Discord's ~50 req/s global limit (≈3 calls/channel × 10
+// channels/s ≈ 30 req/s here) and keep memory modest (one in-flight canvas render per slot).
+// See the note above postOne. The real ceiling is maxDuration in vercel.json, raised to 300s so
+// the midnight run finishes every channel rather than spilling the overflow to the 05:00 twin.
+const CONCURRENCY = 12;
 
 type ScopeRow = { scope_id: string | null; channel_id: string | null };
 type Outcome = 'posted' | 'skipped' | 'failed';

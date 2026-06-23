@@ -37,6 +37,11 @@
   --animate-dots: dots 1.4s steps(4, end) infinite;
   --animate-overlay-fade: ovfade 0.16s ease;
   --animate-sheet-rise: sheetrise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Info-links surfaces (redesign "Desktop/Mobile Connections"): the full-screen
+     DetailView eases up as it slides over the game; the mobile UtilitySheet rises
+     from the bottom edge. */
+  --animate-detail-in: detailin 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-sheet-up: sheetup 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   /* score hero easing into the header row at game end */
   --animate-hero-in: heroIn 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
   /* roster Live/Season/All-time tab swap — a quick, smaller heroIn so switching
@@ -141,6 +146,22 @@
     to {
       transform: none;
       opacity: 1;
+    }
+  }
+  @keyframes detailin {
+    from {
+      transform: translateY(8px);
+    }
+    to {
+      transform: none;
+    }
+  }
+  @keyframes sheetup {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: none;
     }
   }
   @keyframes fadeIn {

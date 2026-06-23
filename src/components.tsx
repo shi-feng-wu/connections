@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import iconUrl from "./assets/connections-nyt.png";
 import { Board, type BoardSnapshot } from "./board";
 import { HoverButton } from "./hoverbutton";
+import { useInfoLinks } from "./infolinks";
 import { LEVELS, type Game, type Puzzle } from "./game";
 import type { PlayerState } from "./player";
 import { Roster, type RosterScope, type RosterView } from "./roster";
@@ -317,14 +318,39 @@ const MAX_SCALE = 1.5;
 const MIN_SCALE = 0.62;
 const GUTTER = 28; // horizontal breathing per edge (binds only on narrow-tall windows)
 const V_GUTTER = 12; // vertical breathing per edge — the "little padding" the unit keeps
+// Desktop frame: padding between the (borderless) rounded card edge and the board, matched
+// to the footer's horizontal padding so the board and the footer links line up. Reserved on
+// both axes before fitting so the framed card (board + padding + footer) never overflows.
+const FRAME_PAD = 22;
 
-function useScaleToFit(ref: RefObject<HTMLElement | null>): {
+// Scale the board to fill the window, then frame it (rounded, padded card) with the
+// info-links footer sharing the frame. Two reservations come out of the viewport before
+// fitting: FRAME_PAD on each axis (the card's inner padding) and the footer's real,
+// unscaled height — so the framed card (board + padding + footer) always fits.
+//
+// The board's VISUAL box must equal its LAYOUT box so the frame hugs it at any scale. We
+// size the box to the scaled dimensions (natW×scale, natH×scale) and scale the board from
+// `top left` to fill it exactly — anchored, not centered-with-overflow. natW is read from a
+// separate zero-height probe (`measureRef`, the frame's outer width) minus the padding, so
+// it's stable regardless of the live transform; natH is the board's offsetHeight at that
+// width (transform-invariant). `width` = natW (applied to the scaled board) and `boxWidth`
+// = natW×scale (the framed board area) are both returned.
+function useScaleToFit(
+  ref: RefObject<HTMLElement | null>,
+  footerRef: RefObject<HTMLElement | null>,
+  measureRef: RefObject<HTMLElement | null>,
+): {
   scale: number;
   height?: number;
+  width?: number;
+  natW?: number;
 } {
-  const [fit, setFit] = useState<{ scale: number; height?: number }>({
-    scale: 1,
-  });
+  const [fit, setFit] = useState<{
+    scale: number;
+    height?: number;
+    width?: number;
+    natW?: number;
+  }>({ scale: 1 });
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -333,24 +359,33 @@ function useScaleToFit(ref: RefObject<HTMLElement | null>): {
         setFit({ scale: 1 });
         return;
       }
-      const natW = el.offsetWidth;
-      const natH = el.offsetHeight;
+      // natW: the board's natural width = the probe's full width (the frame's outer width)
+      // minus the frame padding, i.e. the board area inside the card. Read from the unscaled
+      // probe (not the live, scaled board, whose layout width we drive from this value).
+      const probe = measureRef.current?.offsetWidth;
+      const natW = probe ? probe - FRAME_PAD * 2 : el.offsetWidth;
+      const natH = el.offsetHeight; // transform-invariant; measured at width = natW
       if (!natW || !natH) return;
-      const fitW = (window.innerWidth - GUTTER * 2) / natW;
-      const fitH = (window.innerHeight - V_GUTTER * 2) / natH;
+      // Reserve the footer's real (constant, single-row) height; it isn't scaled.
+      const footH = footerRef.current?.offsetHeight ?? 0;
+      const fitW = (window.innerWidth - GUTTER * 2 - FRAME_PAD * 2) / natW;
+      const fitH =
+        (window.innerHeight - V_GUTTER * 2 - FRAME_PAD * 2 - footH) / natH;
       let scale = Math.min(fitW, fitH, MAX_SCALE);
       if (scale < MIN_SCALE) scale = MIN_SCALE;
-      setFit({ scale, height: natH * scale });
+      setFit({ scale, height: natH * scale, width: natW * scale, natW });
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    if (footerRef.current) ro.observe(footerRef.current);
+    if (measureRef.current) ro.observe(measureRef.current);
     window.addEventListener("resize", measure);
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [ref]);
+  }, [ref, footerRef, measureRef]);
   return fit;
 }
 
@@ -369,6 +404,8 @@ export function GameView({
   onPresence,
   onCommit,
   onFinish,
+  onSubmitFeedback,
+  onOpenExternal,
   initialRevealed,
 }: {
   game: Game;
@@ -390,6 +427,12 @@ export function GameView({
   onPresence: (snap: BoardSnapshot) => void;
   onCommit?: (guess: string[]) => Promise<boolean>;
   onFinish: () => void;
+  // Sends a feedback note (the footer's "Send feedback" form). Returns whether it landed.
+  // Omitted by the dev preview / landing, where the form falls back to a local thank-you.
+  onSubmitFeedback?: (category: string, text: string) => Promise<boolean>;
+  // Opens an external URL (the footer's Ko-fi link). App routes it through the Discord SDK
+  // when embedded; omitted in preview/landing, where useInfoLinks falls back to window.open.
+  onOpenExternal?: (url: string) => void;
   initialRevealed?: number[];
 }) {
   // which list the rail/section shows: the live room, or the cumulative season /
@@ -405,13 +448,28 @@ export function GameView({
     setDone(game.status !== "playing");
   }, [game]);
 
-  // Grow the whole board to fill large desktop windows (mobile is untouched).
+  // Grow the whole board to fill large desktop windows (mobile is untouched). The footer
+  // shares the desktop frame below the board; both the footer height and the frame padding
+  // are reserved here. measureRef is a zero-height probe for the board's natural width.
   const scaleRef = useRef<HTMLDivElement>(null);
-  const { scale, height: boxHeight } = useScaleToFit(scaleRef);
+  const footerRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const {
+    scale,
+    height: boxHeight,
+    width: boxWidth,
+    natW,
+  } = useScaleToFit(scaleRef, footerRef, measureRef);
 
   const header = (className: string) => (
     <Header puzzle={game.puzzle} className={className} />
   );
+
+  // Info links (redesign "Desktop/Mobile Connections"): a full-width LinkBar footer
+  // under the game on desktop; a kebab (⋮) in the players-tab row → bottom sheet on
+  // mobile. Both open the same full-screen DetailView (changelog / FAQ / feedback).
+  // overlays (sheet + detail screen) portal to <body>.
+  const info = useInfoLinks(onSubmitFeedback, onOpenExternal);
 
   return (
     // Mobile: the unit fills the viewport (#app content box = 100dvh − top safe-area
@@ -421,64 +479,105 @@ export function GameView({
     // [&>*]:my-auto then centers it with no scale gap and no phantom scroll — holding the
     // board+rail UNIT positioned absolute and scaled (origin top). The rail's absolute-fill
     // matches the board's height so the two are always the same height.
-    <div
-      className="mx-auto w-full max-w-[480px] animate-fade-in min-[800px]:relative min-[800px]:max-w-[860px]"
-      style={boxHeight ? { height: boxHeight } : undefined}
-    >
-      <div
-        ref={scaleRef}
-        // origin top: the scaled unit top-aligns to the outer box (no centering gap) and
-        // centers horizontally. scale(1) is omitted so mobile gets no needless transform.
-        style={
-          scale !== 1
-            ? { transform: `scale(${scale})`, transformOrigin: "top" }
-            : undefined
-        }
-        className="flex min-h-[calc(100dvh_-_max(0.75rem,var(--sait))_-_max(1.5rem,var(--saib)))] w-full flex-col gap-3 min-[800px]:min-h-0 min-[800px]:absolute min-[800px]:inset-x-0 min-[800px]:top-0 min-[800px]:flex-row min-[800px]:items-stretch min-[800px]:gap-6"
-      >
-        {/* main column — board + footer. No header on mobile: Discord shows its own
-          activity header there, so we hide ours; #app's top padding (max(0.75rem,--sait))
-          already clears that bar — and floors at 12px when there's none — so no extra top
-          padding here. The header sits atop the players rail on desktop instead (below).
-          Desktop: flex-1 — the board fills the left half, snug against the rail. */}
-        <div className="flex w-full min-w-0 flex-col gap-3 min-[800px]:flex-1">
-          <Board
-            key={gameKey}
-            game={game}
-            onPresence={onPresence}
-            onCommit={onCommit}
-            onFinish={() => {
-              setView("live");
-              setDone(true);
-              onFinish();
-            }}
-            initialRevealed={initialRevealed}
-          />
-        </div>
+    <>
+      <div className="mx-auto flex w-full max-w-[480px] flex-col items-center animate-fade-in min-[800px]:max-w-[860px]">
+        {/* zero-height probe for the board's natural width (desktop scale math); never
+          painted, never scaled, so it stays a stable reference as the board transforms. */}
+        <div
+          ref={measureRef}
+          aria-hidden
+          className="pointer-events-none h-0 w-full max-w-[860px]"
+        />
 
-        {/* players column — mobile flex-grows into the freed vertical space (list fills +
-          scrolls internally); desktop rail absolute-fills its half so it matches the
-          board's height exactly (same-height pair) and scrolls its list within. */}
-        <div className="relative flex w-full min-w-0 flex-1 flex-col min-h-0">
-          <div className="flex min-h-0 flex-1 flex-col gap-2.5 min-[800px]:absolute min-[800px]:inset-0">
-            {header("hidden min-[800px]:flex")}
-            <Roster
-              players={players}
-              selfId={selfId}
-              view={view}
-              onViewChange={setView}
-              scope={scope}
-              onScopeChange={onScopeChange}
-              season={season}
-              allTime={allTime}
-              roomKey={roomKey}
-              today={today}
-              nextPuzzle={done}
-              onAddBot={done ? onAddBot : undefined}
-            />
+        {/* The game. Mobile: a full-bleed column. Desktop: a borderless rounded card — the
+          padded board area, then the info-links footer sharing the frame (its top border is
+          the divider). overflow-hidden rounds the corners. The width is set explicitly
+          (board area + padding) so it doesn't collapse to content. */}
+        <div
+          className="flex w-full min-w-0 flex-col min-[800px]:overflow-hidden min-[800px]:rounded-[14px]"
+          style={boxWidth ? { width: boxWidth + FRAME_PAD * 2 } : undefined}
+        >
+          {/* board area — desktop padding insets the board from the rounded card edge */}
+          <div className="flex min-h-[calc(100dvh_-_max(0.75rem,var(--sait))_-_max(1.5rem,var(--saib)))] w-full flex-col min-[800px]:min-h-0 min-[800px]:p-[22px]">
+            {/* game box — desktop: occupies the board's VISUAL box (boxWidth × boxHeight)
+              in flow, with the scaled board filling it from the top-left so the frame hugs
+              it exactly. Mobile: the column fills the viewport (the box just wraps it). */}
+            <div
+              className="flex w-full min-w-0 flex-1 flex-col min-[800px]:relative min-[800px]:flex-none"
+              style={
+                boxHeight ? { height: boxHeight, width: boxWidth } : undefined
+              }
+            >
+              <div
+                ref={scaleRef}
+                // Desktop: scale from top-left so the board's visual bounds == its layout
+                // box (no centering overflow); width is pinned to the measured natural
+                // width. Mobile: no transform (the column flows at scale 1).
+                style={
+                  boxWidth
+                    ? {
+                        transform: `scale(${scale})`,
+                        transformOrigin: "top left",
+                        width: natW,
+                      }
+                    : undefined
+                }
+                className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-3 min-[800px]:max-w-[860px] min-[800px]:flex-none min-[800px]:absolute min-[800px]:left-0 min-[800px]:top-0 min-[800px]:flex-row min-[800px]:items-stretch min-[800px]:gap-6"
+              >
+                {/* main column — the board. No header on mobile: Discord shows its own
+                  activity header there, so we hide ours; #app's top padding already clears
+                  that bar. The header sits atop the players rail on desktop (below).
+                  Desktop: flex-1 — the board fills the left half, snug against the rail. */}
+                <div className="flex w-full min-w-0 flex-col gap-3 min-[800px]:flex-1">
+                  <Board
+                    key={gameKey}
+                    game={game}
+                    onPresence={onPresence}
+                    onCommit={onCommit}
+                    onFinish={() => {
+                      setView("live");
+                      setDone(true);
+                      onFinish();
+                    }}
+                    initialRevealed={initialRevealed}
+                  />
+                </div>
+
+                {/* players column — mobile flex-grows into the freed vertical space (list
+                  fills + scrolls internally); desktop rail absolute-fills its half so it
+                  matches the board's height exactly and scrolls its list within. */}
+                <div className="relative flex w-full min-w-0 flex-1 flex-col min-h-0">
+                  <div className="flex min-h-0 flex-1 flex-col gap-2.5 min-[800px]:absolute min-[800px]:inset-0">
+                    {header("hidden min-[800px]:flex")}
+                    <Roster
+                      players={players}
+                      selfId={selfId}
+                      view={view}
+                      onViewChange={setView}
+                      scope={scope}
+                      onScopeChange={onScopeChange}
+                      season={season}
+                      allTime={allTime}
+                      roomKey={roomKey}
+                      today={today}
+                      nextPuzzle={done}
+                      onAddBot={done ? onAddBot : undefined}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* info-links footer — desktop only, sharing the card frame in normal flow: its
+            real height is reserved by useScaleToFit, and its top border divides it from the
+            board area. Mobile hides it (links live in the kebab sheet). */}
+          <div ref={footerRef} className="hidden min-[800px]:block">
+            {info.footer()}
           </div>
         </div>
       </div>
-    </div>
+      {info.overlays}
+    </>
   );
 }

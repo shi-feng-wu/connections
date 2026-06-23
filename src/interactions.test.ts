@@ -107,6 +107,19 @@ describe("routeInteraction", () => {
     expect(r.data.components).toBeUndefined(); // no button
     expect(r.data.content).toContain("already");
   });
+
+  it("/donate replies privately with the Ko-fi link button", () => {
+    const r = routeInteraction({
+      type: 2,
+      data: { name: "donate" },
+    }) as { type: number; data: { flags?: number; content?: string; components?: { components: { style?: number; url?: string }[] }[] } };
+    expect(r.type).toBe(4); // CHANNEL_MESSAGE_WITH_SOURCE
+    expect(r.data.flags).toBe(64); // ephemeral
+    expect(r.data.content).toContain("server costs");
+    const btn = r.data.components?.[0].components[0];
+    expect(btn?.style).toBe(5); // link button
+    expect(btn?.url).toBe("https://ko-fi.com/borgardev");
+  });
 });
 
 // /share posts the player's finished result as a Components V2 card (shareCard) — a plain bordered

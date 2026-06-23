@@ -56,8 +56,9 @@ type RosterPlayer = {
 };
 
 // A player is "online" (green ring) when their /api/roster heartbeat is within this window.
-// Clients poll ~15s; the TTL spans a missed beat so a brief hiccup doesn't blink the ring,
-// while a backgrounded client (which simply stops polling) ages out of it on its own.
+// Clients poll ~30s, so a reliably-polling player stays inside the TTL (30s < 40s) while a
+// backgrounded client (which simply stops polling) ages out of it on its own. A single
+// dropped beat can blink the ring for one cycle; the next poll's heartbeat revives it.
 const ROSTER_ONLINE_TTL_MS = 40_000;
 
 // A finished roster row built from a scores row, for a player whose progress row is

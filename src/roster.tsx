@@ -6,7 +6,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { Check, RotateCw, X } from "lucide-react";
+import { Check, Newspaper, RotateCw, X } from "lucide-react";
 import { ResetCountdown } from "./countdown";
 import { finishedScore, LEVELS, MAX_MISTAKES } from "./game";
 import type { PlayerState } from "./player";
@@ -525,24 +525,41 @@ function RecapPrompt({ onAdd }: { onAdd: () => void }) {
       >
         <X size={14} strokeWidth={2.5} aria-hidden />
       </HoverButton>
-      <div className="min-w-0 pr-7">
-        <div className="text-balance text-[12.5px] font-semibold leading-snug text-zinc-200">
-          Get the daily recap here
-        </div>
-        <div className="mt-0.5 text-pretty text-[11.5px] leading-snug text-zinc-500">
-          The day’s results and the leaderboard, posted at the nightly reset.
-        </div>
-        <div className="mt-1 text-pretty text-[10.5px] leading-snug text-zinc-600">
-          Needs Manage Server, or ask an admin to run /enable-posts.
+      {/* icon-anchored heading: the newspaper glyph echoes the RotateCw on the
+          Next-puzzle row below, so the rail footer reads as one consistent stack */}
+      <div className="flex gap-2.5 pr-7">
+        <Newspaper
+          size={15}
+          strokeWidth={2}
+          className="mt-px flex-none text-zinc-400"
+          aria-hidden
+        />
+        <div className="min-w-0">
+          <div className="text-balance text-[12.5px] font-semibold leading-snug text-zinc-200">
+            Get the daily recap here
+          </div>
+          <div className="mt-0.5 text-pretty text-[11.5px] leading-snug text-zinc-500">
+            The day’s results and the leaderboard, posted at the nightly reset.
+          </div>
         </div>
       </div>
-      <HoverButton
-        onClick={onAdd}
-        hover="opacity-85"
-        className="mt-3 cursor-pointer self-end rounded-full bg-zinc-100 px-3.5 py-2 text-[12px] font-semibold leading-none text-zinc-900 transition-opacity duration-150 ease-out active:opacity-70"
-      >
-        Enable
-      </HoverButton>
+      {/* footer row: the admin caveat sits on the Enable button's baseline (no dead
+          space under the copy) and /enable-posts reads as a command token */}
+      <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/[0.06] pt-3">
+        <div className="text-pretty text-[10.5px] leading-snug text-zinc-600">
+          Needs Manage Server, or ask an admin to run{" "}
+          <span className="whitespace-nowrap rounded-[5px] bg-white/[0.06] px-[5px] py-px font-semibold text-zinc-400">
+            /enable-posts
+          </span>
+        </div>
+        <HoverButton
+          onClick={onAdd}
+          hover="opacity-85"
+          className="flex-none cursor-pointer rounded-full bg-zinc-100 px-3.5 py-2 text-[12px] font-semibold leading-none text-zinc-900 transition-opacity duration-150 ease-out active:opacity-70"
+        >
+          Enable
+        </HoverButton>
+      </div>
     </div>
   );
 }

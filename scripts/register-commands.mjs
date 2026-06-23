@@ -192,3 +192,34 @@ if (share) {
   const cmd = await createRes.json();
   console.log(`Registered chat command /${cmd.name} (id ${cmd.id}).`);
 }
+
+// --- 5) donate chat-input command -------------------------------------------------
+// /donate replies (privately) with a Ko-fi link button — the same "Help cover the server
+// costs" link in the app footer. The response is built in api/interactions.ts
+// (routeInteraction); this only registers the name. Same contexts + integration types as the
+// launch command so it's available everywhere, including user-install (bot-less) servers — it
+// posts as an interaction response and needs no bot in the guild.
+const DONATE = 'donate';
+const DONATE_DESCRIPTION = 'Support Connections — donate to help cover the server costs';
+const donate = commands.find((c) => c.type === CHAT_INPUT && c.name === DONATE);
+if (donate) {
+  console.log(`Chat command /${DONATE} already registered (id ${donate.id}).`);
+} else {
+  const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({
+      name: DONATE,
+      description: DONATE_DESCRIPTION,
+      type: CHAT_INPUT,
+      contexts: CONTEXTS,
+      integration_types: INTEGRATION_TYPES,
+    }),
+  });
+  if (!createRes.ok) {
+    console.error(`Failed to register /${DONATE}: ${createRes.status} ${await createRes.text()}`);
+    process.exit(1);
+  }
+  const cmd = await createRes.json();
+  console.log(`Registered chat command /${cmd.name} (id ${cmd.id}).`);
+}

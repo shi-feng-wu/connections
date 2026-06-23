@@ -1398,21 +1398,26 @@ function ArtBar({ color, s }: { color: string; s: CSSProperties }) {
   );
 }
 
-// Cover Art — Wordle-style: light, minimal, centered. The brick logo, the serif
-// (Newsreader) wordmark, a small muted subtitle. No scattered art.
+// Cover Art — Wordle-style: minimal, centered, one tight lockup. The brick logo, a
+// tall condensed slab-serif wordmark, a small muted tagline, on flat neutral grey. NOTE:
+// the exported docs/activity-cover.png bakes the type in licensed NYTKarnak Condensed —
+// the EXACT Wordle wordmark face (confirmed via the live page: NYTKarnak Condensed,
+// weight 700), a condensed slab serif. NOT Cheltenham (bracketed old-style) and NOT the
+// wide regular Karnak (reads blocky/short). The dev stand-in below is font-display
+// (Newsreader), so this preview only approximates the bake; keep sizes/spacing in sync.
+// Just the brick logo + condensed slab wordmark, nudged down (pt-[132px]) so the pair sits
+// roughly centered on the flat neutral grey. The bake uses NYTKarnak Condensed 700;
+// font-display (Newsreader) is the dev stand-in here.
 const COVER = (
-  <div className="flex h-dvh w-full flex-col items-center justify-center bg-[#f3f3ec] text-[#121212]">
+  <div className="flex h-dvh w-full flex-col items-center justify-start bg-[#d8d8d6] pt-[132px] text-black">
     <img
       src="/connections-icon.png"
       alt=""
-      className="mb-9 h-[104px] w-[104px] object-contain"
+      className="mb-[22px] h-[140px] w-[140px] object-contain"
     />
-    <h1 className="font-display text-[118px] font-bold leading-[0.9] tracking-[-0.02em]">
+    <h1 className="font-display text-[188px] font-bold leading-[0.84] tracking-[-0.015em]">
       Connections
     </h1>
-    <p className="mt-7 font-display text-[27px] font-medium tracking-tight text-[#5d5d54]">
-      Play live with friends. Climb the season leaderboard.
-    </p>
   </div>
 );
 

@@ -60,6 +60,11 @@ const ENABLE_POSTS_COMMAND = "enable-posts";
 // one row of category-colour squares per guess — publicly to the channel. Computed from the
 // player's stored guesses (a DB read), so it's handled off the pure router (see shareResponse).
 const SHARE_COMMAND = "share";
+// The "/donate" command: replies (privately) with a Ko-fi link button — the same one in the
+// app footer. Connections is free and ad-free; donations cover the server costs. KEEP the URL
+// in sync with the Ko-fi link in src/infolinks.tsx.
+const DONATE_COMMAND = "donate";
+const KOFI_URL = "https://ko-fi.com/borgardev";
 // Guild-install permissions for that button's URL — KEEP IN SYNC with scripts/configure-install.mjs
 // (View Channel | Send Messages | Embed Links | Attach Files | Read Message History).
 const INSTALL_PERMISSIONS = "117760";
@@ -219,6 +224,37 @@ export function routeInteraction(body: Interaction): object {
                 style: 5,
                 label: "Add to Server",
                 url: installUrl(appId),
+              },
+            ],
+          },
+        ],
+      },
+    };
+  }
+  // "/donate": a private reply with the Ko-fi link button (the footer's "Help cover the
+  // server costs" link). Ephemeral — it's a personal nudge, not a channel post.
+  if (
+    body.type === APPLICATION_COMMAND &&
+    body.data?.name === DONATE_COMMAND
+  ) {
+    return {
+      type: CHANNEL_MESSAGE_WITH_SOURCE,
+      data: {
+        content:
+          "### Support Connections ☕\n" +
+          "Connections is free and ad-free — donations go straight to the server costs that keep " +
+          "the daily puzzle, live card, and recaps running. Any amount helps, and thank you!",
+        flags: EPHEMERAL,
+        components: [
+          {
+            type: 1,
+            components: [
+              {
+                type: 2,
+                style: 5,
+                label: "Donate on Ko-fi",
+                emoji: { name: "☕" },
+                url: KOFI_URL,
               },
             ],
           },

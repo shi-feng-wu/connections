@@ -712,7 +712,7 @@ export function App({
     void refreshLeaderboard();
   }, [scopeMode]);
 
-  // The roster is poll-driven (no Realtime): refetch /api/roster every 15s so other players'
+  // The roster is poll-driven (no Realtime): refetch /api/roster every 30s so other players'
   // progress and the green "online" ring stay live, and that same call heartbeats us as present.
   // Your own row is instant (local overlay in the `roster` memo); only others lag up to one
   // interval. Collapsed to PIP (or a hidden tab) the roster isn't visible, so the fetch is
@@ -733,7 +733,7 @@ export function App({
       }
       if (layoutModeRef.current === Common.LayoutModeTypeObject.PIP || document.hidden) return;
       void fetchServerRoster();
-    }, 15_000);
+    }, 30_000);
     return () => clearInterval(id);
   }, [isEmbedded]);
 
@@ -749,10 +749,15 @@ export function App({
 
   // The season/all-time boards move only when someone finishes, and a fresh finish already
   // fires a targeted refresh (the effect below, and onFinish for your own) — so this poll is
-  // purely the safety net for finishers we never catch mid-game; 2 minutes is plenty.
+  // purely the safety net for finishers we never catch mid-game; 3 minutes is plenty, and a
+  // backgrounded tab skips it entirely (it isn't looking at the board, and the mount/scope/
+  // finish refreshes catch it up the moment it returns).
   useEffect(() => {
     if (!isEmbedded) return;
-    const id = setInterval(() => void refreshLeaderboard(), 120_000);
+    const id = setInterval(() => {
+      if (document.hidden) return;
+      void refreshLeaderboard();
+    }, 180_000);
     return () => clearInterval(id);
   }, [isEmbedded]);
 
@@ -850,6 +855,42 @@ export function App({
       /* user dismissed Discord's leave-app dialog — nothing to do */
     });
   };
+  // Send a feedback note to /api/feedback, which relays it to the dev's Discord webhook.
+  // We pass the Discord token (the endpoint verifies identity + tags the note) and the
+  // current puzzle number for context. Returns whether it landed, so the form can show a
+  // real success vs. a "try again".
+  const submitFeedback = async (
+    category: string,
+    text: string,
+  ): Promise<boolean> => {
+    try {
+      const r = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accessToken: accessTokenRef.current,
+          category,
+          text,
+          puzzle: gameRef.current?.puzzle.id ?? null,
+        }),
+      });
+      return r.ok && ((await r.json()) as { ok?: boolean }).ok === true;
+    } catch {
+      return false;
+    }
+  };
+  // Open an external URL (the footer's Ko-fi link). Embedded, it must go through the Discord
+  // SDK (which shows the leave-app consent); standalone, sdkRef is null so we window.open.
+  const openExternal = (url: string): void => {
+    const sdk = sdkRef.current;
+    if (sdk) {
+      void sdk.commands.openExternalLink({ url }).catch(() => {
+        /* user dismissed Discord's leave-app dialog — nothing to do */
+      });
+    } else {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  };
   // Loading takes precedence (gameRef null until first fetch); error only once a fetch has
   // failed; blocked when opened outside Discord. The DayTurnover veil overlays whichever of
   // these is showing, so the midnight swap (ready → loading → ready) plays out underneath it.
@@ -886,6 +927,8 @@ export function App({
         onPresence={onPresence}
         onCommit={commitGuess}
         onFinish={onFinish}
+        onSubmitFeedback={submitFeedback}
+        onOpenExternal={openExternal}
         initialRevealed={revealedLevelsOf(gameRef.current)}
       />
     );

@@ -2,19 +2,18 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import type { RosterDelta } from './player';
 import { supabase } from './supabase';
 
-// Live roster deltas over Supabase Realtime broadcast — the fast path. Mints a room-scoped JWT
-// (/api/realtime-token), joins the room's private channel, and merges progress/join broadcasts
-// (api/_realtime.ts) into the roster the instant a guess lands: no poll, no per-viewer egress.
+// Live roster over Supabase Realtime broadcast — the fast path. Joins the room's PUBLIC channel
+// and merges progress/join broadcasts (api/_realtime.ts, server→clients) plus tiles (client→
+// clients) into the roster the instant they happen: no poll, no per-viewer egress.
 //
 // Broadcast ONLY — the online ring comes from Discord's own participant list (the SDK), not from
-// here, so there's no Presence to track. Purely additive over the cold-start read: if the token
-// mint or socket fails (including the silent death when the Activity backgrounds), live updates
-// just stop and the next load / reconnect / safety-net read reconciles. resync() rejoins the
-// channel when the Activity returns to the foreground.
+// here, so there's no Presence to track. Purely additive over the cold-start read: if the socket
+// can't connect or dies, live updates just stop and the next load / safety-net read reconciles.
+// resync() re-opens only if there's no channel; an existing one is left to supabase-js's own
+// reconnect so we don't churn it.
 
 // Ephemeral "which tiles am I picking" sent client→client over the WebSocket (channel.send),
-// not the server REST path — so it rides the already-connected socket with the client's own
-// room JWT. Pure cosmetic, never persisted.
+// riding the already-connected socket. Pure cosmetic, never persisted.
 export type TilesMsg = { userId: string; channelId?: string | null; selected: string[] };
 
 export type RoomLiveHandlers = {
@@ -47,26 +46,13 @@ export class RoomLive {
     this.connecting = true;
     const { scope, handlers } = this.opts;
     try {
-      const token = await this.mintToken();
-      if (!token) {
-        console.warn('[roomlive] no token minted — staying on cold-start reads');
-        return;
-      }
-      // NOT awaited: setAuth applies the token synchronously and flushes to the socket async;
-      // awaiting it can hang if the proxied WebSocket can't establish, which would block the
-      // subscribe below entirely.
-      try {
-        void supabase.realtime.setAuth(token);
-      } catch (e) {
-        console.error('[roomlive] setAuth threw', e);
-      }
       console.info('[roomlive] subscribing to room:%s', scope);
-      // PUBLIC channel (not private). On a private channel the realtime server re-evaluates the
-      // realtime.messages RLS per recipient during broadcast fan-out, and it only passes for the
-      // sender — so self:true works but no one else ever receives. Public has no per-message RLS,
-      // so every subscriber gets every broadcast. self:true also lets a single tester confirm the
-      // round-trip. The data here is the public "who's playing" roster, so a public room channel
-      // matches the live-card exposure.
+      // PUBLIC channel — no auth token, no setAuth. The supabase client's anon key authorizes the
+      // socket, and a public channel has no RLS, so every subscriber receives every broadcast.
+      // (A private channel re-evaluates realtime.messages RLS per recipient during fan-out and
+      // only the sender passes, so others never receive — confirmed.) We deliberately do NOT call
+      // setAuth: on a public channel it's unnecessary, and applying a token can force the socket
+      // to reconnect mid-join, racing the subscribe and surfacing as a "transport failure" loop.
       const channel = supabase.channel(`room:${scope}`, {
         config: { broadcast: { self: true } },
       });
@@ -97,26 +83,6 @@ export class RoomLive {
     }
   }
 
-  private async mintToken(): Promise<string | null> {
-    if (!this.opts) return null;
-    try {
-      const r = await fetch('/api/realtime-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          accessToken: this.opts.accessToken,
-          guildId: this.opts.guildId,
-          channelId: this.opts.channelId,
-        }),
-      });
-      if (!r.ok) return null;
-      const d = (await r.json()) as { token?: string };
-      return typeof d.token === 'string' ? d.token : null;
-    } catch {
-      return null;
-    }
-  }
-
   // Push the caller's live tile selection to the room over the WebSocket (client→client, not the
   // server REST path). No-op until the channel is joined; a drop just means others stop seeing
   // your picks until you reselect.
@@ -125,12 +91,12 @@ export class RoomLive {
     void this.channel.send({ type: 'broadcast', event: 'tiles', payload: t });
   }
 
-  // Re-establish after a likely drop (the socket can die silently on backgrounding without a
-  // status callback). Healthy + connected → cheap no-op; otherwise tear down and rejoin.
+  // Re-establish ONLY if we have no channel at all. supabase-js auto-reconnects an existing
+  // channel on transport failure with its own backoff; tearing it down and recreating it on every
+  // visibility/layout blip interrupts that retry and churns ("subscribing → error → closed →
+  // subscribing…" forever), so we leave a live-or-retrying channel alone.
   async resync(): Promise<void> {
-    if (!supabase || !this.opts) return;
-    if (this.live && this.channel && supabase.realtime.isConnected()) return;
-    await this.teardown();
+    if (!supabase || !this.opts || this.channel) return;
     await this.open();
   }
 

@@ -387,7 +387,10 @@ export function App({
       const r = await fetch("/api/roster?" + qs.toString(), { headers: { "x-ct": ticket } });
       if (!r.ok) return;
       const d = (await r.json()) as { players?: PlayerState[] };
-      if (Array.isArray(d.players)) setServerRoster(d.players);
+      if (Array.isArray(d.players)) {
+        console.info("[roomlive] roster fetched", d.players.length, d.players.map((p) => p.userId));
+        setServerRoster(d.players);
+      }
     } catch {
       /* keep the last roster */
     }
@@ -422,24 +425,32 @@ export function App({
 
   // A live tile-selection broadcast arrived — store it per player for the roster to render.
   function handleTiles(t: TilesMsg): void {
-    if (
+    const filteredOut =
       scopeModeRef.current === "channel" &&
-      guildIdRef.current &&
-      t.channelId &&
-      channelIdRef.current &&
-      t.channelId !== channelIdRef.current
-    ) {
-      return;
-    }
-    console.info("[roomlive] handleTiles", t.userId, t.selected);
+      !!guildIdRef.current &&
+      !!t.channelId &&
+      !!channelIdRef.current &&
+      t.channelId !== channelIdRef.current;
+    const known = serverRosterRef.current.some((p) => p.userId === t.userId);
+    console.info(
+      "[roomlive] handleTiles",
+      t.userId,
+      "known:", known,
+      "filteredOut:", filteredOut,
+      "view:", scopeModeRef.current,
+      "myChan:", channelIdRef.current,
+      "theirChan:", t.channelId,
+      "rosterIds:", serverRosterRef.current.map((p) => p.userId),
+    );
+    if (filteredOut) return;
     // Pure cosmetic overlay: paint the selection onto the player's existing roster row.
     setPickingByUser((prev) => ({ ...prev, [t.userId]: t.selected }));
     // If we don't have this picker yet — their join broadcast landed before we subscribed and the
     // cold-start read missed them — pull the authoritative roster once (they really opened the
     // room, so the read includes their real row). We never synthesize a row from tile data.
-    const known = serverRosterRef.current.some((p) => p.userId === t.userId);
     if (!known && t.userId !== meRef.current.id && !tileFetchRequested.current.has(t.userId)) {
       tileFetchRequested.current.add(t.userId);
+      console.info("[roomlive] tile-refetch for", t.userId);
       void fetchServerRoster();
     }
   }

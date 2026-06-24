@@ -12,13 +12,45 @@ import {
   roomSelf,
   submitScore,
 } from "./leaderboard";
-import type { PlayerState } from "./player";
+import type { PlayerState, RosterDelta } from "./player";
 import { Landing } from "./landing";
 import { type PresenceInput, presenceSignature, setPresence } from "./presence";
+import { RoomLive } from "./roomlive";
 import { canonicalScope } from "./scope";
 import type { Standings } from "./season";
+import { supabaseEnabled } from "./supabase";
 
 const EMPTY_STANDINGS: Standings = { board: [], self: null };
+
+// Merge one Realtime delta (api/_realtime.ts) into the roster: patch the matching row, or
+// insert a new player (a `join` carries identity). Broadcast payloads only include fields that
+// changed, and JSON drops absent ones, so spreading the delta never clobbers a known value with
+// an undefined. `channelId` rides onto the row harmlessly (it's not a PlayerState field the UI
+// reads). The green ring isn't set here — it comes from channel Presence (the `roster` memo).
+function mergeDelta(roster: PlayerState[], d: RosterDelta): PlayerState[] {
+  const i = roster.findIndex((p) => p.userId === d.userId);
+  if (i >= 0) {
+    const next = roster.slice();
+    next[i] = { ...next[i], ...d };
+    return next;
+  }
+  return [
+    ...roster,
+    {
+      name: "Player",
+      mistakesLeft: MAX_MISTAKES,
+      solvedCount: 0,
+      solvedLevels: [],
+      picking: false,
+      done: null,
+      startedAt: Date.now(),
+      finishedAt: null,
+      online: true,
+      // ...d supplies userId (required) and overrides any field it carries.
+      ...d,
+    },
+  ];
+}
 
 // Persist the Channel/Server toggle across launches. localStorage is per-origin (the
 // activity's discordsays.com proxy), so the choice survives reopening the Activity. Wrapped
@@ -193,6 +225,17 @@ export function App({
   // never lags the poll. Empty for non-guild / non-daily contexts, where the roster is just you.
   const [serverRoster, setServerRoster] = useState<PlayerState[]>([]);
   const [self, setSelf] = useState<PlayerState | null>(null);
+  // Realtime (src/roomlive.ts) is the fast path when it's up: progress/join broadcasts merge
+  // into serverRoster the instant a guess lands, and channel Presence drives the online ring.
+  // `live` gates which online source the roster memo trusts; `liveOnline` is the presence set;
+  // serverRosterRef mirrors serverRoster so a broadcast handler can tell a known player from a
+  // new one without a stale closure. When `live` is false the backstop poll + heartbeat take
+  // over (exactly today's behavior), so Realtime is purely additive.
+  const serverRosterRef = useRef<PlayerState[]>([]);
+  const [live, setLive] = useState(false);
+  const liveRef = useRef(false);
+  const [liveOnline, setLiveOnline] = useState<Set<string>>(new Set());
+  const roomLiveRef = useRef<RoomLive | null>(null);
   // End-screen room leaderboard, two windows; fetched after a finish posts and on load.
   const [season, setSeason] = useState<Standings>(EMPTY_STANDINGS);
   const [allTime, setAllTime] = useState<Standings>(EMPTY_STANDINGS);
@@ -354,6 +397,34 @@ export function App({
     }
   }
 
+  // A Realtime delta arrived (someone guessed or joined). Merge it into the roster instantly.
+  // Channel view ignores deltas from other channels of the guild (the roster is narrowed). A
+  // progress delta for a player we have no identity for yet (rare: their join never landed
+  // here) can't be rendered, so fall back to one backstop fetch to pick up their row. Reads
+  // refs only, so the value captured by the channel subscription stays correct across renders.
+  function applyDelta(d: RosterDelta): void {
+    if (
+      scopeModeRef.current === "channel" &&
+      guildIdRef.current &&
+      d.channelId &&
+      channelIdRef.current &&
+      d.channelId !== channelIdRef.current
+    ) {
+      return;
+    }
+    const known = serverRosterRef.current.some((p) => p.userId === d.userId);
+    if (!known && typeof d.name !== "string") {
+      void fetchServerRoster();
+      return;
+    }
+    setServerRoster((prev) => mergeDelta(prev, d));
+  }
+
+  function handleLive(isLive: boolean): void {
+    liveRef.current = isLive;
+    setLive(isLive);
+  }
+
   function onFinish(): void {
     const g = gameRef.current;
     if (!g) return;
@@ -414,7 +485,14 @@ export function App({
         method: "POST",
         keepalive: true,
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ date, guess }),
+        // guildId/channelId let the server fan this guess out over Realtime to the room's
+        // other players (api/_realtime.ts); they don't affect scoring (/api/score re-derives).
+        body: JSON.stringify({
+          date,
+          guess,
+          guildId: guildIdRef.current,
+          channelId: channelIdRef.current,
+        }),
       });
       if (r.ok) {
         const ok = ((await r.json()) as { ok?: boolean }).ok !== false;
@@ -743,16 +821,21 @@ export function App({
   // api/score.ts).
   useEffect(() => {
     if (!isEmbedded) return;
-    const id = setInterval(() => {
+    let timer = 0;
+    const tick = (): void => {
       const g = gameRef.current;
       if (isDailyRef.current && g && etDate() !== g.puzzle.date) {
         void swapToNewDay();
-        return;
+      } else if (layoutModeRef.current !== Common.LayoutModeTypeObject.PIP && !document.hidden) {
+        void fetchServerRoster();
       }
-      if (layoutModeRef.current === Common.LayoutModeTypeObject.PIP || document.hidden) return;
-      void fetchServerRoster();
-    }, 30_000);
-    return () => clearInterval(id);
+      // Backstop cadence: when Realtime is carrying live updates the poll is just a safety net,
+      // so slow it to 90s; when the socket is down the poll is the primary path, so 30s. Re-read
+      // each tick so it adapts as the channel comes and goes.
+      timer = window.setTimeout(tick, liveRef.current ? 90_000 : 30_000);
+    };
+    timer = window.setTimeout(tick, liveRef.current ? 90_000 : 30_000);
+    return () => window.clearTimeout(timer);
   }, [isEmbedded]);
 
   // Sync the layout ref the poll reads, and catch the roster up the moment the player
@@ -761,9 +844,65 @@ export function App({
     const wasPip = layoutModeRef.current === Common.LayoutModeTypeObject.PIP;
     layoutModeRef.current = layoutMode;
     if (isEmbedded && wasPip && layoutMode !== Common.LayoutModeTypeObject.PIP) {
+      // The Realtime socket may have died silently while collapsed — re-establish it, then
+      // catch the roster up in case any deltas were missed during the gap.
+      void roomLiveRef.current?.resync();
       void fetchServerRoster();
     }
   }, [layoutMode]);
+
+  // Mirror the roster into a ref so the Realtime delta handler can tell a known player from a
+  // new one without re-binding the channel subscription on every render.
+  useEffect(() => {
+    serverRosterRef.current = serverRoster;
+  }, [serverRoster]);
+
+  // Join the room's Realtime channel once the daily is ready and we have identity. Fast path:
+  // progress/join broadcasts merge instantly and Presence drives the online ring, with the poll
+  // above demoted to a 90s backstop. connect() is idempotent; if Realtime is unavailable (no
+  // socket / no token) onLive(false) keeps us on the poll — purely additive.
+  useEffect(() => {
+    if (phase !== "ready" || !isEmbedded || !isDailyRef.current || !supabaseEnabled) return;
+    const scope = scopeRef.current;
+    const accessToken = accessTokenRef.current;
+    const selfId = meRef.current.id;
+    if (!scope || !accessToken || !selfId) return;
+    let rl = roomLiveRef.current;
+    if (!rl) {
+      rl = new RoomLive();
+      roomLiveRef.current = rl;
+    }
+    void rl.connect({
+      scope,
+      selfId,
+      accessToken,
+      guildId: guildIdRef.current,
+      channelId: channelIdRef.current,
+      handlers: { onDelta: applyDelta, onPresence: setLiveOnline, onLive: handleLive },
+    });
+  }, [phase, isEmbedded]);
+
+  // Tear the channel down on unmount.
+  useEffect(
+    () => () => {
+      void roomLiveRef.current?.disconnect();
+      roomLiveRef.current = null;
+    },
+    [],
+  );
+
+  // A hidden tab can drop the socket silently; re-establish it (and catch up) when the tab is
+  // visible again — the hidden-tab analog of the PIP-expand recovery above.
+  useEffect(() => {
+    if (!isEmbedded) return;
+    const onVisible = (): void => {
+      if (document.hidden) return;
+      void roomLiveRef.current?.resync();
+      void fetchServerRoster();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [isEmbedded]);
 
   // The season/all-time boards move only when someone finishes, and a fresh finish already
   // fires a targeted refresh (the effect below, and onFinish for your own) — so this poll is
@@ -799,17 +938,23 @@ export function App({
     return () => window.clearTimeout(timer);
   }, [isEmbedded]);
 
-  // The polled roster with your own local state overlaid, so your row never lags the poll.
+  // The roster with your own local state overlaid, so your row never lags. Online ring: you're
+  // always on while playing; for others it's the Realtime presence set when the channel is live,
+  // else the server heartbeat (p.online) from the backstop poll.
   const roster = useMemo(() => {
     const byId = new Map<string, PlayerState>();
     for (const p of serverRoster) byId.set(p.userId, p);
     if (self) byId.set(self.userId, self);
-    // You're always online while playing; everyone else's ring comes from their server heartbeat.
     return [...byId.values()].map((p) => ({
       ...p,
-      online: p.userId === meRef.current.id ? true : (p.online ?? false),
+      online:
+        p.userId === meRef.current.id
+          ? true
+          : live
+            ? liveOnline.has(p.userId)
+            : (p.online ?? false),
     }));
-  }, [serverRoster, self]);
+  }, [serverRoster, self, live, liveOnline]);
 
   // Live leaderboard, the near-real-time path: when another player wraps the daily their
   // season/all-time totals change server-side a beat later (once their score write lands),

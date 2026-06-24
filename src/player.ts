@@ -22,6 +22,17 @@ export type PlayerState = {
   // True while this player is "here right now" — i.e. their /api/roster heartbeat is
   // within the TTL (server-set), or it's you (always online while playing). Drives the
   // green "online" ring. A player who joined and then left stays in the roster with this
-  // unset/false.
+  // unset/false. On the Realtime path the live source is channel Presence, not this.
   online?: boolean;
+};
+
+// A partial roster update fanned out over Realtime broadcast (api/_realtime.ts) on each guess
+// (progress) or open (join). Carries only the fields that changed for one player; the client
+// merges it onto the existing row by userId. `channelId` lets a Channel-view client ignore
+// updates from other channels in the same guild. Identity (name) is present on a `join` so a
+// brand-new player can be inserted; a `progress` delta for an unknown player triggers a
+// backstop refetch instead.
+export type RosterDelta = Partial<Omit<PlayerState, 'userId'>> & {
+  userId: string;
+  channelId?: string | null;
 };

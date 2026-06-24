@@ -1,21 +1,24 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { canonicalScope } from '../src/scope.js';
 import { fetchDiscordUser, mintSupabaseJWT } from './_discord.js';
 
-// Mints a short-lived Supabase JWT for the verified Discord user to join the
-// private Realtime presence channel. No token falls back to a public channel
-// (dev); in production the private channel's RLS keeps unauthenticated clients
-// out, so presence can't be spoofed anonymously.
+// Mints a short-lived Supabase JWT for the verified Discord user to join the room's private
+// Realtime channel (progress Broadcast + online Presence). The token is scoped to the room's
+// CANONICAL SCOPE (g:<guild> or c:<channel>) — the same key the roster and leaderboard use, so
+// everyone playing the room today shares one channel and a guess fans out to all of them. The
+// `room` claim pins the topic via RLS (schema.sql), so a token for one room can't read or write
+// any other. Only verified Discord users get one; no token / unconfigured → the client falls
+// back to its backstop poll.
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
-  // Room (Discord activity instance id) the token is scoped to. The JWT carries it
-  // as a claim and the channel RLS only authorizes the matching topic, so the token
-  // is good for this one room and no other.
-  const room = typeof req.body?.room === 'string' ? req.body.room : '';
-  if (!room) {
+  const guildId = typeof req.body?.guildId === 'string' ? req.body.guildId : null;
+  const channelId = typeof req.body?.channelId === 'string' ? req.body.channelId : null;
+  const scope = canonicalScope(guildId, channelId);
+  if (!scope) {
     res.status(400).json({ error: 'missing room' });
     return;
   }
@@ -24,7 +27,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     res.status(401).json({ error: 'unauthenticated' });
     return;
   }
-  const token = mintSupabaseJWT(user, room);
+  const token = mintSupabaseJWT(user, scope);
   if (!token) {
     res.status(503).json({ error: 'realtime auth unavailable' });
     return;

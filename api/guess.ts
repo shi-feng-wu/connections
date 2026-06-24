@@ -1,8 +1,12 @@
+import { waitUntil } from '@vercel/functions';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Game } from '../src/game.js';
+import type { RosterDelta } from '../src/player.js';
+import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import { bearerToken } from './_discord.js';
 import { fetchPuzzle, isValidDate, todayET } from './_nyt.js';
+import { broadcastRoom } from './_realtime.js';
 import { isLocalDev, verifyAuth } from './_session.js';
 
 // Commit one guess to the player's authoritative daily record, then return its
@@ -119,6 +123,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         },
         { onConflict: 'user_id,puzzle_date' },
       );
+    }
+
+    // Fan the new state out to everyone watching this room's roster, instantly (Realtime
+    // broadcast — Supabase delivers to all subscribers). Only a counted guess changes what
+    // they'd see. Off the reveal path via waitUntil so it never delays this response; a drop
+    // is harmless (their ~90s backstop poll catches up). The guessing player sees their own
+    // result from this response + local state, not from the broadcast.
+    if (counted) {
+      const guildId = typeof body.guildId === 'string' ? body.guildId : null;
+      const channelId = typeof body.channelId === 'string' ? body.channelId : null;
+      const scope = canonicalScope(guildId, channelId);
+      if (scope) {
+        const done = game.status === 'playing' ? null : game.status;
+        const delta: RosterDelta = {
+          userId: uid,
+          channelId,
+          solvedCount: game.solved.length,
+          solvedLevels: game.solved.map((s) => s.level),
+          mistakesLeft: game.mistakesLeft,
+          done,
+          finishedAt: done ? Date.now() : null,
+        };
+        waitUntil(broadcastRoom(scope, 'progress', delta));
+      }
     }
 
     res.status(200).json({ ok: true, result, state: snapshot(game) });

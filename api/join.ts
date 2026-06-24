@@ -1,3 +1,4 @@
+import { waitUntil } from '@vercel/functions';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { Puzzle } from '../src/game.js';
 import { canonicalScope } from '../src/scope.js';
@@ -6,6 +7,7 @@ import { type CardPlayer, mergePlayer, renderRoster } from './_card.js';
 import { botInGuild, fetchDiscordUser, fetchUserGuildIds } from './_discord.js';
 import { botCardUrl, CARD_JOIN_THROTTLE_MS, cardPayload, playerFinished, sendCard, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
+import { broadcastRoom } from './_realtime.js';
 
 // Registers a player on the room's "who's playing today" card when they open the
 // Activity, then refreshes the card. The card is a bot message in the channel (posted
@@ -132,6 +134,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       },
       { onConflict: 'scope_id,puzzle_date,channel_id' },
     );
+
+    // Tell everyone watching this room's roster that a new player is here, instantly — their
+    // tile appears without waiting for a backstop poll. Identity only; the player's progress
+    // arrives on their first guess broadcast (or the next backstop). Off the response path.
+    waitUntil(
+      broadcastRoom(scope, 'join', {
+        userId: user.id,
+        channelId,
+        name: user.name,
+        avatar: user.avatar ?? undefined,
+      }),
+    );
+
     res.status(200).json({ ok: true, edited, players: players.length, botInstalled: await botInstalled });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : 'error' });

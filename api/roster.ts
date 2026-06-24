@@ -7,16 +7,15 @@ import { fetchPuzzle, todayET } from './_nyt.js';
 
 // Persistent "who's played this room today" roster for the live panel. Returns every player
 // we can identify who has played today — replayed server-side from their committed guesses
-// (the same record /api/score trusts), each carrying the green "online" ring from their
-// presence heartbeat.
+// (the same record /api/score trusts): finishers and abandoners alike, frozen at their last
+// committed state.
 //
-// This is a side-effect-free, per-room GET so its response can be CDN-cached and SHARED
-// across everyone in the room: one origin hit per room per ~20s instead of one per player
-// per 30s poll (that per-player fan-out, shipping each room's whole roster back to every
-// member, was the dominant Supabase egress). The caller's identity is verified at the edge
-// (middleware.ts) via the x-ct ticket BEFORE the cache, so cache hits stay gated; this
-// handler does no per-user work. The presence beat that lights the ring moved to its own
-// write, /api/heartbeat, since a cacheable read must not write.
+// This is the COLD-START / safety-net read, not a poll. The client runs it on load, on
+// reconnect/foreground, and a 5-min backstop; Realtime broadcasts (api/_realtime.ts) carry the
+// live progress in between, and Discord's own participant list drives the green "online" ring —
+// so this handler computes no live presence (the `online` field it still returns is ignored by
+// the client). Side-effect-free and per-room, so the response stays CDN-cacheable; identity is
+// verified at the edge (middleware.ts) via the x-ct ticket before the cache.
 //
 // The player SET is the union of two identity sources, because that's everywhere a
 // player's name/avatar is recorded:

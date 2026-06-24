@@ -225,17 +225,17 @@ export function App({
   // never lags the poll. Empty for non-guild / non-daily contexts, where the roster is just you.
   const [serverRoster, setServerRoster] = useState<PlayerState[]>([]);
   const [self, setSelf] = useState<PlayerState | null>(null);
-  // Realtime (src/roomlive.ts) is the fast path when it's up: progress/join broadcasts merge
-  // into serverRoster the instant a guess lands, and channel Presence drives the online ring.
-  // `live` gates which online source the roster memo trusts; `liveOnline` is the presence set;
-  // serverRosterRef mirrors serverRoster so a broadcast handler can tell a known player from a
-  // new one without a stale closure. When `live` is false the backstop poll + heartbeat take
-  // over (exactly today's behavior), so Realtime is purely additive.
+  // Realtime (src/roomlive.ts) is the fast path: progress/join broadcasts merge into
+  // serverRoster the instant a guess lands. serverRosterRef mirrors serverRoster so a broadcast
+  // handler can tell a known player from a new one without a stale closure. Live updates are
+  // purely additive over the cold-start read; if the socket drops, the next read reconciles.
   const serverRosterRef = useRef<PlayerState[]>([]);
-  const [live, setLive] = useState(false);
-  const liveRef = useRef(false);
-  const [liveOnline, setLiveOnline] = useState<Set<string>>(new Set());
   const roomLiveRef = useRef<RoomLive | null>(null);
+  // Green "online" ring = whoever Discord reports is in this Activity instance right now (the
+  // bottom-left participant tray), pushed via the SDK. Anyone in this set gets a ring; everyone
+  // else (finishers/abandoners who've left) doesn't. You're in it yourself, so your own ring
+  // falls out naturally.
+  const [participantIds, setParticipantIds] = useState<Set<string>>(new Set());
   // End-screen room leaderboard, two windows; fetched after a finish posts and on load.
   const [season, setSeason] = useState<Standings>(EMPTY_STANDINGS);
   const [allTime, setAllTime] = useState<Standings>(EMPTY_STANDINGS);
@@ -355,21 +355,16 @@ export function App({
     setAllTime({ board: aBoard, self: aSelf });
   }
 
-  // Pull the room's roster (everyone who played today, replayed from their committed guesses,
-  // with the live "online" ring) — the polled source of truth for the Live tab. Any room-scoped
-  // daily — a guild (g:) or a DM/group (c:); it self-gates on the scope and the server returns []
-  // otherwise. Best-effort: a failure keeps the last roster.
-  //
-  // This is a per-room GET that Vercel's CDN caches and shares across the whole room (~20s), so
-  // it costs one origin hit per room per window instead of one per player per poll. The signed
-  // ticket rides in `x-ct` (a custom header, NOT Authorization — an auth header would make the
-  // CDN treat the response as private and skip caching); middleware.ts verifies it at the edge.
-  // Scope goes in the query string so it keys the shared cache. The "online" beat is a separate
-  // write, fired alongside (sendHeartbeat), since a cacheable read must not write.
+  // The cold-start read for the Live tab: everyone who played this room's daily today (finishers
+  // + abandoners), replayed server-side from their committed guesses. NOT polled — it runs on
+  // load, on reconnect/foreground, and a 5-min safety net; Realtime broadcasts carry the live
+  // updates in between, and Discord's participant list drives the online ring. A room-scoped GET;
+  // the signed ticket rides in `x-ct` (a custom header, not Authorization, so the edge gate in
+  // middleware.ts can verify it without blocking caching). Best-effort: a failure keeps the last
+  // roster.
   async function fetchServerRoster(): Promise<void> {
     const ticket = authTicketRef.current;
     if (!isDailyRef.current || !ticket || !scopeRef.current) return;
-    void sendHeartbeat();
     try {
       const qs = new URLSearchParams();
       if (guildIdRef.current) qs.set("g", guildIdRef.current);
@@ -381,19 +376,6 @@ export function App({
       if (Array.isArray(d.players)) setServerRoster(d.players);
     } catch {
       /* keep the last roster */
-    }
-  }
-
-  // The presence beat: a tiny authenticated write that keeps our "online" ring lit for others
-  // (see /api/heartbeat), split from the roster read so that read can be cached per room. Fired
-  // by every roster poll, so it's skipped exactly when the poll is (backgrounded / PIP), letting
-  // our ring age out honestly while we're away. Soft: a missed beat just blinks the ring.
-  async function sendHeartbeat(): Promise<void> {
-    if (!isDailyRef.current || !authTicketRef.current) return;
-    try {
-      await fetch("/api/heartbeat", { method: "POST", headers: authHeaders() });
-    } catch {
-      /* a missed beat just blinks the ring */
     }
   }
 
@@ -418,11 +400,6 @@ export function App({
       return;
     }
     setServerRoster((prev) => mergeDelta(prev, d));
-  }
-
-  function handleLive(isLive: boolean): void {
-    liveRef.current = isLive;
-    setLive(isLive);
   }
 
   function onFinish(): void {
@@ -685,6 +662,19 @@ export function App({
           /* non-fatal: the thumbnail just won't engage if the subscription fails */
         });
 
+      // The green "online" ring: whoever Discord reports is in this Activity instance right now
+      // (the participant tray), pushed live. Seed it with the current list. Non-fatal — a failure
+      // just means no rings until the next update; the roster itself is unaffected.
+      void sdk
+        .subscribe("ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE", (data) => {
+          setParticipantIds(new Set(data.participants.map((p) => p.id)));
+        })
+        .catch(() => {});
+      void sdk.commands
+        .getInstanceConnectedParticipants()
+        .then((d) => setParticipantIds(new Set(d.participants.map((p) => p.id))))
+        .catch(() => {});
+
       const { code } = await sdk.commands.authorize({
         client_id: CLIENT_ID,
         response_type: "code",
@@ -808,34 +798,26 @@ export function App({
     void refreshLeaderboard();
   }, [scopeMode]);
 
-  // The roster is poll-driven (no Realtime): refetch /api/roster every 30s so other players'
-  // progress and the green "online" ring stay live, and that same call heartbeats us as present.
-  // Your own row is instant (local overlay in the `roster` memo); only others lag up to one
-  // interval. Collapsed to PIP (or a hidden tab) the roster isn't visible, so the fetch is
-  // skipped — and the skipped heartbeat lets our ring age out honestly while we're away; the
-  // layout effect below fires a catch-up fetch on expand. Also the daily-reset fallback: a
-  // client left open across midnight ET is pinned to the old day — the precise timer below
-  // swaps at the exact reset, but a throttled/backgrounded tab can miss it, so re-check here
-  // too. Once the new puzzle is out the old one is closed (an unfinished old board ends
-  // unscored; a post-midnight finish is rejected by the session.date !== todayET() gate in
-  // api/score.ts).
+  // Not a poll — a 5-minute safety net. Realtime broadcasts carry others' progress live and
+  // Discord's participant list drives the ring, so the roster read only has to backstop a
+  // silently-dropped broadcast (a missed join especially). Skipped while collapsed/hidden (the
+  // expand + visibility effects catch up on return). Also the daily-reset fallback: a client
+  // left open across midnight ET is pinned to the old day — the precise timer below swaps at the
+  // exact reset, but a throttled tab can miss it, so re-check here too. Once the new puzzle is
+  // out the old one is closed (an unfinished old board ends unscored; a post-midnight finish is
+  // rejected by the session.date !== todayET() gate in api/score.ts).
   useEffect(() => {
     if (!isEmbedded) return;
-    let timer = 0;
-    const tick = (): void => {
+    const id = setInterval(() => {
       const g = gameRef.current;
       if (isDailyRef.current && g && etDate() !== g.puzzle.date) {
         void swapToNewDay();
-      } else if (layoutModeRef.current !== Common.LayoutModeTypeObject.PIP && !document.hidden) {
-        void fetchServerRoster();
+        return;
       }
-      // Backstop cadence: when Realtime is carrying live updates the poll is just a safety net,
-      // so slow it to 90s; when the socket is down the poll is the primary path, so 30s. Re-read
-      // each tick so it adapts as the channel comes and goes.
-      timer = window.setTimeout(tick, liveRef.current ? 90_000 : 30_000);
-    };
-    timer = window.setTimeout(tick, liveRef.current ? 90_000 : 30_000);
-    return () => window.clearTimeout(timer);
+      if (layoutModeRef.current === Common.LayoutModeTypeObject.PIP || document.hidden) return;
+      void fetchServerRoster();
+    }, 300_000);
+    return () => clearInterval(id);
   }, [isEmbedded]);
 
   // Sync the layout ref the poll reads, and catch the roster up the moment the player
@@ -865,8 +847,7 @@ export function App({
     if (phase !== "ready" || !isEmbedded || !isDailyRef.current || !supabaseEnabled) return;
     const scope = scopeRef.current;
     const accessToken = accessTokenRef.current;
-    const selfId = meRef.current.id;
-    if (!scope || !accessToken || !selfId) return;
+    if (!scope || !accessToken) return;
     let rl = roomLiveRef.current;
     if (!rl) {
       rl = new RoomLive();
@@ -874,11 +855,10 @@ export function App({
     }
     void rl.connect({
       scope,
-      selfId,
       accessToken,
       guildId: guildIdRef.current,
       channelId: channelIdRef.current,
-      handlers: { onDelta: applyDelta, onPresence: setLiveOnline, onLive: handleLive },
+      handlers: { onDelta: applyDelta },
     });
   }, [phase, isEmbedded]);
 
@@ -938,23 +918,18 @@ export function App({
     return () => window.clearTimeout(timer);
   }, [isEmbedded]);
 
-  // The roster with your own local state overlaid, so your row never lags. Online ring: you're
-  // always on while playing; for others it's the Realtime presence set when the channel is live,
-  // else the server heartbeat (p.online) from the backstop poll.
+  // The roster with your own local state overlaid, so your row never lags. Online ring = whoever
+  // Discord says is in the Activity instance right now (participantIds); you're always in that
+  // set, so your own ring is guarded true in case the list hasn't loaded yet.
   const roster = useMemo(() => {
     const byId = new Map<string, PlayerState>();
     for (const p of serverRoster) byId.set(p.userId, p);
     if (self) byId.set(self.userId, self);
     return [...byId.values()].map((p) => ({
       ...p,
-      online:
-        p.userId === meRef.current.id
-          ? true
-          : live
-            ? liveOnline.has(p.userId)
-            : (p.online ?? false),
+      online: p.userId === meRef.current.id ? true : participantIds.has(p.userId),
     }));
-  }, [serverRoster, self, live, liveOnline]);
+  }, [serverRoster, self, participantIds]);
 
   // Live leaderboard, the near-real-time path: when another player wraps the daily their
   // season/all-time totals change server-side a beat later (once their score write lands),

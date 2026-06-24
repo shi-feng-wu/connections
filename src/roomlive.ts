@@ -61,10 +61,14 @@ export class RoomLive {
         console.error('[roomlive] setAuth threw', e);
       }
       console.info('[roomlive] subscribing to room:%s', scope);
-      // self:true so the broadcaster also receives its own messages — lets a single tester
-      // confirm the round-trip without a second person.
+      // PUBLIC channel (not private). On a private channel the realtime server re-evaluates the
+      // realtime.messages RLS per recipient during broadcast fan-out, and it only passes for the
+      // sender — so self:true works but no one else ever receives. Public has no per-message RLS,
+      // so every subscriber gets every broadcast. self:true also lets a single tester confirm the
+      // round-trip. The data here is the public "who's playing" roster, so a public room channel
+      // matches the live-card exposure.
       const channel = supabase.channel(`room:${scope}`, {
-        config: { private: true, broadcast: { self: true } },
+        config: { broadcast: { self: true } },
       });
       channel
         .on('broadcast', { event: 'progress' }, (msg) => {

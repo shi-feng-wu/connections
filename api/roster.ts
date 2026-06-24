@@ -3,16 +3,20 @@ import { Game, MAX_MISTAKES, type Puzzle } from '../src/game.js';
 import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import type { CardPlayer } from './_card.js';
-import { bearerToken } from './_discord.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
-import { isLocalDev, verifyAuth } from './_session.js';
 
-// Persistent "who's played this room today" roster for the live panel. Presence (the
-// Supabase channel) only reports who's connected right now, so a player who joined and
-// left before you opened the Activity is invisible to it. This returns every player we
-// can identify who has played today — replayed server-side from their committed guesses
-// (the same record /api/score trusts). The client merges this under live presence: these
-// seed the roster, presence overlays the live ones and supplies the green "online" ring.
+// Persistent "who's played this room today" roster for the live panel. Returns every player
+// we can identify who has played today — replayed server-side from their committed guesses
+// (the same record /api/score trusts), each carrying the green "online" ring from their
+// presence heartbeat.
+//
+// This is a side-effect-free, per-room GET so its response can be CDN-cached and SHARED
+// across everyone in the room: one origin hit per room per ~20s instead of one per player
+// per 30s poll (that per-player fan-out, shipping each room's whole roster back to every
+// member, was the dominant Supabase egress). The caller's identity is verified at the edge
+// (middleware.ts) via the x-ct ticket BEFORE the cache, so cache hits stay gated; this
+// handler does no per-user work. The presence beat that lights the ring moved to its own
+// write, /api/heartbeat, since a cacheable read must not write.
 //
 // The player SET is the union of two identity sources, because that's everywhere a
 // player's name/avatar is recorded:
@@ -188,25 +192,34 @@ export function cacheBundle(key: string, bundle: RosterBundle, now: number): voi
   bundleCache.set(key, { at: now, bundle });
 }
 
+// Per-room read shared at Vercel's CDN for ~20s, so N players in a room cost ~1 origin hit
+// per window, not N. Vercel-CDN-Cache-Control governs the edge cache and is NOT echoed to the
+// client; the client's Cache-Control is max-age=0 so the browser always revalidates (every
+// poll reaches the CDN, which answers from the shared cache) rather than serving its own stale
+// copy. 20s keeps roster staleness under one poll; the 40s online-TTL's missed-beat slack
+// already absorbs it.
+function cacheRoster(res: VercelResponse): void {
+  res.setHeader('Vercel-CDN-Cache-Control', 'public, s-maxage=20, stale-while-revalidate=40');
+  res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
-  res.setHeader('Cache-Control', 'no-store');
-  if (req.method !== 'POST') {
+  if (req.method !== 'GET') {
+    res.setHeader('Cache-Control', 'no-store');
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
-  const auth = verifyAuth(bearerToken(req.headers.authorization));
-  if (!isLocalDev() && !auth) {
-    res.status(401).json({ error: 'unauthenticated' });
-    return;
-  }
-  const uid = auth?.uid ?? null;
-
-  const guildId = typeof req.body?.guildId === 'string' ? req.body.guildId : null;
-  const channelId = typeof req.body?.channelId === 'string' ? req.body.channelId : null;
+  // Identity was verified at the edge (middleware.ts) via the x-ct ticket, ahead of the cache,
+  // so this handler is purely a per-room read — no uid, no write — which is what makes the
+  // response cacheable and shareable. Scope rides in the query string so it keys the cache.
+  const guildId = typeof req.query.g === 'string' ? req.query.g : null;
+  const channelId = typeof req.query.c === 'string' ? req.query.c : null;
   const scope = canonicalScope(guildId, channelId);
   const db = admin();
-  // No scope, no store, or a context with no persistent roster → presence-only on the client.
+  // No scope or no store (standalone/DM with no persistent roster) → empty, and don't cache
+  // it (it's per-context, not per-room, and cheap — no DB hit).
   if (!scope || !db) {
+    res.setHeader('Cache-Control', 'no-store');
     res.status(200).json({ players: [] });
     return;
   }
@@ -220,40 +233,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   // Channel narrowing only applies to a guild scope, where one guild spans many channels. A
   // c: DM/group scope IS a single channel, so narrowing is redundant and would drop legacy
   // rows written before channel_id existed — skip it (guildId is null for a DM/group).
-  const wantChannel = req.body?.scopeMode !== 'server';
+  const wantChannel = req.query.view !== 'server';
   const narrowTo = wantChannel && channelId && guildId ? channelId : null;
 
   const now = Date.now();
   // Independent of the bundle, and usually free (read-through cached in _nyt.ts).
   const puzzleP = fetchPuzzle(date).catch(() => null);
 
+  // In-memory layer behind the CDN: absorbs the CDN's per-window revalidation and any misses
+  // that land on a warm instance. No heartbeat rides along now — the read writes nothing.
   let bundle = cachedBundle(`${scope}|${narrowTo ?? ''}|${date}`, now);
-  if (bundle) {
-    // A cache hit skips the RPC, but the caller's heartbeat must still land — it's what keeps
-    // their green ring alive on everyone else's roster. Soft: a failed beat just costs the ring.
-    if (uid) {
-      await db
-        .from('presence')
-        .upsert({ user_id: uid, puzzle_date: date, last_seen: new Date(now).toISOString() })
-        .then(
-          () => {},
-          () => {},
-        );
-    }
-  } else {
-    // One round-trip for everything a poll reads (plus the caller's heartbeat, stamped inside):
-    // member identity (already one row per user), today's card openers, and today's
-    // scores/progress/presence for that id set — ANY scope, so a member's single daily game
-    // follows them into every room they belong to. See roster_bundle in supabase/schema.sql.
+  if (!bundle) {
     const { data, error } = await db.rpc('roster_bundle', {
       p_scope: scope,
       p_date: date,
       p_channel: narrowTo,
-      p_uid: uid,
+      p_uid: null,
     });
     if (error || !data) {
-      // Same degradation as a failed table read before: an empty roster, never a 500 —
-      // presence overlays on the client keep the Live tab minimally alive.
+      // Degrade to an empty roster, never a 500 — but don't cache a transient failure.
+      res.setHeader('Cache-Control', 'no-store');
       res.status(200).json({ players: [] });
       return;
     }
@@ -268,6 +267,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   for (const p of bundle.card_players) if (p && typeof p.id === 'string') identity.set(p.id, p);
   const joined = [...identity.values()];
   if (!joined.length) {
+    // An empty room is still a valid shared answer for the window — cache it like any roster.
+    cacheRoster(res);
     res.status(200).json({ players: [] });
     return;
   }
@@ -280,5 +281,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   const players = assembleRoster(joined, bundle.scores, bundle.progress, await puzzleP, now, lastSeen);
+  cacheRoster(res);
   res.status(200).json({ players });
 }

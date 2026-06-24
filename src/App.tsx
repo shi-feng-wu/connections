@@ -316,23 +316,41 @@ export function App({
   // with the live "online" ring) — the polled source of truth for the Live tab. Any room-scoped
   // daily — a guild (g:) or a DM/group (c:); it self-gates on the scope and the server returns []
   // otherwise. Best-effort: a failure keeps the last roster.
+  //
+  // This is a per-room GET that Vercel's CDN caches and shares across the whole room (~20s), so
+  // it costs one origin hit per room per window instead of one per player per poll. The signed
+  // ticket rides in `x-ct` (a custom header, NOT Authorization — an auth header would make the
+  // CDN treat the response as private and skip caching); middleware.ts verifies it at the edge.
+  // Scope goes in the query string so it keys the shared cache. The "online" beat is a separate
+  // write, fired alongside (sendHeartbeat), since a cacheable read must not write.
   async function fetchServerRoster(): Promise<void> {
-    if (!isDailyRef.current || !authTicketRef.current || !scopeRef.current) return;
+    const ticket = authTicketRef.current;
+    if (!isDailyRef.current || !ticket || !scopeRef.current) return;
+    void sendHeartbeat();
     try {
-      const r = await fetch("/api/roster", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({
-          guildId: guildIdRef.current,
-          channelId: channelIdRef.current,
-          scopeMode: scopeModeRef.current,
-        }),
-      });
+      const qs = new URLSearchParams();
+      if (guildIdRef.current) qs.set("g", guildIdRef.current);
+      if (channelIdRef.current) qs.set("c", channelIdRef.current);
+      qs.set("view", scopeModeRef.current);
+      const r = await fetch("/api/roster?" + qs.toString(), { headers: { "x-ct": ticket } });
       if (!r.ok) return;
       const d = (await r.json()) as { players?: PlayerState[] };
       if (Array.isArray(d.players)) setServerRoster(d.players);
     } catch {
       /* keep the last roster */
+    }
+  }
+
+  // The presence beat: a tiny authenticated write that keeps our "online" ring lit for others
+  // (see /api/heartbeat), split from the roster read so that read can be cached per room. Fired
+  // by every roster poll, so it's skipped exactly when the poll is (backgrounded / PIP), letting
+  // our ring age out honestly while we're away. Soft: a missed beat just blinks the ring.
+  async function sendHeartbeat(): Promise<void> {
+    if (!isDailyRef.current || !authTicketRef.current) return;
+    try {
+      await fetch("/api/heartbeat", { method: "POST", headers: authHeaders() });
+    } catch {
+      /* a missed beat just blinks the ring */
     }
   }
 

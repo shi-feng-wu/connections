@@ -708,6 +708,7 @@ const CARD_RECAP: RecapData = {
       total: 487,
       wins: 6,
       plays: 7,
+      delta: 2, // climbed two places after yesterday's puzzle
     },
     {
       id: "p-jun",
@@ -716,6 +717,7 @@ const CARD_RECAP: RecapData = {
       total: 441,
       wins: 4,
       plays: 7,
+      delta: -1, // slipped one
     },
     {
       id: "p-aria",
@@ -724,6 +726,7 @@ const CARD_RECAP: RecapData = {
       total: 408,
       wins: 3,
       plays: 7,
+      delta: 1,
     },
     {
       id: "p-theo",
@@ -732,6 +735,7 @@ const CARD_RECAP: RecapData = {
       total: 372,
       wins: 3,
       plays: 6,
+      delta: 0, // unchanged → no arrow
     },
     {
       id: "p-priya",
@@ -740,6 +744,7 @@ const CARD_RECAP: RecapData = {
       total: 339,
       wins: 2,
       plays: 6,
+      delta: null, // new to the board → no arrow
     },
   ],
 };

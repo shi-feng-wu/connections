@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { BoardRow } from "./leaderboard";
+import { type RankSnapshot, rankMap, rankDelta } from "./rank-delta";
 
 // "Position change since today's puzzle dropped" for the standings tabs. The board itself
 // carries no rank — it arrives ordered richest-first and rank is just the row index
@@ -8,35 +9,16 @@ import type { BoardRow } from "./leaderboard";
 // it. The baseline is frozen for the whole day and recaptured at the next midnight-ET
 // rollover (when the new Connections is released), so arrows accumulate across the day and
 // reset daily. Per-device by design (localStorage): the agreed zero-backend implementation,
-// so arrows can differ across devices and reset if storage is cleared.
+// so arrows can differ across devices and reset if storage is cleared. The pure diff math
+// (rankMap/rankDelta) lives in ./rank-delta so the server recap can reuse it.
 
 const PREFIX = "connections:standingsRank:";
 
-type RankSnapshot = Record<string, number>;
+// Re-exported so existing consumers (season.tsx, the test) keep importing from here.
+export { rankMap, rankDelta };
 
 // A day's baseline ranking: the standings as of the start of ET day `date`.
 export type Baseline = { date: string; ranks: RankSnapshot };
-
-// {user_id -> 1-based rank} from the board's order. Mirrors season.tsx's `i + 1`.
-export function rankMap(board: BoardRow[]): RankSnapshot {
-  const out: RankSnapshot = {};
-  board.forEach((r, i) => {
-    out[r.user_id] = i + 1;
-  });
-  return out;
-}
-
-// Places moved since `prev` was taken: positive = climbed (smaller rank now), negative =
-// slipped. null when there's no prior snapshot or the player wasn't in it (brand-new), so
-// the UI shows no arrow. 0 (unchanged) also reads as "no arrow" at the render site.
-export function rankDelta(
-  prev: RankSnapshot | null | undefined,
-  userId: string,
-  rank: number,
-): number | null {
-  const was = prev?.[userId];
-  return was != null ? was - rank : null;
-}
 
 // Today's baseline given what's stored. Same ET day → reuse the stored baseline (so it
 // stays frozen and arrows accumulate); a new day, a first-ever view, or a legacy/garbled

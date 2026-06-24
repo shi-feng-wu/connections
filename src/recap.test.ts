@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { recapPayload, recapText } from "../api/_recap";
+import { recapPayload, recapText, toRecapData, type SeasonRow } from "../api/_recap";
 
 // api/_recap.ts: recapText is the one-line text body posted above the recap PNG — a bold
 // streak clause with the room's current solve streak (and a 🔥), then the results intro.
@@ -52,6 +52,22 @@ describe("recapText", () => {
     expect(recapText({ streak: 0, solved: false, played: false })).toBe(
       "Nobody played yesterday's Connections… but today is a new day 🌞",
     );
+  });
+});
+
+// toRecapData maps the RPC result sets into the render model. The season-standings
+// rank-change delta (computed by the recap cron, not an RPC column) must survive the map,
+// defaulting to null when absent so the card draws no arrow.
+describe("toRecapData standings delta", () => {
+  const season: SeasonRow[] = [
+    { user_id: "a", name: "A", avatar: null, total: 100, wins: 5, plays: 6, delta: 2 },
+    { user_id: "b", name: "B", avatar: null, total: 90, wins: 4, plays: 6, delta: -1 },
+    { user_id: "c", name: "C", avatar: null, total: 80, wins: 3, plays: 6 }, // no delta
+  ];
+
+  it("passes each row's delta through, null when absent", () => {
+    const data = toRecapData({ puzzleDate: "2026-05-30", results: [], season });
+    expect(data.standings.map((s) => s.delta)).toEqual([2, -1, null]);
   });
 });
 

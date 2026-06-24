@@ -22,7 +22,9 @@ export type DayRow = {
   duration_ms: number | null;
 };
 
-// One season-standings row (from the room_board RPC; a subset of its columns).
+// One season-standings row (from the room_board RPC; a subset of its columns). `delta` is
+// the room's rank movement caused by yesterday's puzzle, computed by the recap cron (not an
+// RPC column): positive = climbed, negative = slipped, null/0 = no arrow.
 export type SeasonRow = {
   user_id: string;
   name: string;
@@ -30,6 +32,7 @@ export type SeasonRow = {
   total: number;
   wins: number;
   plays: number;
+  delta?: number | null;
 };
 
 const PLAY_CUSTOM_ID = 'connections_play';
@@ -86,6 +89,7 @@ export function toRecapData(opts: {
       total: r.total,
       wins: r.wins,
       plays: r.plays,
+      delta: r.delta ?? null,
     })),
   };
 }

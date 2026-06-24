@@ -6,6 +6,7 @@ import { sendCard } from './_livecard.js';
 import { fetchPuzzle, todayET, yesterdayET } from './_nyt.js';
 import { type DayRow, recapPayload, recapText, type SeasonRow, toRecapData } from './_recap.js';
 import { Game, type Puzzle } from '../src/game.js';
+import { rankMap, rankDelta } from '../src/rank-delta.js';
 
 // Daily recap cron. Posts yesterday's results + season standings, with a Play button, to
 // every CHANNEL that has ever had play (recap_channels) AND sits in a guild the bot is actually
@@ -197,9 +198,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     try {
       const guildId = scope.startsWith('g:') ? scope.slice(2) : '';
-      const [{ data: results }, { data: season }, { data: stats }, guildName, channelName] = await Promise.all([
+      const [{ data: results }, { data: season }, { data: prevSeason }, { data: stats }, guildName, channelName] = await Promise.all([
         db.rpc('day_results', { p_scope: scope, p_date: date, p_channel: channel }),
-        db.rpc('room_board', { p_scope: scope, p_since: since, p_limit: SEASON_LIMIT, p_channel: channel }),
+        // Standings AS OF the recapped day (p_until: date) — so today's early plays can't skew
+        // them and a backfilled/test recap for an old date shows that day's board, not today's.
+        db.rpc('room_board', { p_scope: scope, p_since: since, p_limit: SEASON_LIMIT, p_channel: channel, p_until: date }),
+        // The same board one day earlier, unlimited, so the rank-change arrows can find where a
+        // current top-5 player ranked before yesterday's puzzle (delta = movement it caused).
+        db.rpc('room_board', { p_scope: scope, p_since: since, p_limit: 1000, p_channel: channel, p_until: dayBefore }),
         db.rpc('room_recap_stats', { p_scope: scope, p_since: since, p_date: date, p_channel: channel }),
         // Room identity for the card eyebrow; best-effort (null → static "DAILY RECAP").
         fetchGuildName(guildId, botToken),
@@ -208,6 +214,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       const stat = ((stats ?? []) as { streak: number; win_pct: number; max_streak: number }[])[0];
       const dayRows = (results ?? []) as DayRow[];
       const solvedYesterday = dayRows.some((r) => r.solved);
+
+      // Season-standings rank movement caused by yesterday's puzzle: diff the current board's
+      // order (rank = row index) against the same board "as of the day before". Reuses the
+      // leaderboard's pure delta math so the arrows mean the same thing on both. A player not
+      // on the board the day before (brand-new) gets null → no arrow (see rankDelta).
+      const prevRanks = rankMap((prevSeason ?? []) as SeasonRow[]);
+      const seasonRows = ((season ?? []) as SeasonRow[]).map((r, i) => ({
+        ...r,
+        delta: rankDelta(prevRanks, r.user_id, i + 1),
+      }));
 
       // Mini-board solve ORDER: the recap reads counts from scores, so mirror the live card /
       // roster and replay each finisher's committed guesses against yesterday's puzzle. One
@@ -257,7 +273,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
           puzzleDate: date,
           puzzleNo,
           results: dayRows,
-          season: (season ?? []) as SeasonRow[],
+          season: seasonRows,
           streak: displayStreak,
           longest: stat?.max_streak ?? null,
           winRate: stat?.win_pct ?? null,

@@ -188,13 +188,17 @@ $$;
 grant execute on function public.user_streak(text, date) to anon, authenticated;
 
 -- Leaderboard rows for a window: one per player, richest-first, with every
--- column the end screen shows. p_since NULL = all-time.
+-- column the end screen shows. p_since NULL = all-time. p_until NULL = up to
+-- today; pass a date to rank the board "as of" that day (the daily recap diffs
+-- through-yesterday vs through-the-day-before for its rank-change arrows).
 drop function if exists public.room_board(text, date, int);
+drop function if exists public.room_board(text, date, int, text);
 create or replace function public.room_board(
   p_scope text,
   p_since date default null,
   p_limit int default 50,
-  p_channel text default null
+  p_channel text default null,
+  p_until date default null
 )
 returns table (
   user_id text, name text, avatar text,
@@ -231,6 +235,7 @@ as $$
     from public.scores s
     left join mj on mj.user_id = s.user_id
     where (p_since is null or s.puzzle_date >= p_since)
+      and (p_until is null or s.puzzle_date <= p_until)
       and case when p_scope like 'g:%'
         then mj.user_id is not null and s.puzzle_date >= mj.joined
         else s.scope_id = p_scope and (p_channel is null or s.channel_id = p_channel)
@@ -249,7 +254,7 @@ as $$
   limit p_limit;
 $$;
 
-grant execute on function public.room_board(text, date, int, text) to anon, authenticated;
+grant execute on function public.room_board(text, date, int, text, date) to anon, authenticated;
 
 -- One player's standing for a window as JSON: rank, total players, their stats.
 -- Backs the end screen's pinned "your standing" row. p_since NULL = all-time.

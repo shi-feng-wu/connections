@@ -46,11 +46,11 @@ const RECAP: RecapData = {
     { id: 'p-omar', name: 'Omar Haddad', solved: false, score: 12, mistakes: 4, solvedLevels: [3, 1], sec: null },
   ],
   standings: [
-    { id: 'p-noa', name: 'Noa Friedman', total: 487, wins: 6, plays: 7 },
-    { id: 'p-jun', name: 'Jun Park', total: 441, wins: 4, plays: 7 },
-    { id: 'p-aria', name: 'Aria Voss', total: 408, wins: 3, plays: 7 },
-    { id: 'p-theo', name: 'Theo Lindqvist', total: 372, wins: 3, plays: 6 },
-    { id: 'p-priya', name: 'Priya Nair', total: 339, wins: 2, plays: 6 },
+    { id: 'p-noa', name: 'Noa Friedman', total: 487, wins: 6, plays: 7, delta: 2 },
+    { id: 'p-jun', name: 'Jun Park', total: 441, wins: 4, plays: 7, delta: -1 },
+    { id: 'p-aria', name: 'Aria Voss', total: 408, wins: 3, plays: 7, delta: 1 },
+    { id: 'p-theo', name: 'Theo Lindqvist', total: 372, wins: 3, plays: 6, delta: 0 },
+    { id: 'p-priya', name: 'Priya Nair', total: 339, wins: 2, plays: 6, delta: null },
   ],
 };
 {

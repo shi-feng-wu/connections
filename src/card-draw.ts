@@ -47,7 +47,8 @@ const ZINC_300 = "#d4d4d8";
 const ZINC_100 = "#f4f4f5";
 const ZINC_800 = "#27272a";
 const ZINC_700 = "#3f3f46";
-const EMERALD = "#34d399";
+const EMERALD = "#34d399"; // emerald-400 — solve accent / "climbed" rank arrow
+const ROSE = "#fb7185"; // rose-400 — "slipped" rank arrow (matches the leaderboard)
 const WON_TIME = "#e4e4e7";
 const BAR_EMPTY = ZINC_800;
 const BAR_EMPTY_BORDER = "#2c2c30";
@@ -236,6 +237,10 @@ const ICON_TROPHY = {
   d: "M6 9H4.5a2.5 2.5 0 0 1 0-5H6 M18 9h1.5a2.5 2.5 0 0 0 0-5H18 M4 22h16 M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22 M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22 M18 2H6v7a6 6 0 0 0 12 0V2Z",
   sw: 2.25,
 };
+// Season-standings rank movement (chevron-up / chevron-down), drawn at the leaderboard's
+// strokeWidth={3} so the recap arrows match the in-app ones.
+const ICON_CHEVRON_UP = { d: "m18 15-6-6-6 6", sw: 3 };
+const ICON_CHEVRON_DOWN = { d: "m6 9 6 6 6-6", sw: 3 };
 
 function roundRect(
   ctx: CanvasRenderingContext2D,
@@ -579,6 +584,9 @@ export type RecapStanding = {
   total: number;
   wins: number;
   plays: number;
+  // Rank movement caused by yesterday's puzzle: positive = climbed (green up chevron),
+  // negative = slipped (red down chevron), null/0 = no arrow. Mirrors the leaderboard.
+  delta?: number | null;
 };
 export type RecapData = {
   puzzleNo?: number;
@@ -635,6 +643,10 @@ const RC_ROW_H = 47;
 const RC_ROW_GAP = 2;
 const RC_ROW_R = 10;
 const RC_AV = 30; // recap avatar diameter
+// Season-standings rank-change column: a fixed gutter right of the rank number for the
+// movement chevron + places moved (reserved for every standings row so avatars never jitter
+// between rows that do/don't have an arrow). Results rows pass 0 — their layout is untouched.
+const RC_DELTA_W = 26;
 const RC_DOT = 7;
 const RC_DOT_GAP = 5;
 // Per-row mini-board: four stacked bars mirroring the live "who's playing" card / roster — a
@@ -1098,6 +1110,11 @@ export async function drawRecap(
     img: CanvasImageSource | null,
     nameRight: number,
     nameInset = 0,
+    // Season standings only: reserve a gutter right of the rank for the movement chevron and
+    // draw it when `delta` is truthy (null/0 → blank, like the leaderboard's RankDelta).
+    // Results rows pass deltaColW 0 → no shift, identical layout.
+    deltaColW = 0,
+    delta: number | null = null,
   ): { cy: number } => {
     const cy = rowTop + RC_ROW_H / 2;
     roundRect(ctx, blockX, rowTop, blockW, RC_ROW_H, RC_ROW_R);
@@ -1111,10 +1128,22 @@ export async function drawRecap(
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(String(rank + 1), contentLeft + 11, cy + 1);
-    // avatar (22px rank col + 11 gap, then 34px ring col)
-    drawAvatar(ctx, person, img, contentLeft + 22 + 11 + 17, cy, RC_AV);
+    // rank-change chevron + places moved, in the reserved gutter after the 22px rank col
+    if (deltaColW > 0 && delta) {
+      const up = delta > 0;
+      const color = up ? EMERALD : ROSE;
+      const cx = contentLeft + 22 + 1; // gutter left edge
+      drawIcon(ctx, env.Path2D, up ? ICON_CHEVRON_UP : ICON_CHEVRON_DOWN, cx, cy - 5.5, 11, color);
+      ctx.fillStyle = color;
+      ctx.font = `700 11px "Libre Franklin"`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(Math.abs(delta)), cx + 11, cy + 1);
+    }
+    // avatar (22px rank col + delta gutter + 11 gap, then 34px ring col)
+    drawAvatar(ctx, person, img, contentLeft + 22 + deltaColW + 11 + 17, cy, RC_AV);
     // name (inset past the mini-board in the results column; 0 elsewhere)
-    const nameLeft = contentLeft + 22 + 11 + 34 + 11 + nameInset;
+    const nameLeft = contentLeft + 22 + deltaColW + 11 + 34 + 11 + nameInset;
     ctx.fillStyle = ZINC_100;
     ctx.font = `600 14.5px "Libre Franklin"`;
     ctx.textAlign = "left";
@@ -1238,6 +1267,9 @@ export async function drawRecap(
       r,
       imgAt(results.length + i),
       wlRight - 64,
+      0,
+      RC_DELTA_W,
+      r.delta ?? null,
     );
     // "6" (bold) + "/7 won" (muted), baseline-aligned, right-justified to wlRight
     const base = cy + 5;

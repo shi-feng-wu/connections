@@ -1,45 +1,33 @@
 import type { RosterDelta } from '../src/player.js';
 
-// Server-side Realtime broadcast. One HTTPS POST to Supabase's broadcast REST endpoint fans a
-// message out to every client subscribed to the room's channel — Supabase does the per-viewer
-// delivery, so this is O(1) per update no matter how many people are watching, and no socket has
-// to stay open (serverless-friendly).
+// Server→relay push. The Vercel API POSTs a delta to the SSE relay (scripts/relay.mjs on Railway),
+// which fans it out to every client holding an SSE stream for the room — O(1) per update no matter
+// how many people are watching, and no socket stays open on Vercel (serverless-friendly).
 //
-// The room channel is PUBLIC (no `private` flag). On a private channel the realtime server
-// re-evaluates the realtime.messages RLS per recipient during fan-out and only the sender passes,
-// so broadcasts never reach other subscribers (confirmed: self-echo works, cross-client doesn't).
-// Public has no per-message RLS, so every subscriber receives every broadcast. The payload is the
-// public "who's playing" roster, the same data the bot already posts in-channel.
+// Replaces the old Supabase Realtime broadcast: a Discord Activity client can't reliably hold the
+// proxied WebSocket Realtime needs, but it CAN hold an SSE stream from the relay. Supabase now sees
+// zero realtime traffic, which is what was blowing past the free egress tier.
 //
-// Fire-and-forget by contract: a failed or dropped broadcast just means the affected clients fall
-// back to their backstop read, so callers must NOT put this on a latency-critical path (use
-// waitUntil) and never depend on it landing. Leading underscore keeps Vercel from treating this
-// file as a route.
+// Fire-and-forget by contract: a failed or dropped push just means the affected clients fall back
+// to their backstop read, so callers must NOT put this on a latency-critical path (use waitUntil)
+// and never depend on it landing. Leading underscore keeps Vercel from treating this as a route.
 
-const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? '';
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
-const ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY ?? '';
+const RELAY_URL = process.env.RELAY_URL ?? ''; // https://<relay-host> (server-to-server, no proxy)
+const RELAY_SECRET = process.env.RELAY_SECRET ?? ''; // shared secret the relay checks on server pushes
 
-// The channel a room's clients subscribe to: everyone in a guild shares room:g:<id>, a DM/group
-// shares room:c:<id>, where the suffix is the canonical scope.
-export function roomTopic(scope: string): string {
-  return `room:${scope}`;
-}
-
-export async function broadcastRoom(scope: string, event: 'progress' | 'join', payload: RosterDelta): Promise<void> {
-  const apikey = ANON_KEY || SERVICE_KEY;
-  if (!SUPABASE_URL || !scope || !apikey) return;
+// The room a delta fans out to: everyone in a guild shares g:<id>, a DM/group shares c:<id> — the
+// canonical scope, byte-for-byte the same string the client subscribes with.
+export async function broadcastRoom(
+  scope: string,
+  event: 'progress' | 'join',
+  payload: RosterDelta,
+): Promise<void> {
+  if (!RELAY_URL || !RELAY_SECRET || !scope) return;
   try {
-    await fetch(`${SUPABASE_URL}/realtime/v1/api/broadcast`, {
+    await fetch(`${RELAY_URL}/pub`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey,
-        Authorization: `Bearer ${apikey}`,
-      },
-      body: JSON.stringify({
-        messages: [{ topic: roomTopic(scope), event, payload }],
-      }),
+      headers: { 'content-type': 'application/json', 'x-relay-secret': RELAY_SECRET },
+      body: JSON.stringify({ room: scope, event, payload }),
     });
   } catch {
     /* clients self-heal via the backstop read */

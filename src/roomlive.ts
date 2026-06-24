@@ -1,119 +1,94 @@
-import type { RealtimeChannel } from '@supabase/supabase-js';
 import type { RosterDelta } from './player';
-import { supabase } from './supabase';
 
-// Live roster over Supabase Realtime broadcast — the fast path. Joins the room's PUBLIC channel
-// and merges progress/join broadcasts (api/_realtime.ts, server→clients) plus tiles (client→
-// clients) into the roster the instant they happen: no poll, no per-viewer egress.
+// Live roster over an SSE relay (scripts/relay.mjs on Railway) — the universal realtime path. A
+// Discord Activity client can't reliably hold a WebSocket: the proxy/filters/web break the WS
+// upgrade (confirmed — it dies on web and on filtered networks). But it CAN hold a long-lived SSE
+// stream: plain HTTP, no upgrade, which streams cleanly through Discord's proxy even on the client
+// where the WebSocket failed. So each client holds ONE EventSource to the relay via the `/relay`
+// Developer-Portal URL mapping, and the relay fans out progress/join (pushed by the Vercel API)
+// and tiles (pushed by clients). Supabase sees zero realtime traffic — the metered egress is gone.
 //
-// Broadcast ONLY — the online ring comes from Discord's own participant list (the SDK), not from
-// here, so there's no Presence to track. Purely additive over the cold-start read: if the socket
-// can't connect or dies, live updates just stop and the next load / safety-net read reconciles.
-// resync() re-opens only if there's no channel; an existing one is left to supabase-js's own
-// reconnect so we don't churn it.
+// EventSource reconnects itself on a dropped stream (the relay sends a `retry:`), so there's no
+// socket to babysit. Purely additive over the cold-start read: if the stream can't open, live
+// updates just stop and the next load / safety-net read reconciles.
 
-// Ephemeral "which tiles am I picking" sent client→client over the WebSocket (channel.send),
-// riding the already-connected socket. Pure cosmetic, never persisted.
+// Ephemeral "which tiles am I picking", POSTed to the relay, which stamps userId from the caller's
+// ticket (so nobody can broadcast as someone else) and fans it out. Pure cosmetic, never persisted.
 export type TilesMsg = { userId: string; channelId?: string | null; selected: string[] };
 
 export type RoomLiveHandlers = {
-  onDelta: (d: RosterDelta) => void; // a player's progress/identity changed (server broadcast)
-  onTiles: (t: TilesMsg) => void; // a player's live tile selection (client broadcast)
+  onDelta: (d: RosterDelta) => void; // a player's progress/identity changed (server push)
+  onTiles: (t: TilesMsg) => void; // a player's live tile selection (client push)
 };
 
 type ConnectOpts = {
-  scope: string;
-  accessToken: string;
-  guildId: string | null;
-  channelId: string | null;
+  scope: string; // room key (g:<guild> / c:<channel>) — matches the room the API pushes to
+  ticket: string; // signed x-ct auth ticket: gates the SSE sub and stamps tile authorship
   handlers: RoomLiveHandlers;
 };
 
 export class RoomLive {
-  private channel: RealtimeChannel | null = null;
+  private es: EventSource | null = null;
   private opts: ConnectOpts | null = null;
-  private connecting = false;
-  private live = false;
 
-  // Idempotent: the first call opens the channel; later calls refresh opts and no-op if joined.
+  // Idempotent: the first call opens the stream; later calls refresh opts and no-op if open.
   async connect(opts: ConnectOpts): Promise<void> {
     this.opts = opts;
-    await this.open();
+    this.open();
   }
 
-  private async open(): Promise<void> {
-    if (!supabase || !this.opts || this.connecting || this.channel) return;
-    this.connecting = true;
-    const { scope, handlers } = this.opts;
-    try {
-      console.info('[roomlive] subscribing to room:%s', scope);
-      // PUBLIC channel — no auth token, no setAuth. The supabase client's anon key authorizes the
-      // socket, and a public channel has no RLS, so every subscriber receives every broadcast.
-      // (A private channel re-evaluates realtime.messages RLS per recipient during fan-out and
-      // only the sender passes, so others never receive — confirmed.) We deliberately do NOT call
-      // setAuth: on a public channel it's unnecessary, and applying a token can force the socket
-      // to reconnect mid-join, racing the subscribe and surfacing as a "transport failure" loop.
-      const channel = supabase.channel(`room:${scope}`, {
-        config: { broadcast: { self: true } },
-      });
-      channel
-        .on('broadcast', { event: 'progress' }, (msg) => {
-          console.info('[roomlive] rx progress', JSON.stringify(msg));
-          handlers.onDelta((msg as { payload?: RosterDelta }).payload as RosterDelta);
-        })
-        .on('broadcast', { event: 'join' }, (msg) => {
-          console.info('[roomlive] rx join', JSON.stringify(msg));
-          handlers.onDelta((msg as { payload?: RosterDelta }).payload as RosterDelta);
-        })
-        .on('broadcast', { event: 'tiles' }, (msg) => {
-          console.info('[roomlive] rx tiles', JSON.stringify(msg));
-          handlers.onTiles((msg as { payload?: TilesMsg }).payload as TilesMsg);
-        })
-        .subscribe((status, err) => {
-          // Diagnostic: SUBSCRIBED = connected + authorized; CHANNEL_ERROR/TIMED_OUT = the
-          // socket or RLS rejected us; nothing logged = we never reached subscribe.
-          console.info('[roomlive] status:', status, err ? `err=${err.message}` : '');
-          this.live = status === 'SUBSCRIBED';
-        });
-      this.channel = channel;
-    } catch (e) {
-      console.error('[roomlive] open failed', e);
-    } finally {
-      this.connecting = false;
-    }
+  private open(): void {
+    if (!this.opts || this.es) return;
+    const { scope, ticket, handlers } = this.opts;
+    // Relative URL — the `/relay` URL mapping proxies it out to the Railway relay. EventSource is
+    // NOT rewritten by patchUrlMappings, so we use the proxied path directly; and it can't set
+    // headers, so the ticket rides in the query string.
+    const url = `/relay/sub?room=${encodeURIComponent(scope)}&ct=${encodeURIComponent(ticket)}`;
+    console.info('[roomlive] subscribing', scope);
+    const es = new EventSource(url);
+    es.addEventListener('open', () => console.info('[roomlive] SSE open'));
+    es.addEventListener('error', () =>
+      // Fires on a dropped stream; EventSource auto-reconnects (relay sent retry:).
+      console.info('[roomlive] SSE error (auto-retrying)'),
+    );
+    es.addEventListener('progress', (e) => {
+      handlers.onDelta(JSON.parse((e as MessageEvent).data) as RosterDelta);
+    });
+    es.addEventListener('join', (e) => {
+      handlers.onDelta(JSON.parse((e as MessageEvent).data) as RosterDelta);
+    });
+    es.addEventListener('tiles', (e) => {
+      handlers.onTiles(JSON.parse((e as MessageEvent).data) as TilesMsg);
+    });
+    this.es = es;
   }
 
-  // Push the caller's live tile selection to the room over the WebSocket (client→client, not the
-  // server REST path). No-op until the channel is joined; a drop just means others stop seeing
-  // your picks until you reselect.
+  // Push the caller's live tile selection to the relay (client→clients). The relay overwrites
+  // userId from the ticket; a dropped POST just means others stop seeing your picks until you
+  // reselect. No-op until connected.
   sendTiles(t: TilesMsg): void {
-    if (!this.channel || !this.live) return;
-    void this.channel.send({ type: 'broadcast', event: 'tiles', payload: t });
+    if (!this.opts) return;
+    void fetch('/relay/pub', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-ct': this.opts.ticket },
+      body: JSON.stringify({ room: this.opts.scope, event: 'tiles', payload: t }),
+    }).catch(() => {
+      /* cosmetic; ignore */
+    });
   }
 
-  // Re-establish ONLY if we have no channel at all. supabase-js auto-reconnects an existing
-  // channel on transport failure with its own backoff; tearing it down and recreating it on every
-  // visibility/layout blip interrupts that retry and churns ("subscribing → error → closed →
-  // subscribing…" forever), so we leave a live-or-retrying channel alone.
+  // EventSource handles its own reconnection, so this only re-opens a stream we explicitly closed
+  // (e.g. a backgrounding teardown). A live or auto-retrying stream is left alone — no churn.
   async resync(): Promise<void> {
-    if (!supabase || !this.opts || this.channel) return;
-    await this.open();
-  }
-
-  private async teardown(): Promise<void> {
-    this.live = false;
-    if (supabase && this.channel) {
-      try {
-        await supabase.removeChannel(this.channel);
-      } catch {
-        /* ignore */
-      }
-    }
-    this.channel = null;
+    if (!this.opts || this.es) return;
+    this.open();
   }
 
   async disconnect(): Promise<void> {
     this.opts = null;
-    await this.teardown();
+    if (this.es) {
+      this.es.close();
+      this.es = null;
+    }
   }
 }

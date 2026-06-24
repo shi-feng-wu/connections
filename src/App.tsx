@@ -18,7 +18,6 @@ import { type PresenceInput, presenceSignature, setPresence } from "./presence";
 import { RoomLive, type TilesMsg } from "./roomlive";
 import { canonicalScope } from "./scope";
 import type { Standings } from "./season";
-import { supabaseEnabled } from "./supabase";
 
 const EMPTY_STANDINGS: Standings = { board: [], self: null };
 
@@ -873,21 +872,6 @@ export function App({
     return () => clearInterval(id);
   }, [isEmbedded]);
 
-  // TEMPORARY de-risk probe (delete with /api/sse-test): does Discord's proxy pass a long-lived
-  // SSE stream? Same-origin, so no URL mapping needed. Watch the console: ticks ~1s apart over
-  // ~12s = streaming works (SSE relay viable); all at once near 12s = buffered (use long-poll);
-  // error at Ns = that's the proxy's hold limit (sets the long-poll window).
-  useEffect(() => {
-    if (!isEmbedded) return;
-    const t0 = performance.now();
-    console.info("[sse-test] opening EventSource /api/sse-test");
-    const es = new EventSource("/api/sse-test");
-    es.onmessage = (e) =>
-      console.info("[sse-test] rx:", e.data, "@", Math.round(performance.now() - t0), "ms");
-    es.onerror = () =>
-      console.info("[sse-test] error/closed @", Math.round(performance.now() - t0), "ms");
-    return () => es.close();
-  }, [isEmbedded]);
 
   // Sync the layout ref the poll reads, and catch the roster up the moment the player
   // expands out of PIP (the poll skipped while collapsed, so it may be a while stale).
@@ -913,10 +897,10 @@ export function App({
   // above demoted to a 90s backstop. connect() is idempotent; if Realtime is unavailable (no
   // socket / no token) onLive(false) keeps us on the poll — purely additive.
   useEffect(() => {
-    if (phase !== "ready" || !isEmbedded || !isDailyRef.current || !supabaseEnabled) return;
+    if (phase !== "ready" || !isEmbedded || !isDailyRef.current) return;
     const scope = scopeRef.current;
-    const accessToken = accessTokenRef.current;
-    if (!scope || !accessToken) return;
+    const ticket = authTicketRef.current;
+    if (!scope || !ticket) return;
     let rl = roomLiveRef.current;
     if (!rl) {
       rl = new RoomLive();
@@ -924,9 +908,7 @@ export function App({
     }
     void rl.connect({
       scope,
-      accessToken,
-      guildId: guildIdRef.current,
-      channelId: channelIdRef.current,
+      ticket,
       handlers: { onDelta: applyDelta, onTiles: handleTiles },
     });
   }, [phase, isEmbedded]);

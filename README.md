@@ -6,7 +6,9 @@ The daily NYT Connections puzzle as a Discord Activity (the embedded GUI that op
 
 - Client: Vite + React + TypeScript + Tailwind v4
 - API: Vercel serverless functions for OAuth token exchange and the NYT puzzle proxy
-- Realtime + storage: Supabase Presence for live progress, Postgres for the leaderboard
+- Storage: Supabase Postgres (scores, live cards, daily progress) + its REST for the leaderboard
+- Realtime: an SSE relay on Railway fans live progress/tiles out to clients (Supabase has no
+  realtime — a Discord Activity can't reliably hold the WebSocket it needs)
 - Also runs standalone in a plain browser (skips Discord/Supabase) for UI dev
 - In production, a plain browser visit gets a landing page with a self-playing
   demo board (`src/landing.tsx`) — the game itself stays Discord-only
@@ -19,15 +21,28 @@ src/        client: main.tsx (bootstrap), App.tsx (state/wiring), components.tsx
 api/        Vercel functions: puzzle.ts (NYT proxy), token.ts (OAuth), score.ts +
             guess.ts + start.ts (server-authoritative scoring), roster.ts,
             cron-recap.ts + interactions.ts (daily recap bot)
+tests/      vitest suite (pnpm test) — co-located by subject (game, roster, sql, …);
+            the *-sql ones run real schema.sql functions in PGlite (WASM Postgres)
 supabase/   schema.sql (tables + leaderboard functions, run once),
             recap-cron.sql (optional pg_cron trigger)
-scripts/    Discord setup helpers (pnpm register-commands, …) and a local
-            analytics dashboard (pnpm dashboard)
-index.html  vite.config.ts  tsconfig.json  package.json
+scripts/    Discord setup helpers (pnpm register-commands, …), a local analytics
+            dashboard (pnpm dashboard), and the two always-on Railway workers:
+            relay.mjs (live-roster SSE relay) + status.mjs (bot custom status)
+index.html  vite.config.ts  tsconfig.json  package.json  Dockerfile (Railway)
 ```
 
-One `package.json`, one `node_modules`. No server to run: Vercel hosts the
-static client + functions, Supabase handles realtime/DB.
+The work is split across three platforms, each doing what it's best at:
+
+- **Vercel (Pro)** — the static client + all serverless request/response API (scoring, roster
+  reads, OAuth, card images, the recap cron). Nothing long-lived.
+- **Railway** — the two always-on processes that need a persistent connection: the SSE relay
+  (`scripts/relay.mjs`, which clients hold an EventSource to) and the Discord status worker
+  (`scripts/status.mjs`). One service, ~$5/mo. See `Dockerfile`.
+- **Supabase** — Postgres + REST only (the durable scores/cards/progress and the leaderboard
+  RPCs). No realtime traffic, so it stays comfortably on the free tier.
+
+Live updates flow guess → Vercel writes Postgres → Vercel pushes a delta to the relay → relay
+fans it out over SSE to everyone in the room. Supabase is never in the realtime path.
 
 ## Requirements
 
@@ -96,7 +111,7 @@ Covers the parts that must be correct: the pure `Game` model (`game.ts`: submit
 outcomes, loss back-fill, the score formula, share grid), roster ranking
 (`roster.tsx`), the HMAC session signing (`api/_session.ts`, the anti-cheat that
 binds a score to a server-timed session), and the leaderboard SQL itself.
-`src/sql.test.ts` loads the real `current_streak` / `room_board` / `room_self`
+`tests/sql.test.ts` loads the real `current_streak` / `room_board` / `room_self`
 function bodies out of `supabase/schema.sql` and runs them in an in-process
 Postgres ([PGlite](https://pglite.dev), WASM), so the streak/aggregation logic
 is actually executed, not just reviewed. The UI is verified separately via the

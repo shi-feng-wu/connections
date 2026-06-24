@@ -21,11 +21,12 @@ import type { Standings } from "./season";
 
 const EMPTY_STANDINGS: Standings = { board: [], self: null };
 
-// Merge one Realtime delta (api/_realtime.ts) into the roster: patch the matching row, or
-// insert a new player (a `join` carries identity). Broadcast payloads only include fields that
+// Merge one live delta (api/_realtime.ts, relayed over SSE) into the roster: patch the matching
+// row, or insert a new player (a `join` carries identity). Delta payloads only include fields that
 // changed, and JSON drops absent ones, so spreading the delta never clobbers a known value with
 // an undefined. `channelId` rides onto the row harmlessly (it's not a PlayerState field the UI
-// reads). The green ring isn't set here — it comes from channel Presence (the `roster` memo).
+// reads). The green ring isn't set here — it comes from Discord's participant list (the `roster`
+// memo reads `participantIds`).
 function mergeDelta(roster: PlayerState[], d: RosterDelta): PlayerState[] {
   const i = roster.findIndex((p) => p.userId === d.userId);
   if (i >= 0) {
@@ -386,22 +387,18 @@ export function App({
       const r = await fetch("/api/roster?" + qs.toString(), { headers: { "x-ct": ticket } });
       if (!r.ok) return;
       const d = (await r.json()) as { players?: PlayerState[] };
-      if (Array.isArray(d.players)) {
-        console.info("[roomlive] roster fetched", d.players.length, d.players.map((p) => p.userId));
-        setServerRoster(d.players);
-      }
+      if (Array.isArray(d.players)) setServerRoster(d.players);
     } catch {
       /* keep the last roster */
     }
   }
 
-  // A Realtime delta arrived (someone guessed or joined). Merge it into the roster instantly.
+  // A live delta arrived (someone guessed or joined). Merge it into the roster instantly.
   // Channel view ignores deltas from other channels of the guild (the roster is narrowed). A
   // progress delta for a player we have no identity for yet (rare: their join never landed
   // here) can't be rendered, so fall back to one backstop fetch to pick up their row. Reads
-  // refs only, so the value captured by the channel subscription stays correct across renders.
+  // refs only, so the value captured by the relay handler stays correct across renders.
   function applyDelta(d: RosterDelta): void {
-    console.info("[roomlive] applyDelta in", JSON.stringify(d));
     if (
       scopeModeRef.current === "channel" &&
       guildIdRef.current &&
@@ -409,16 +406,13 @@ export function App({
       channelIdRef.current &&
       d.channelId !== channelIdRef.current
     ) {
-      console.info("[roomlive] applyDelta DROPPED: other channel", d.channelId, "vs", channelIdRef.current);
       return;
     }
     const known = serverRosterRef.current.some((p) => p.userId === d.userId);
     if (!known && typeof d.name !== "string") {
-      console.info("[roomlive] applyDelta unknown player -> backstop refetch");
       void fetchServerRoster();
       return;
     }
-    console.info("[roomlive] applyDelta MERGED", d.userId);
     setServerRoster((prev) => mergeDelta(prev, d));
   }
 
@@ -430,26 +424,15 @@ export function App({
       !!t.channelId &&
       !!channelIdRef.current &&
       t.channelId !== channelIdRef.current;
-    const known = serverRosterRef.current.some((p) => p.userId === t.userId);
-    console.info(
-      "[roomlive] handleTiles",
-      t.userId,
-      "known:", known,
-      "filteredOut:", filteredOut,
-      "view:", scopeModeRef.current,
-      "myChan:", channelIdRef.current,
-      "theirChan:", t.channelId,
-      "rosterIds:", serverRosterRef.current.map((p) => p.userId),
-    );
     if (filteredOut) return;
     // Pure cosmetic overlay: paint the selection onto the player's existing roster row.
     setPickingByUser((prev) => ({ ...prev, [t.userId]: t.selected }));
-    // If we don't have this picker yet — their join broadcast landed before we subscribed and the
-    // cold-start read missed them — pull the authoritative roster once (they really opened the
-    // room, so the read includes their real row). We never synthesize a row from tile data.
+    // If we don't have this picker yet — their join landed before we subscribed and the cold-start
+    // read missed them — pull the authoritative roster once (they really opened the room, so the
+    // read includes their real row). We never synthesize a row from tile data.
+    const known = serverRosterRef.current.some((p) => p.userId === t.userId);
     if (!known && t.userId !== meRef.current.id && !tileFetchRequested.current.has(t.userId)) {
       tileFetchRequested.current.add(t.userId);
-      console.info("[roomlive] tile-refetch for", t.userId);
       void fetchServerRoster();
     }
   }

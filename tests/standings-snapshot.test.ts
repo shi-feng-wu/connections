@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { BoardRow } from "./leaderboard";
-import { rankMap, rankDelta, resolveBaseline } from "./standings-snapshot";
+import type { BoardRow } from "../src/leaderboard";
+import { rankMap, rankDelta, resolveBaseline } from "../src/standings-snapshot";
 
 const row = (user_id: string): BoardRow => ({
   user_id,

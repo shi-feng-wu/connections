@@ -44,13 +44,9 @@ export class RoomLive {
     // NOT rewritten by patchUrlMappings, so we use the proxied path directly; and it can't set
     // headers, so the ticket rides in the query string.
     const url = `/relay/sub?room=${encodeURIComponent(scope)}&ct=${encodeURIComponent(ticket)}`;
-    console.info('[roomlive] subscribing', scope);
+    // On a dropped stream EventSource auto-reconnects (the relay sends a retry:), so there's no
+    // error handler to add — a failed open just retries until the stream comes back.
     const es = new EventSource(url);
-    es.addEventListener('open', () => console.info('[roomlive] SSE open'));
-    es.addEventListener('error', () =>
-      // Fires on a dropped stream; EventSource auto-reconnects (relay sent retry:).
-      console.info('[roomlive] SSE error (auto-retrying)'),
-    );
     es.addEventListener('progress', (e) => {
       handlers.onDelta(JSON.parse((e as MessageEvent).data) as RosterDelta);
     });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { currentSeasonStart } from "./leaderboard";
+import { currentSeasonStart } from "../src/leaderboard";
 
 describe("currentSeasonStart", () => {
   it("returns the first day of the month, in UTC", () => {

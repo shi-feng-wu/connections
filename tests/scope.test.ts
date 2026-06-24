@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalScope } from "./scope";
+import { canonicalScope } from "../src/scope";
 
 // Namespacing that stops cross-room leaderboard pollution. g:/c: prefixes keep a
 // guild board and a channel board from ever sharing a key.

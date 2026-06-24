@@ -6,6 +6,10 @@
   badge and sets the app version, so add a new release at the very top.
 -->
 
+## v1.7 — Jun 24, 2026
+
+- The live roster now updates instantly, and you can see other players clicking tiles now.
+
 ## v1.6 — Jun 23, 2026
 
 - Reworked scoring: dropped the redundant solve bonus, a quick solve now earns a bigger speed bonus, and a new grace period lets a super-quick run (20s) reach a perfect 500. (Does not affect old scores.)

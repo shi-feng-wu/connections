@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { botCardUrl, cardPayload, playerFinished } from "../api/_livecard";
-import type { Puzzle } from "./game";
+import type { Puzzle } from "../src/game";
 
 // api/_livecard.ts: the room card is a bot message. On create it replies to the
 // launcher's "<user> used /connections" message (message_reference); edits address the

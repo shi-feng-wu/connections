@@ -1,6 +1,6 @@
 import { generateKeyPairSync, sign as edSign } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { Game, LEVELS, type Puzzle } from "./game";
+import { Game, LEVELS, type Puzzle } from "../src/game";
 import { installNudgePayload, isUserInstallOnly, routeInteraction, shareCard, verifyDiscordSig } from "../api/interactions";
 
 // api/interactions.ts: Discord signs every interaction (Ed25519); an unverified

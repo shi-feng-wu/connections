@@ -3,7 +3,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { beforeAll, describe, expect, it } from "vitest";
 import { assembleRoster } from "../api/roster";
 import type { CardPlayer } from "../api/_card";
-import type { Puzzle } from "./game";
+import type { Puzzle } from "../src/game";
 
 // Temporal behaviour of the live-roster "signal" — the /api/roster poll + heartbeat that
 // REPLACED Supabase Realtime presence. The old realtime socket's failure mode was that it

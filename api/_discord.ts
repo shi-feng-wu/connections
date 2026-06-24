@@ -1,5 +1,3 @@
-import { createHmac } from 'node:crypto';
-
 // Server-side identity. Resolve the client's Discord OAuth token against Discord
 // so user_id/name/avatar are authoritative; a client can't submit a score or join
 // presence as someone else.
@@ -121,30 +119,3 @@ export async function fetchChannelName(channelId: string, botToken: string): Pro
   }
 }
 
-// Short-lived Supabase JWT (HS256, role=authenticated) for one private Realtime
-// room. Only verified Discord users get one, so presence can't be joined
-// anonymously; the `room` claim scopes the token to a single channel (see the
-// realtime.messages RLS policy in schema.sql), so a token for one room can't
-// read or write any other. Null if unconfigured or no room given.
-const b64url = (s: string): string => Buffer.from(s).toString('base64url');
-
-export function mintSupabaseJWT(user: DiscordUser, room: string, ttlSec = 3600): string | null {
-  const secret = process.env.SUPABASE_JWT_SECRET ?? '';
-  if (!secret || !room) return null;
-  const now = Math.floor(Date.now() / 1000);
-  const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const payload = b64url(
-    JSON.stringify({
-      sub: user.id,
-      role: 'authenticated',
-      aud: 'authenticated',
-      // scopes the token to one room: the RLS policy requires topic = 'room:' || this claim
-      room,
-      iat: now,
-      exp: now + ttlSec,
-    }),
-  );
-  const data = `${header}.${payload}`;
-  const sig = createHmac('sha256', secret).update(data).digest('base64url');
-  return `${data}.${sig}`;
-}

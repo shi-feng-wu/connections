@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseChangelog, CHANGELOG, APP_VERSION } from "./changelog";
+import { parseChangelog, CHANGELOG, APP_VERSION } from "../src/changelog";
 
 describe("parseChangelog", () => {
   const sample = [

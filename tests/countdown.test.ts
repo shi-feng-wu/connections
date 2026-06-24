@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmtCountdown, msUntilNextEtMidnight } from "./countdown";
+import { fmtCountdown, msUntilNextEtMidnight } from "../src/countdown";
 
 // msUntilNextEtMidnight takes an explicit `now`, so each case is a fixed UTC instant whose
 // ET wall-clock we know — no clock mocking needed. The instants below are chosen so the ET

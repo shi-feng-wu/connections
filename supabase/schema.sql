@@ -332,23 +332,12 @@ create policy "scores readable by all"
 drop policy if exists "anyone can insert a score" on public.scores;
 drop policy if exists "anyone can update a score" on public.scores;
 
--- Realtime authorization for live presence. Room channels are private; a holder
--- of a server-minted Supabase JWT (/api/realtime-token, from a verified Discord
--- identity) may join/broadcast only in the room named by its `room` claim. The
--- policy pins topic = 'room:' || claim, so a token for one room can't touch any
--- other (a plain `like 'room:%'` would let any authenticated user join every
--- room). Blocks anonymous spoofing and cross-room snooping. Needs Realtime
--- Authorization (RLS on realtime.messages). Dev clients with no JWT use a public
--- channel.
+-- Live updates no longer ride Supabase Realtime: clients can't reliably hold the proxied
+-- WebSocket it needs inside a Discord Activity, so the live roster moved to an SSE relay
+-- (scripts/relay.mjs on Railway). These old realtime.messages RLS policies are dropped — Supabase
+-- is now DB + REST only, with zero realtime traffic.
 drop policy if exists "room presence: authenticated read" on realtime.messages;
-create policy "room presence: authenticated read"
-  on realtime.messages for select to authenticated
-  using ( realtime.topic() = 'room:' || (auth.jwt() ->> 'room') );
-
 drop policy if exists "room presence: authenticated write" on realtime.messages;
-create policy "room presence: authenticated write"
-  on realtime.messages for insert to authenticated
-  with check ( realtime.topic() = 'room:' || (auth.jwt() ->> 'room') );
 
 -- Daily recap plumbing. The bot posts yesterday's results + season standings to the
 -- channel an Activity was last played in, per room, on the midnight-ET reset (see

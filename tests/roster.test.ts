@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { colorFor, initials, rankOf, sortRoster } from "./roster";
-import { finishedScore } from "./game";
-import type { PlayerState } from "./player";
+import { colorFor, initials, rankOf, sortRoster } from "../src/roster";
+import { finishedScore } from "../src/game";
+import type { PlayerState } from "../src/player";
 
 const NOW = 1_000_000;
 

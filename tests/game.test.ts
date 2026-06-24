@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Game, LEVELS, MAX_MISTAKES, SCORING, shuffle, type Puzzle } from "./game";
+import { Game, LEVELS, MAX_MISTAKES, SCORING, shuffle, type Puzzle } from "../src/game";
 
 // Fixed 16-word puzzle; word names encode their group, e.g. "A2" is in level 2.
 const puzzle: Puzzle = {

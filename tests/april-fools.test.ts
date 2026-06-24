@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { fetchPuzzle } from "../api/_nyt";
-import { Game } from "./game";
+import { Game } from "../src/game";
 
 // Can the app handle NYT's "weird" April Fools puzzles? These feed the REAL raw
 // NYT responses (captured verbatim from the v2 endpoint) through the actual parser

@@ -14,5 +14,5 @@
     "verbatimModuleSyntax": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["src", "api", "middleware.ts"]
+  "include": ["src", "api", "tests", "middleware.ts"]
 }

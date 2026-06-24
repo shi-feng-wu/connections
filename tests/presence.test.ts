@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildActivity, type PresenceInput, presenceSignature } from "./presence";
+import { buildActivity, type PresenceInput, presenceSignature } from "../src/presence";
 
 // A mid-game baseline: puzzle #123, nothing solved yet, all mistakes intact.
 const base: PresenceInput = {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { assembleRoster, cacheBundle, cachedBundle } from "../api/roster";
 import type { CardPlayer } from "../api/_card";
-import type { Puzzle } from "./game";
+import type { Puzzle } from "../src/game";
 
 // assembleRoster (api/roster.ts) builds the Live-tab roster. The player SET is the union
 // of who joined the room card (live_cards.players) and who finished (scores), so a player

@@ -429,6 +429,9 @@ export function App({
       return;
     }
     console.info("[roomlive] handleTiles", t.userId, t.selected);
+    // Pure cosmetic overlay: paint the selection onto the player's existing roster row. If they
+    // aren't in the roster yet, their join broadcast / the cold-start read brings them in (their
+    // tiles render once their row exists) — we don't synthesize a row from a tile message.
     setPickingByUser((prev) => ({ ...prev, [t.userId]: t.selected }));
   }
 

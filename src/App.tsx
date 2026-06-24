@@ -873,6 +873,22 @@ export function App({
     return () => clearInterval(id);
   }, [isEmbedded]);
 
+  // TEMPORARY de-risk probe (delete with /api/sse-test): does Discord's proxy pass a long-lived
+  // SSE stream? Same-origin, so no URL mapping needed. Watch the console: ticks ~1s apart over
+  // ~12s = streaming works (SSE relay viable); all at once near 12s = buffered (use long-poll);
+  // error at Ns = that's the proxy's hold limit (sets the long-poll window).
+  useEffect(() => {
+    if (!isEmbedded) return;
+    const t0 = performance.now();
+    console.info("[sse-test] opening EventSource /api/sse-test");
+    const es = new EventSource("/api/sse-test");
+    es.onmessage = (e) =>
+      console.info("[sse-test] rx:", e.data, "@", Math.round(performance.now() - t0), "ms");
+    es.onerror = () =>
+      console.info("[sse-test] error/closed @", Math.round(performance.now() - t0), "ms");
+    return () => es.close();
+  }, [isEmbedded]);
+
   // Sync the layout ref the poll reads, and catch the roster up the moment the player
   // expands out of PIP (the poll skipped while collapsed, so it may be a while stale).
   useEffect(() => {

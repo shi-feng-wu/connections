@@ -672,7 +672,11 @@ function SpoilerBar({
       onClick={reveal}
       aria-label={revealed ? category : "Reveal the hidden category"}
       className={
-        "spoiler-bar relative flex h-[var(--tile-h)] w-full select-none appearance-none flex-col items-center justify-center overflow-hidden rounded-lg border-0 px-2 text-center text-[#121212] transition-opacity duration-300 ease-out" +
+        // `isolate` keeps the bar's internal z-stack (cover/cat/glint/members)
+        // contained — without it those z-indices leak into the root stacking
+        // context and the reveal wipe paints over the end-screen score breakdown
+        // popover (which is trapped inside the footer's transform stacking context).
+        "spoiler-bar relative isolate flex h-[var(--tile-h)] w-full select-none appearance-none flex-col items-center justify-center overflow-hidden rounded-lg border-0 px-2 text-center text-[#121212] transition-opacity duration-300 ease-out" +
         // once revealed the bar does nothing on click — drop the pointer cursor
         // and the press feedback so it reads as the static solved bar it now is
         (revealed

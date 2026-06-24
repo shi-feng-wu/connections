@@ -385,6 +385,7 @@ export function App({
   // here) can't be rendered, so fall back to one backstop fetch to pick up their row. Reads
   // refs only, so the value captured by the channel subscription stays correct across renders.
   function applyDelta(d: RosterDelta): void {
+    console.info("[roomlive] applyDelta in", JSON.stringify(d));
     if (
       scopeModeRef.current === "channel" &&
       guildIdRef.current &&
@@ -392,13 +393,16 @@ export function App({
       channelIdRef.current &&
       d.channelId !== channelIdRef.current
     ) {
+      console.info("[roomlive] applyDelta DROPPED: other channel", d.channelId, "vs", channelIdRef.current);
       return;
     }
     const known = serverRosterRef.current.some((p) => p.userId === d.userId);
     if (!known && typeof d.name !== "string") {
+      console.info("[roomlive] applyDelta unknown player -> backstop refetch");
       void fetchServerRoster();
       return;
     }
+    console.info("[roomlive] applyDelta MERGED", d.userId);
     setServerRoster((prev) => mergeDelta(prev, d));
   }
 

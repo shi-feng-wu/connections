@@ -57,13 +57,13 @@ export class RoomLive {
       console.info('[roomlive] subscribing to room:%s', scope);
       const channel = supabase.channel(`room:${scope}`, { config: { private: true } });
       channel
-        .on('broadcast', { event: 'progress' }, ({ payload }) => {
-          console.debug('[roomlive] rx progress', payload);
-          handlers.onDelta(payload as RosterDelta);
+        .on('broadcast', { event: 'progress' }, (msg) => {
+          console.info('[roomlive] rx progress', JSON.stringify(msg));
+          handlers.onDelta((msg as { payload?: RosterDelta }).payload as RosterDelta);
         })
-        .on('broadcast', { event: 'join' }, ({ payload }) => {
-          console.debug('[roomlive] rx join', payload);
-          handlers.onDelta(payload as RosterDelta);
+        .on('broadcast', { event: 'join' }, (msg) => {
+          console.info('[roomlive] rx join', JSON.stringify(msg));
+          handlers.onDelta((msg as { payload?: RosterDelta }).payload as RosterDelta);
         })
         .subscribe((status, err) => {
           // Diagnostic: SUBSCRIBED = connected + authorized; CHANNEL_ERROR/TIMED_OUT = the

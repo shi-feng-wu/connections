@@ -227,6 +227,10 @@ function Avatar({
 // segmented rows for the rest. Flashes the newest bar when a group just landed.
 function MiniBoard({ p, flash }: { p: PlayerState; flash: boolean }) {
   const solved = p.solvedLevels;
+  // How many tiles this player currently has selected (live, over Realtime broadcast). Light up
+  // that many of the remaining squares, reading left-to-right, top-to-bottom — a "they're
+  // picking" pulse without needing to know which exact words map to which square.
+  const picking = p.pickingWords?.length ?? 0;
   return (
     <div className="flex w-5.5 flex-none flex-col gap-[2px] min-[800px]:w-7.5">
       {solved.map((lvl, i) => (
@@ -242,7 +246,13 @@ function MiniBoard({ p, flash }: { p: PlayerState; flash: boolean }) {
       {Array.from({ length: 4 - solved.length }, (_, r) => (
         <div className="flex h-[5px] gap-[1.5px] min-[800px]:h-1.5" key={`e${r}`}>
           {[0, 1, 2, 3].map((c) => (
-            <div className="flex-1 rounded-[1px] bg-zinc-700" key={c} />
+            <div
+              className={
+                "flex-1 rounded-[1px] transition-colors " +
+                (r * 4 + c < picking ? "bg-[#efefe6]" : "bg-zinc-700")
+              }
+              key={c}
+            />
           ))}
         </div>
       ))}
@@ -413,18 +423,6 @@ const RosterRow = memo(function RosterRow({
         {p.name}
         {you ? " (you)" : ""}
       </span>
-      {p.pickingWords && p.pickingWords.length > 0 ? (
-        <span className="flex flex-none gap-0.5">
-          {p.pickingWords.map((w) => (
-            <span
-              key={w}
-              className="rounded bg-amber-400 px-1 py-0.5 text-[9px] font-bold leading-none text-black"
-            >
-              {w.slice(0, 4)}
-            </span>
-          ))}
-        </span>
-      ) : null}
       <Mistakes p={p} />
       <FinalScore p={p} />
       <Status p={p} />

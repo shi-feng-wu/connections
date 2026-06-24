@@ -42,18 +42,38 @@ export class RoomLive {
     const { scope, handlers } = this.opts;
     try {
       const token = await this.mintToken();
-      if (!token) return;
-      await supabase.realtime.setAuth(token);
+      if (!token) {
+        console.warn('[roomlive] no token minted — staying on cold-start reads');
+        return;
+      }
+      // NOT awaited: setAuth applies the token synchronously and flushes to the socket async;
+      // awaiting it can hang if the proxied WebSocket can't establish, which would block the
+      // subscribe below entirely.
+      try {
+        void supabase.realtime.setAuth(token);
+      } catch (e) {
+        console.error('[roomlive] setAuth threw', e);
+      }
+      console.info('[roomlive] subscribing to room:%s', scope);
       const channel = supabase.channel(`room:${scope}`, { config: { private: true } });
       channel
-        .on('broadcast', { event: 'progress' }, ({ payload }) => handlers.onDelta(payload as RosterDelta))
-        .on('broadcast', { event: 'join' }, ({ payload }) => handlers.onDelta(payload as RosterDelta))
-        .subscribe((status) => {
+        .on('broadcast', { event: 'progress' }, ({ payload }) => {
+          console.debug('[roomlive] rx progress', payload);
+          handlers.onDelta(payload as RosterDelta);
+        })
+        .on('broadcast', { event: 'join' }, ({ payload }) => {
+          console.debug('[roomlive] rx join', payload);
+          handlers.onDelta(payload as RosterDelta);
+        })
+        .subscribe((status, err) => {
+          // Diagnostic: SUBSCRIBED = connected + authorized; CHANNEL_ERROR/TIMED_OUT = the
+          // socket or RLS rejected us; nothing logged = we never reached subscribe.
+          console.info('[roomlive] status:', status, err ? `err=${err.message}` : '');
           this.live = status === 'SUBSCRIBED';
         });
       this.channel = channel;
-    } catch {
-      /* live updates just won't start; the cold-start read reconciles */
+    } catch (e) {
+      console.error('[roomlive] open failed', e);
     } finally {
       this.connecting = false;
     }

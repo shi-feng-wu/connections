@@ -58,7 +58,7 @@ const LINKS: LinkDef[] = [
   { key: "faq", label: "FAQ", Icon: CircleHelp, page: "faq" },
   {
     key: "feedback",
-    label: "Send feedback",
+    label: "Feedback",
     Icon: MessageCircle,
     page: "feedback",
   },

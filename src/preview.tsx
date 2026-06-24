@@ -1179,6 +1179,7 @@ const known = [
   "reel",
   "cover",
   "bg",
+  "anim",
 ];
 // #simulate and #feedback both isolate the Simulate playground (#feedback also
 // auto-fires a one-away guess to surface the header feedback pill); #card isolates the
@@ -1209,6 +1210,8 @@ const onlyReel = pick === "reel";
 // #cover and #bg isolate the Discord App-Directory still art (1024×576).
 const onlyCover = pick === "cover";
 const onlyBg = pick === "bg";
+// #anim isolates the interactive roster-animation playground (replay buttons).
+const onlyAnim = pick === "anim";
 const shown =
   known.includes(pick) && !onlySim && !onlyCard && !onlyPip
     ? STATES.filter((s) => String(s.props.label).toLowerCase().includes(pick))
@@ -1568,11 +1571,106 @@ function Group({
   );
 }
 
+// Interactive animation playground (#anim): a small live roster plus replay buttons that fire each
+// transition — solve/overtake, mistake, win count-up, live tile picking, join — so the roster
+// motions can be watched and tuned in the browser without two Discord clients. (The animations are
+// state-transition driven, so a static mock never plays them; this drives the transitions.)
+function AnimDemo() {
+  const mk = (id: string, name: string, o: Partial<PlayerState> = {}): PlayerState => ({
+    userId: id,
+    name,
+    mistakesLeft: 4,
+    solvedCount: 0,
+    solvedLevels: [],
+    picking: false,
+    online: true,
+    done: null,
+    startedAt: NOW - 90_000,
+    finishedAt: null,
+    ...o,
+  });
+  const fresh = (): PlayerState[] => [
+    mk("ad-ana", "Ana", { solvedCount: 3, solvedLevels: [0, 1, 2], mistakesLeft: 3, startedAt: NOW - 118_000 }),
+    mk("ad-maya", "Maya", { solvedCount: 2, solvedLevels: [0, 1], mistakesLeft: 3, startedAt: NOW - 158_000 }),
+    mk("ad-kit", "Kit", { solvedCount: 1, solvedLevels: [0], mistakesLeft: 4, startedAt: NOW - 134_000 }),
+    mk("ad-devon", "Devon", { solvedCount: 0, solvedLevels: [], mistakesLeft: 1, startedAt: NOW - 170_000 }),
+  ];
+  const [players, setPlayers] = useState<PlayerState[]>(fresh);
+  const patch = (id: string, fn: (p: PlayerState) => PlayerState): void =>
+    setPlayers((ps) => ps.map((p) => (p.userId === id ? fn(p) : p)));
+  const nextLevel = (p: PlayerState): number =>
+    [0, 1, 2, 3].find((l) => !p.solvedLevels.includes(l)) ?? 3;
+
+  // Kit gains her next group — from 1 group she passes Maya (2), so it shows the overtake reorder
+  // + emerald glow + the new bar popping in, all at once.
+  const solve = (): void =>
+    patch("ad-kit", (p) =>
+      p.solvedCount >= 4
+        ? p
+        : { ...p, solvedCount: p.solvedCount + 1, solvedLevels: [...p.solvedLevels, nextLevel(p)] },
+    );
+  const mistake = (): void =>
+    patch("ad-kit", (p) => ({ ...p, mistakesLeft: Math.max(0, p.mistakesLeft - 1) }));
+  const win = (): void =>
+    patch("ad-ana", (p) =>
+      p.done ? p : { ...p, done: "won", solvedCount: 4, solvedLevels: [0, 1, 2, 3], finishedAt: NOW },
+    );
+  // tiles fill one at a time (press-pop + ring), then a submit clears them.
+  const pick = (): void => {
+    patch("ad-kit", (p) => ({ ...p, pickingWords: [] }));
+    let n = 0;
+    const tick = (): void => {
+      n += 1;
+      patch("ad-kit", (p) => ({ ...p, pickingWords: Array.from({ length: n }, (_, i) => `t${i}`) }));
+      if (n < 3) setTimeout(tick, 320);
+      else setTimeout(() => patch("ad-kit", (p) => ({ ...p, pickingWords: [] })), 1100);
+    };
+    setTimeout(tick, 200);
+  };
+  const join = (): void =>
+    setPlayers((ps) =>
+      ps.some((p) => p.userId === "ad-lia")
+        ? ps
+        : [...ps, mk("ad-lia", "Lia", { solvedCount: 1, solvedLevels: [0], startedAt: NOW - 205_000 })],
+    );
+
+  const btns: [string, () => void][] = [
+    ["Solve / overtake", solve],
+    ["Mistake", mistake],
+    ["Win · count-up", win],
+    ["Pick tiles", pick],
+    ["Join", join],
+    ["Reset", () => setPlayers(fresh())],
+  ];
+  return (
+    <section className="w-full max-w-[360px] px-4">
+      <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
+        Roster animations · replay (Kit solves / mistakes / picks · Ana wins · Lia joins)
+      </div>
+      <div className="mb-3 flex flex-wrap gap-2">
+        {btns.map(([label, fn]) => (
+          <button
+            key={label}
+            onClick={fn}
+            className="cursor-pointer rounded-full border border-zinc-700 px-3 py-1 text-xs font-semibold text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <Roster players={players} selfId="ad-maya" />
+    </section>
+  );
+}
+
 const fullPage = (
   <div className="flex flex-col items-center gap-24 pb-28 pt-12">
     <PageHeader />
     <Group title="Game states">
       <div className="flex w-full flex-col items-center gap-14">{STATES}</div>
+    </Group>
+    <Group title="Roster animations" hash="anim">
+      <AnimDemo />
     </Group>
     <Group title="Playground" hash="simulate">
       <Simulate />
@@ -1620,6 +1718,10 @@ createRoot(document.getElementById("preview")!).render(
     COVER
   ) : onlyBg ? (
     BG
+  ) : onlyAnim ? (
+    <div className="flex justify-center py-10">
+      <AnimDemo />
+    </div>
   ) : (
     <div className="flex flex-col items-center gap-16 py-10">
       {onlyLanding && LANDING}

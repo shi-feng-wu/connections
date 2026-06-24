@@ -150,31 +150,113 @@ function useNow(active: boolean): number {
   return useSyncExternalStore(active ? subscribeTick : noSub, readTick);
 }
 
-// One-shot flash on a row when a new group lands (not a looping ambient flash).
-function useFlash(players: PlayerState[]): Set<string> {
-  const prev = useRef<Map<string, number>>(new Map());
-  const [flashing, setFlashing] = useState<Set<string>>(new Set());
+// Transient per-row events that drive the live-roster animations: a group just solved, a
+// wrong guess landed, the run just won, or the player just joined. Each flag is raised on the
+// state transition and cleared after its own short window — long enough for the one-shot
+// animation it drives to play, short enough not to bleed into the next event. (Replaces the old
+// solve-only useFlash.)
+export type RowEvents = {
+  solved?: boolean;
+  mistake?: boolean;
+  won?: boolean;
+  joined?: boolean;
+};
+// Per-event clear windows (ms): the glow holds longest, the wrong-flash/shake are snappy.
+const EVENT_MS: Record<keyof RowEvents, number> = {
+  solved: 1300,
+  won: 1300,
+  mistake: 650,
+  joined: 700,
+};
+
+function useRowEvents(players: PlayerState[]): Map<string, RowEvents> {
+  const prev = useRef<
+    Map<string, { solved: number; mistakes: number; done: PlayerState["done"] }>
+  >(new Map());
+  const seen = useRef<Set<string>>(new Set());
+  const mounted = useRef(false);
+  const timers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const [events, setEvents] = useState<Map<string, RowEvents>>(new Map());
+
+  // Clear pending timers ONLY on unmount — not on every players change, so a second event
+  // firing quickly can't cancel an earlier event's clear and leave a flag stuck on.
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+
   useEffect(() => {
-    const fresh: string[] = [];
+    const fired: Array<[string, keyof RowEvents]> = [];
     for (const p of players) {
       const before = prev.current.get(p.userId);
-      if (before != null && p.solvedCount > before) fresh.push(p.userId);
-      prev.current.set(p.userId, p.solvedCount);
+      if (before) {
+        if (p.solvedCount > before.solved) fired.push([p.userId, "solved"]);
+        if (p.mistakesLeft < before.mistakes) fired.push([p.userId, "mistake"]);
+        if (!before.done && p.done === "won") fired.push([p.userId, "won"]);
+      }
+      prev.current.set(p.userId, {
+        solved: p.solvedCount,
+        mistakes: p.mistakesLeft,
+        done: p.done,
+      });
+      // A userId we've never seen joins — but not on first mount (the whole list isn't "joining").
+      if (mounted.current && !seen.current.has(p.userId))
+        fired.push([p.userId, "joined"]);
+      seen.current.add(p.userId);
     }
-    if (!fresh.length) return;
-    setFlashing((s) => new Set([...s, ...fresh]));
-    const id = setTimeout(
-      () =>
-        setFlashing((s) => {
-          const next = new Set(s);
-          fresh.forEach((u) => next.delete(u));
+    mounted.current = true;
+    if (!fired.length) return;
+    setEvents((m) => {
+      const next = new Map(m);
+      for (const [id, key] of fired) next.set(id, { ...next.get(id), [key]: true });
+      return next;
+    });
+    for (const [id, key] of fired) {
+      const t = setTimeout(() => {
+        timers.current.delete(t);
+        setEvents((m) => {
+          const cur = m.get(id);
+          if (!cur?.[key]) return m;
+          const next = new Map(m);
+          const e = { ...cur };
+          delete e[key];
+          if (Object.keys(e).length) next.set(id, e);
+          else next.delete(id);
           return next;
-        }),
-      2600,
-    );
-    return () => clearTimeout(id);
+        });
+      }, EVENT_MS[key]);
+      timers.current.add(t);
+    }
   }, [players]);
-  return flashing;
+
+  return events;
+}
+
+// Cubic ease-out count from 0 to `target` when `run` flips true (a win landing), once; settles
+// on `target` and never re-runs. Off → just shows the number.
+function useCountUp(target: number, run: boolean): number {
+  const [val, setVal] = useState(run ? 0 : target);
+  const done = useRef(false);
+  useEffect(() => {
+    if (!run) {
+      setVal(target);
+      return;
+    }
+    if (done.current) return;
+    done.current = true;
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = (t: number): void => {
+      const k = Math.min(1, (t - t0) / 900);
+      setVal(Math.round(target * (1 - Math.pow(1 - k, 3))));
+      if (k < 1) raf = requestAnimationFrame(tick);
+      else setVal(target);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [run, target]);
+  return val;
+}
+
+function ScoreNum({ value, run }: { value: number; run: boolean }) {
+  return <>{useCountUp(value, run)}</>;
 }
 
 // Colored initial circle. `online` adds a steady emerald presence ring (live view only)
@@ -186,19 +268,23 @@ function Avatar({
   p,
   selfId,
   online,
+  picking,
 }: {
   p: PlayerState;
   selfId: string;
   online: boolean;
+  // a teammate is actively choosing tiles (live) — adds a breathing ring you can feel.
+  picking: boolean;
 }) {
   const you = p.userId === selfId;
   const [broken, setBroken] = useState<string | null>(null);
   const showPhoto = p.avatar && broken !== p.avatar;
-  // White (you) takes precedence over green (online); same dark-separator + 2px-colour
-  // box-shadow so every state occupies the exact same box.
+  // White (you) takes precedence over green; picking and online both ride the emerald ring (a
+  // picker is by definition here), with a pulsing overlay added on top while picking. Same
+  // dark-separator + 2px-colour box-shadow so every state occupies the exact same box.
   const ring = you
     ? " shadow-[0_0_0_2px_#09090b,0_0_0_4px_#f4f4f5]"
-    : online
+    : online || picking
       ? " shadow-[0_0_0_2px_#09090b,0_0_0_4px_#34d399]"
       : "";
   return (
@@ -219,48 +305,85 @@ function Avatar({
           onError={() => setBroken(p.avatar ?? null)}
         />
       )}
+      {picking && (
+        <span
+          className="animate-pick-ring pointer-events-none absolute -inset-[3px] rounded-full"
+          style={{ boxShadow: "0 0 0 2px #34d399" }}
+        />
+      )}
     </div>
   );
 }
 
-// Vertical stack: a solid colored bar per solved group (in solve order), grey
-// segmented rows for the rest. Flashes the newest bar when a group just landed.
-function MiniBoard({ p, flash }: { p: PlayerState; flash: boolean }) {
-  const solved = p.solvedLevels;
-  // How many tiles this player currently has selected (live, over Realtime broadcast). Light up
-  // that many of the remaining squares, reading left-to-right, top-to-bottom — a "they're
-  // picking" pulse without needing to know which exact words map to which square.
+// A faithful little board: a solid colored bar per solved group (in solve order, newest pops
+// in), then the remaining tiles as a cream grid. Live picks flip to charcoal one at a time with
+// the real board's press-pop; a wrong guess flashes the top row red. Picks fill left-to-right by
+// COUNT, not real position — a "they're picking" mirror that never leaks which words go together.
+function MiniBoard({
+  p,
+  solved: solvedEvent,
+  mistake,
+}: {
+  p: PlayerState;
+  solved: boolean;
+  mistake: boolean;
+}) {
+  const levels = p.solvedLevels;
   const picking = p.pickingWords?.length ?? 0;
+  const cells = useRef<(HTMLDivElement | null)[]>([]);
+  const prevPick = useRef(picking);
+
+  // Press-pop each newly-selected tile as picks come in — the same shrink-and-return the real
+  // board plays on a tap (board.tsx). Only on growth, only the freshly-filled cells.
+  useEffect(() => {
+    const before = prevPick.current;
+    prevPick.current = picking;
+    if (picking <= before) return;
+    for (let i = before; i < picking; i++)
+      cells.current[i]?.animate(
+        [{ transform: "scale(1)" }, { transform: "scale(0.66)" }, { transform: "scale(1)" }],
+        { duration: 200, easing: "ease-out" },
+      );
+  }, [picking]);
+
   return (
-    <div className="flex w-5.5 flex-none flex-col gap-[2px] min-[800px]:w-7.5">
-      {solved.map((lvl, i) => (
+    // ONE square 4×4 grid (the design's layout): solved groups span the full width as a bar, the
+    // rest are individual cells. Tracks are EXPLICIT integer pixels (6px / 7px) with a 1px gap,
+    // not `1fr` — at this size `1fr` tracks compute to fractional widths (5.375px) that round
+    // unevenly to device pixels, drifting the last column. Whole-pixel tracks render perfectly
+    // even. The board's intrinsic size (27px / 31px) sits flush with the avatar beside it.
+    <div className="grid flex-none gap-[1px] grid-cols-[repeat(4,6px)] grid-rows-[repeat(4,6px)] min-[800px]:grid-cols-[repeat(4,7px)] min-[800px]:grid-rows-[repeat(4,7px)]">
+      {levels.map((lvl, i) => (
         <div
           key={`s${lvl}`}
           className={
-            "h-[5px] overflow-hidden rounded-[2px] min-[800px]:h-1.5 " +
-            (flash && i === solved.length - 1 ? "animate-solve-flash" : "")
+            "col-span-4 rounded-[1px] " +
+            (solvedEvent && i === levels.length - 1 ? "animate-mb-pop" : "")
           }
           style={{ background: LEVELS[lvl].color }}
         />
       ))}
-      {Array.from({ length: 4 - solved.length }, (_, r) => (
-        <div className="flex h-[5px] gap-[1.5px] min-[800px]:h-1.5" key={`e${r}`}>
-          {[0, 1, 2, 3].map((c) => (
-            <div
-              className={
-                "flex-1 rounded-[1px] transition-colors " +
-                (r * 4 + c < picking ? "bg-[#efefe6]" : "bg-zinc-700")
-              }
-              key={c}
-            />
-          ))}
-        </div>
-      ))}
+      {Array.from({ length: (4 - levels.length) * 4 }, (_, idx) => {
+        // top remaining row flashes red on a wrong guess (a mistake is always a 4-tile group).
+        const wrong = mistake && idx < 4;
+        return (
+          <div
+            key={idx}
+            ref={(el) => {
+              cells.current[idx] = el;
+            }}
+            className="rounded-[1px] transition-colors duration-200"
+            style={{
+              background: wrong ? "#e0707a" : idx < picking ? "#5a594e" : "#efefe6",
+            }}
+          />
+        );
+      })}
     </div>
   );
 }
 
-function Mistakes({ p }: { p: PlayerState }) {
+function Mistakes({ p, mistake }: { p: PlayerState; mistake: boolean }) {
   return (
     <span className="inline-flex flex-none items-center gap-[3px]">
       {Array.from({ length: MAX_MISTAKES }, (_, i) => (
@@ -268,7 +391,9 @@ function Mistakes({ p }: { p: PlayerState }) {
           key={i}
           className={
             "h-1.75 w-1.75 rounded-full " +
-            (i < p.mistakesLeft ? "bg-zinc-300" : "bg-zinc-700")
+            (i < p.mistakesLeft ? "bg-zinc-300" : "bg-zinc-700") +
+            // the dot that just got spent (index === the new mistakesLeft) flares and drains.
+            (mistake && i === p.mistakesLeft ? " animate-dot-drain" : "")
           }
         />
       ))}
@@ -284,7 +409,7 @@ function Mistakes({ p }: { p: PlayerState }) {
 // sized for the widest case, "500pts") so the columns to the dots' right never
 // vary — the dots sit at the same x in every row, and a score pops in without
 // shifting anything.
-function FinalScore({ p }: { p: PlayerState }) {
+function FinalScore({ p, won }: { p: PlayerState; won: boolean }) {
   return (
     <span
       className={
@@ -294,7 +419,7 @@ function FinalScore({ p }: { p: PlayerState }) {
     >
       {p.done && (
         <>
-          {scoreOf(p)}
+          <ScoreNum value={scoreOf(p)} run={won} />
           <span className="ml-0.5 text-[0.62em] font-semibold tracking-[0.02em] text-zinc-500">
             pts
           </span>
@@ -319,7 +444,7 @@ function LiveTime({ p }: { p: PlayerState }) {
   return <span className={TIME + " text-zinc-400"}>{fmtElapsed(p, now)}</span>;
 }
 
-function Status({ p }: { p: PlayerState }) {
+function Status({ p, won }: { p: PlayerState; won: boolean }) {
   // ONE fixed width for every state (not min-w, and not per-state): sized for the
   // widest case — the finished mobile box, where the score stands in for the ✓/✗
   // (the icons are desktop-only) next to the time. A per-state width (finished
@@ -334,7 +459,7 @@ function Status({ p }: { p: PlayerState }) {
         (p.done === "won" ? "text-[#efefe6]" : "text-zinc-500")
       }
     >
-      {scoreOf(p)}
+      <ScoreNum value={scoreOf(p)} run={won} />
     </span>
   );
   if (p.done === "lost")
@@ -389,31 +514,44 @@ const RosterRow = memo(function RosterRow({
   p,
   rank,
   selfId,
-  flash,
+  ev,
   online,
   rowRef,
 }: {
   p: PlayerState;
   rank: number;
   selfId: string;
-  flash: boolean;
+  // transient animation events for this row (solve / mistake / win / join), or undefined.
+  ev?: RowEvents;
   online: boolean;
   // attached only to your row, so the locate arrow can scroll + pulse it.
   rowRef?: React.Ref<HTMLDivElement>;
 }) {
   const you = p.userId === selfId;
+  // Row-level one-shots: emerald glow on a solve or a win (covers the overtake highlight and the
+  // final-score green flash), a tight shake on a mistake, an ease-in for a newcomer.
+  const rowAnim =
+    (ev?.solved || ev?.won ? " animate-row-glow" : "") +
+    (ev?.mistake ? " animate-row-shake" : "") +
+    (ev?.joined ? " animate-row-in" : "");
   return (
     <div
       ref={rowRef}
       data-flip-row={p.userId}
       className={
         "relative flex flex-none items-center gap-2 rounded-[9px] px-2.5 py-2 min-[800px]:gap-2.75 min-[800px]:px-3 min-[800px]:py-2.25 " +
-        (you ? "bg-zinc-100/10" : "bg-zinc-900/60")
+        (you ? "bg-zinc-100/10" : "bg-zinc-900/60") +
+        rowAnim
       }
     >
       <Rank rank={rank} />
-      <Avatar p={p} selfId={selfId} online={online} />
-      <MiniBoard p={p} flash={flash} />
+      <Avatar
+        p={p}
+        selfId={selfId}
+        online={online}
+        picking={!you && (p.pickingWords?.length ?? 0) > 0}
+      />
+      <MiniBoard p={p} solved={!!ev?.solved} mistake={!!ev?.mistake} />
       <span
         className={
           "min-w-0 flex-1 truncate text-[13px] " +
@@ -423,9 +561,9 @@ const RosterRow = memo(function RosterRow({
         {p.name}
         {you ? " (you)" : ""}
       </span>
-      <Mistakes p={p} />
-      <FinalScore p={p} />
-      <Status p={p} />
+      <Mistakes p={p} mistake={!!ev?.mistake} />
+      <FinalScore p={p} won={!!ev?.won} />
+      <Status p={p} won={!!ev?.won} />
     </div>
   );
 });
@@ -634,7 +772,7 @@ export function Roster({
   const panelKey = `${view}:${scope ?? ""}`;
 
   const now = useNow(players.some((p) => p.done === null));
-  const flashing = useFlash(players);
+  const events = useRowEvents(players);
   const sorted = useMemo(() => sortRoster(players, now), [players, now]);
 
   // Switching tabs scrolls your row into view in the list you just opened, so you
@@ -694,7 +832,10 @@ export function Roster({
           // Own scroller (matches the standings list): flex-1 + min-h-0 lets it fill the
           // rail and overflow-y-auto scrolls internally instead of spilling past the board
           // on desktop when the live room is long (the rail is a fixed-height panel there).
-          className="flex min-h-0 flex-1 animate-tab-in flex-col gap-1.5 overflow-y-auto scrollbar-thin pb-6"
+          // overflow-y-auto forces overflow-x to clip too (CSS rule), which would shave a
+          // solving row's emerald glow ring and a mistake's shake at the left/right edges —
+          // so px-1.5 + -mx-1.5 gives the rings room to bleed while the rows stay aligned.
+          className="-mx-1.5 flex min-h-0 flex-1 animate-tab-in flex-col gap-1.5 overflow-y-auto scrollbar-thin px-1.5 pb-6"
         >
           {sorted.length ? (
             sorted.map((p, i) => {
@@ -705,7 +846,7 @@ export function Roster({
                   p={p}
                   rank={i + 1}
                   selfId={selfId}
-                  flash={flashing.has(p.userId)}
+                  ev={events.get(p.userId)}
                   online={live && !!p.online}
                   rowRef={you ? selfRowRef : undefined}
                 />

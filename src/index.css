@@ -32,9 +32,18 @@
 
   /* Defining keyframes here exposes them as `animate-*` utilities. */
   --animate-pick-ring: pickRing 1.4s ease-in-out infinite;
-  --animate-solve-flash: solveFlash 2.6s ease-in-out infinite;
   --animate-livedot: livedot 1.6s ease-in-out infinite;
   --animate-dots: dots 1.4s steps(4, end) infinite;
+  /* Live-roster motion (redesign "Roster Animation Concepts"). All ONE-SHOT — they play
+     once when a row event lands and never loop (the old solve-flash was `infinite`, which
+     is why a solved row kept flashing). A new group's bar pops in; the row glows emerald on
+     a solve/overtake; a wrong guess shakes the row and drains a mistake dot; a newcomer's
+     row eases in. */
+  --animate-mb-pop: mbPop 0.44s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-row-glow: rowGlow 1.15s ease;
+  --animate-row-shake: rowShake 0.38s ease-in-out;
+  --animate-row-in: rowIn 0.44s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-dot-drain: dotDrain 0.46s ease-out;
   --animate-overlay-fade: ovfade 0.16s ease;
   --animate-sheet-rise: sheetrise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
   /* Info-links surfaces (redesign "Desktop/Mobile Connections"): the full-screen
@@ -72,16 +81,72 @@
       transform: scale(1.06);
     }
   }
-  @keyframes solveFlash {
-    0%,
-    70%,
+  /* A newly-solved group's bar lands in the miniboard with a quick pop. */
+  @keyframes mbPop {
+    from {
+      transform: scale(0.45);
+      opacity: 0.25;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+  /* Emerald glow when a row solves a group / climbs the standings — one beat, then gone. */
+  @keyframes rowGlow {
+    0% {
+      box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+    }
+    22% {
+      box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.6);
+    }
     100% {
-      box-shadow: 0 0 0 0 transparent;
-      filter: none;
+      box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+    }
+  }
+  /* Tight horizontal shake on a wrong guess. */
+  @keyframes rowShake {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    20% {
+      transform: translateX(-5px);
+    }
+    40% {
+      transform: translateX(5px);
+    }
+    60% {
+      transform: translateX(-3px);
     }
     80% {
-      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
-      filter: brightness(1.22);
+      transform: translateX(3px);
+    }
+  }
+  /* A newcomer's row eases in (others FLIP-slide apart via FlipList). */
+  @keyframes rowIn {
+    from {
+      opacity: 0;
+      transform: translateY(-6px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  /* The mistake dot that just got spent flares red and settles. Ends with no background
+     so the dot reverts to its spent (zinc-700) fill. */
+  @keyframes dotDrain {
+    0% {
+      transform: scale(1);
+      background: #e0707a;
+    }
+    45% {
+      transform: scale(1.7);
+      background: #e0707a;
+    }
+    100% {
+      transform: scale(1);
     }
   }
   @keyframes livedot {

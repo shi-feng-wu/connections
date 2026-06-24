@@ -12,8 +12,14 @@ import { supabase } from './supabase';
 // just stop and the next load / reconnect / safety-net read reconciles. resync() rejoins the
 // channel when the Activity returns to the foreground.
 
+// Ephemeral "which tiles am I picking" sent client→client over the WebSocket (channel.send),
+// not the server REST path — so it rides the already-connected socket with the client's own
+// room JWT. Pure cosmetic, never persisted.
+export type TilesMsg = { userId: string; channelId?: string | null; selected: string[] };
+
 export type RoomLiveHandlers = {
-  onDelta: (d: RosterDelta) => void; // a player's progress/identity changed
+  onDelta: (d: RosterDelta) => void; // a player's progress/identity changed (server broadcast)
+  onTiles: (t: TilesMsg) => void; // a player's live tile selection (client broadcast)
 };
 
 type ConnectOpts = {
@@ -55,7 +61,11 @@ export class RoomLive {
         console.error('[roomlive] setAuth threw', e);
       }
       console.info('[roomlive] subscribing to room:%s', scope);
-      const channel = supabase.channel(`room:${scope}`, { config: { private: true } });
+      // self:true so the broadcaster also receives its own messages — lets a single tester
+      // confirm the round-trip without a second person.
+      const channel = supabase.channel(`room:${scope}`, {
+        config: { private: true, broadcast: { self: true } },
+      });
       channel
         .on('broadcast', { event: 'progress' }, (msg) => {
           console.info('[roomlive] rx progress', JSON.stringify(msg));
@@ -64,6 +74,10 @@ export class RoomLive {
         .on('broadcast', { event: 'join' }, (msg) => {
           console.info('[roomlive] rx join', JSON.stringify(msg));
           handlers.onDelta((msg as { payload?: RosterDelta }).payload as RosterDelta);
+        })
+        .on('broadcast', { event: 'tiles' }, (msg) => {
+          console.info('[roomlive] rx tiles', JSON.stringify(msg));
+          handlers.onTiles((msg as { payload?: TilesMsg }).payload as TilesMsg);
         })
         .subscribe((status, err) => {
           // Diagnostic: SUBSCRIBED = connected + authorized; CHANNEL_ERROR/TIMED_OUT = the
@@ -97,6 +111,14 @@ export class RoomLive {
     } catch {
       return null;
     }
+  }
+
+  // Push the caller's live tile selection to the room over the WebSocket (client→client, not the
+  // server REST path). No-op until the channel is joined; a drop just means others stop seeing
+  // your picks until you reselect.
+  sendTiles(t: TilesMsg): void {
+    if (!this.channel || !this.live) return;
+    void this.channel.send({ type: 'broadcast', event: 'tiles', payload: t });
   }
 
   // Re-establish after a likely drop (the socket can die silently on backgrounding without a

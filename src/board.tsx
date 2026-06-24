@@ -603,6 +603,8 @@ export type BoardSnapshot = {
   mistakesLeft: number;
   solvedLevels: number[];
   picking: boolean;
+  // Currently-selected (not yet submitted) words, for the live "see them picking" broadcast.
+  selected?: string[];
   done: "won" | "lost" | null;
 };
 
@@ -801,6 +803,7 @@ export function Board({
       mistakesLeft: game.mistakesLeft,
       solvedLevels: real,
       picking: game.status === "playing" && selected.current.size > 0,
+      selected: game.status === "playing" ? [...selected.current] : [],
       done: game.status === "playing" ? null : game.status,
     });
   }

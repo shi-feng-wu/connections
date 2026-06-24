@@ -24,6 +24,9 @@ export type PlayerState = {
   // green "online" ring. A player who joined and then left stays in the roster with this
   // unset/false. On the Realtime path the live source is channel Presence, not this.
   online?: boolean;
+  // Words this player currently has selected but hasn't submitted — live over Realtime
+  // broadcast (Wordle-style "see them picking"). Client-only; never set by the server roster.
+  pickingWords?: string[];
 };
 
 // A partial roster update fanned out over Realtime broadcast (api/_realtime.ts) on each guess

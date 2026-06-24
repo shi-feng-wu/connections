@@ -15,7 +15,7 @@ import {
 import type { PlayerState, RosterDelta } from "./player";
 import { Landing } from "./landing";
 import { type PresenceInput, presenceSignature, setPresence } from "./presence";
-import { RoomLive } from "./roomlive";
+import { RoomLive, type TilesMsg } from "./roomlive";
 import { canonicalScope } from "./scope";
 import type { Standings } from "./season";
 import { supabaseEnabled } from "./supabase";
@@ -236,6 +236,9 @@ export function App({
   // else (finishers/abandoners who've left) doesn't. You're in it yourself, so your own ring
   // falls out naturally.
   const [participantIds, setParticipantIds] = useState<Set<string>>(new Set());
+  // Live tile selection per player (Wordle-style "picking"), from the WS broadcast. Merged into
+  // the roster memo; cleared to [] when a player deselects or submits.
+  const [pickingByUser, setPickingByUser] = useState<Record<string, string[]>>({});
   // End-screen room leaderboard, two windows; fetched after a finish posts and on load.
   const [season, setSeason] = useState<Standings>(EMPTY_STANDINGS);
   const [allTime, setAllTime] = useState<Standings>(EMPTY_STANDINGS);
@@ -307,6 +310,14 @@ export function App({
     };
     setSelf(player);
     pushPresence();
+    // Live tile selection to the room over the WS (client→client; see roomlive.sendTiles).
+    if (isDailyRef.current) {
+      roomLiveRef.current?.sendTiles({
+        userId: meRef.current.id,
+        channelId: channelIdRef.current,
+        selected: snap.selected ?? [],
+      });
+    }
   }
 
   // Mirror the game onto the player's Discord profile (Rich Presence). Embedded
@@ -404,6 +415,21 @@ export function App({
     }
     console.info("[roomlive] applyDelta MERGED", d.userId);
     setServerRoster((prev) => mergeDelta(prev, d));
+  }
+
+  // A live tile-selection broadcast arrived — store it per player for the roster to render.
+  function handleTiles(t: TilesMsg): void {
+    if (
+      scopeModeRef.current === "channel" &&
+      guildIdRef.current &&
+      t.channelId &&
+      channelIdRef.current &&
+      t.channelId !== channelIdRef.current
+    ) {
+      return;
+    }
+    console.info("[roomlive] handleTiles", t.userId, t.selected);
+    setPickingByUser((prev) => ({ ...prev, [t.userId]: t.selected }));
   }
 
   function onFinish(): void {
@@ -862,7 +888,7 @@ export function App({
       accessToken,
       guildId: guildIdRef.current,
       channelId: channelIdRef.current,
-      handlers: { onDelta: applyDelta },
+      handlers: { onDelta: applyDelta, onTiles: handleTiles },
     });
   }, [phase, isEmbedded]);
 
@@ -932,8 +958,9 @@ export function App({
     return [...byId.values()].map((p) => ({
       ...p,
       online: p.userId === meRef.current.id ? true : participantIds.has(p.userId),
+      pickingWords: pickingByUser[p.userId],
     }));
-  }, [serverRoster, self, participantIds]);
+  }, [serverRoster, self, participantIds, pickingByUser]);
 
   // Live leaderboard, the near-real-time path: when another player wraps the daily their
   // season/all-time totals change server-side a beat later (once their score write lands),

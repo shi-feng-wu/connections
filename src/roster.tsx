@@ -413,6 +413,18 @@ const RosterRow = memo(function RosterRow({
         {p.name}
         {you ? " (you)" : ""}
       </span>
+      {p.pickingWords && p.pickingWords.length > 0 ? (
+        <span className="flex flex-none gap-0.5">
+          {p.pickingWords.map((w) => (
+            <span
+              key={w}
+              className="rounded bg-amber-400 px-1 py-0.5 text-[9px] font-bold leading-none text-black"
+            >
+              {w.slice(0, 4)}
+            </span>
+          ))}
+        </span>
+      ) : null}
       <Mistakes p={p} />
       <FinalScore p={p} />
       <Status p={p} />

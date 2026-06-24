@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -446,13 +447,6 @@ function UtilitySheet({
   onClose: () => void;
 }): ReactNode {
   useScrollLock();
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   // Swipe-to-dismiss. The sheet follows the finger downward (never up); on release it
   // dismisses if dragged far enough or flicked, else snaps back. The scrim fades with the
@@ -460,6 +454,34 @@ function UtilitySheet({
   // swallow the click after any real drag so a downward swipe never opens a row.
   const sheetRef = useRef<HTMLDivElement>(null);
   const scrimRef = useRef<HTMLDivElement>(null);
+  const closing = useRef(false);
+
+  // Animated dismiss: slide the sheet down + fade the scrim, then unmount. Every "close"
+  // gesture (scrim tap, Escape, swipe-flick) runs through here so the sheet never just
+  // vanishes. Idempotent — a second trigger mid-animation is ignored.
+  const animateOut = useCallback((): void => {
+    if (closing.current) return;
+    closing.current = true;
+    const el = sheetRef.current;
+    if (el) {
+      el.style.transition = "transform 0.22s ease-out";
+      el.style.transform = "translateY(110%)";
+    }
+    if (scrimRef.current) {
+      scrimRef.current.style.transition = "opacity 0.22s ease-out";
+      scrimRef.current.style.opacity = "0";
+    }
+    window.setTimeout(onClose, 200);
+  }, [onClose]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") animateOut();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [animateOut]);
+
   const drag = useRef({
     startY: 0,
     down: false,
@@ -515,16 +537,15 @@ function UtilitySheet({
     const el = sheetRef.current;
     if (!el) return;
     const dismiss = d.dy > 80 || (d.vy > 0.6 && d.dy > 24);
-    el.style.transition = "transform 0.22s ease-out";
-    if (scrimRef.current)
-      scrimRef.current.style.transition = "opacity 0.22s ease-out";
     if (dismiss) {
-      el.style.transform = "translateY(110%)";
-      if (scrimRef.current) scrimRef.current.style.opacity = "0";
-      window.setTimeout(onClose, 190);
+      animateOut();
     } else {
+      el.style.transition = "transform 0.22s ease-out";
       el.style.transform = "translateY(0)";
-      if (scrimRef.current) scrimRef.current.style.opacity = "1";
+      if (scrimRef.current) {
+        scrimRef.current.style.transition = "opacity 0.22s ease-out";
+        scrimRef.current.style.opacity = "1";
+      }
     }
   };
 
@@ -532,7 +553,7 @@ function UtilitySheet({
     <div
       ref={scrimRef}
       className="fixed inset-0 z-50 flex animate-overlay-fade items-end justify-center bg-[rgba(6,6,8,0.62)] backdrop-blur-[3px]"
-      onClick={onClose}
+      onClick={animateOut}
     >
       <div
         ref={sheetRef}

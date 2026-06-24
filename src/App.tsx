@@ -239,6 +239,9 @@ export function App({
   // Live tile selection per player (Wordle-style "picking"), from the WS broadcast. Merged into
   // the roster memo; cleared to [] when a player deselects or submits.
   const [pickingByUser, setPickingByUser] = useState<Record<string, string[]>>({});
+  // Pickers we've already pulled a fresh roster read for (their join broadcast was missed), so a
+  // burst of their tile messages triggers exactly one refetch, not one per message.
+  const tileFetchRequested = useRef<Set<string>>(new Set());
   // End-screen room leaderboard, two windows; fetched after a finish posts and on load.
   const [season, setSeason] = useState<Standings>(EMPTY_STANDINGS);
   const [allTime, setAllTime] = useState<Standings>(EMPTY_STANDINGS);
@@ -429,10 +432,16 @@ export function App({
       return;
     }
     console.info("[roomlive] handleTiles", t.userId, t.selected);
-    // Pure cosmetic overlay: paint the selection onto the player's existing roster row. If they
-    // aren't in the roster yet, their join broadcast / the cold-start read brings them in (their
-    // tiles render once their row exists) — we don't synthesize a row from a tile message.
+    // Pure cosmetic overlay: paint the selection onto the player's existing roster row.
     setPickingByUser((prev) => ({ ...prev, [t.userId]: t.selected }));
+    // If we don't have this picker yet — their join broadcast landed before we subscribed and the
+    // cold-start read missed them — pull the authoritative roster once (they really opened the
+    // room, so the read includes their real row). We never synthesize a row from tile data.
+    const known = serverRosterRef.current.some((p) => p.userId === t.userId);
+    if (!known && t.userId !== meRef.current.id && !tileFetchRequested.current.has(t.userId)) {
+      tileFetchRequested.current.add(t.userId);
+      void fetchServerRoster();
+    }
   }
 
   function onFinish(): void {

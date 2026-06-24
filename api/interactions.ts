@@ -413,17 +413,27 @@ async function shareResponse(body: LaunchInteraction): Promise<object> {
   };
 }
 
-// The /unsubscribe reply, by outcome. Always ephemeral — it's a config action only the invoker
-// needs to see, not a channel post. "done" confirms the opt-out and the auto-re-arm; "no-guild"
-// fires in a DM/non-guild surface where there's no channel recap to silence; "error" is a DB
-// hiccup. Pure so it's unit-testable without a request (unsubscribeResponse does the DB write).
-// Exported for tests.
-export function unsubscribeResult(kind: "done" | "no-guild" | "error"): object {
+// The /unsubscribe reply, by outcome. "done" is a PUBLIC channel post (no ephemeral flag) so the
+// channel sees the recap was turned off and how to undo/permanently mute it. The rest stay
+// ephemeral so re-runs and edge cases don't post noise: "already" (recaps were already off and
+// haven't been re-armed by a launch since — so a re-run doesn't re-post the public confirmation),
+// "no-guild" (a DM/non-guild surface with no channel recap to silence), and "error" (a DB hiccup).
+// Pure so it's unit-testable without a request (unsubscribeResponse does the DB write). Exported.
+export function unsubscribeResult(kind: "done" | "already" | "no-guild" | "error"): object {
+  if (kind === "done") {
+    return {
+      type: CHANNEL_MESSAGE_WITH_SOURCE,
+      data: {
+        content:
+          "### Recaps off for this channel\n" +
+          "The daily recap won’t post here anymore. It turns back on automatically the next time someone launches Connections in this channel.\n" +
+          "If you want to permanently mute it, just don’t give the bot **View Channel** permission for the channel.",
+      },
+    };
+  }
   const content =
-    kind === "done"
-      ? "### Recaps off for this channel\n" +
-        "The **daily recap** won’t post here anymore. It turns back on automatically the next " +
-        "time someone launches Connections in this channel."
+    kind === "already"
+      ? "Recaps are already off in this channel — they’ll come back if someone launches Connections here again."
       : kind === "no-guild"
         ? "### Nothing to turn off here\n" +
           "`/unsubscribe` only does something in a server channel — that’s the only place the daily recap posts."
@@ -456,18 +466,23 @@ async function unsubscribeResponse(body: LaunchInteraction): Promise<object> {
   if (!db) return unsubscribeResult("error");
 
   const u = body.member?.user ?? body.user;
-  const { error } = await db.from("recap_optouts").upsert(
-    {
-      scope_id: scope,
-      channel_id: channelId,
-      opted_out_by: u?.id ?? null,
-      opted_out_at: new Date().toISOString(),
-    },
-    { onConflict: "scope_id,channel_id" },
-  );
+  // Plain insert (not upsert): a unique violation (23505) means this channel was ALREADY opted
+  // out and hasn't been re-armed by a launch since — so report "already off" rather than re-post
+  // the public confirmation. A launch in the meantime deletes the row (postCard), so a genuine
+  // re-subscribe-then-unsubscribe inserts cleanly and reads "done" again.
+  const { error } = await db.from("recap_optouts").insert({
+    scope_id: scope,
+    channel_id: channelId,
+    opted_out_by: u?.id ?? null,
+    opted_out_at: new Date().toISOString(),
+  });
   if (error) {
+    if (error.code === "23505") {
+      console.log("[unsubscribe] already opted out", { scope, channel: channelId });
+      return unsubscribeResult("already");
+    }
     console.error(
-      "[unsubscribe] upsert error (schema migrated?)",
+      "[unsubscribe] insert error (schema migrated?)",
       error.message,
     );
     return unsubscribeResult("error");

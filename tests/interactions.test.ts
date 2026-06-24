@@ -228,21 +228,28 @@ describe("installNudgePayload", () => {
   });
 });
 
-// /unsubscribe replies are all ephemeral (a config action, not a channel post). "done" confirms
-// the opt-out and tells the user it re-arms on the next launch; "no-guild" is the DM case.
+// /unsubscribe replies: "done" is a PUBLIC channel post (the channel sees recaps were turned off
+// + how to permanently mute); "no-guild"/"error" stay ephemeral so they don't post noise.
 describe("unsubscribeResult", () => {
-  const data = (kind: "done" | "no-guild" | "error") =>
+  const data = (kind: "done" | "already" | "no-guild" | "error") =>
     (unsubscribeResult(kind) as { type: number; data: { flags?: number; content?: string } });
 
-  it("confirms the opt-out ephemerally and mentions the auto re-arm", () => {
+  it("confirms the opt-out publicly, with the auto re-arm and the permanent-mute tip", () => {
     const r = data("done");
     expect(r.type).toBe(4); // CHANNEL_MESSAGE_WITH_SOURCE
-    expect(r.data.flags).toBe(64); // ephemeral
+    expect(r.data.flags).toBeUndefined(); // public, not ephemeral
     expect(r.data.content).toContain("won’t post here");
     expect(r.data.content).toContain("turns back on"); // re-arms on the next launch
+    expect(r.data.content).toContain("View Channel"); // permanent-mute path
   });
 
-  it("explains there's nothing to turn off in a DM/non-guild surface", () => {
+  it("tells a re-runner recaps are already off — ephemerally, so it doesn't re-post", () => {
+    const r = data("already");
+    expect(r.data.flags).toBe(64); // ephemeral — no duplicate public confirmation
+    expect(r.data.content).toContain("already off");
+  });
+
+  it("explains there's nothing to turn off in a DM/non-guild surface (ephemeral)", () => {
     const r = data("no-guild");
     expect(r.data.flags).toBe(64);
     expect(r.data.content).toContain("server channel");

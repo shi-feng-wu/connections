@@ -694,10 +694,7 @@ export function Roster({
           // Own scroller (matches the standings list): flex-1 + min-h-0 lets it fill the
           // rail and overflow-y-auto scrolls internally instead of spilling past the board
           // on desktop when the live room is long (the rail is a fixed-height panel there).
-          // The bottom fade is desktop-only: on mobile the column grows with its content
-          // (the PAGE scrolls, this list never does), so a fade would dim the last row
-          // while falsely implying more rows inside the box.
-          className="flex min-h-0 flex-1 animate-tab-in flex-col gap-1.5 overflow-y-auto scrollbar-thin pb-6 min-[800px]:list-fade"
+          className="flex min-h-0 flex-1 animate-tab-in flex-col gap-1.5 overflow-y-auto scrollbar-thin pb-6"
         >
           {sorted.length ? (
             sorted.map((p, i) => {

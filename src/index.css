@@ -253,13 +253,6 @@
   }
 }
 
-/* Soft fade on the bottom edge of the scrollable players/leaderboard list, so it
-   reads as scrollable while the pinned "Your standing" row below stays crisp. */
-@utility list-fade {
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
-}
-
 /* Thin dark scrollbar; Firefox + WebKit pieces can't be inline utilities. */
 @utility scrollbar-thin {
   scrollbar-width: thin;

@@ -172,7 +172,7 @@ function LedgerRow({
             (you ? "font-bold text-zinc-100" : "text-[#d4d4d8]")
           }
         >
-          {e.name + (you ? " (you)" : "")}
+          {e.name}
         </span>
       </div>
       <div className="text-right text-[15px]">

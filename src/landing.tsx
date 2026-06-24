@@ -354,8 +354,8 @@ export function DemoRoster() {
   return (
     // Fixed-height flex column — the rail's own panel mode: both tab panels are
     // flex-1/min-h-0, so the Live list fills the box exactly (382px = tabs + 6
-    // rows, measured) and the taller Season table scrolls internally under its
-    // list-fade instead of growing the page. The flip can't move anything.
+    // rows, measured) and the taller Season table scrolls internally instead of
+    // growing the page. The flip can't move anything.
     <div
       aria-hidden
       data-demo-roster

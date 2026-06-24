@@ -6,6 +6,10 @@
   badge and sets the app version, so add a new release at the very top.
 -->
 
+## v1.9 — Jun 24, 2026
+
+- If the bot can’t post in your channel (usually a private one), launching the game there now shows a private tip with the exact permissions to grant, so the recap and who’s-playing card can appear.
+
 ## v1.8 — Jun 24, 2026
 
 - Channel moderators can now run /unsubscribe to stop the daily recap from posting in a channel. It turns back on by itself if someone plays there again.

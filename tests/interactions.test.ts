@@ -1,7 +1,7 @@
 import { generateKeyPairSync, sign as edSign } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { Game, LEVELS, type Puzzle } from "../src/game";
-import { installNudgePayload, isUserInstallOnly, routeInteraction, shareCard, unsubscribeResult, verifyDiscordSig } from "../api/interactions";
+import { botCanPostInChannel, installNudgePayload, isUserInstallOnly, missingPermsNudgePayload, routeInteraction, shareCard, unsubscribeResult, verifyDiscordSig } from "../api/interactions";
 
 // api/interactions.ts: Discord signs every interaction (Ed25519); an unverified
 // request must be refused, and the recap's Play button must map to a launch.
@@ -281,5 +281,55 @@ describe("isUserInstallOnly", () => {
   it("is false (proceeds) when the field is absent or empty", () => {
     expect(isUserInstallOnly({})).toBe(false);
     expect(isUserInstallOnly({ authorizing_integration_owners: {} })).toBe(false);
+  });
+});
+
+// botCanPostInChannel reads the bot's effective channel permissions off the interaction's
+// app_permissions bitfield. The card/recap are PNG attachments, so it needs View Channel +
+// Send Messages + Attach Files — short any one (e.g. a private channel the bot's role isn't in)
+// and the recap silently 403s. Bitfield is compared as BigInt.
+describe("botCanPostInChannel", () => {
+  const VIEW = 1n << 10n, SEND = 1n << 11n, ATTACH = 1n << 15n, ADMIN = 1n << 3n;
+
+  it("is true when View Channel + Send Messages + Attach Files are all present", () => {
+    expect(botCanPostInChannel(String(VIEW | SEND | ATTACH))).toBe(true);
+  });
+
+  it("is false when Attach Files is missing (the card/recap are image attachments)", () => {
+    expect(botCanPostInChannel(String(VIEW | SEND))).toBe(false);
+  });
+
+  it("is false when View Channel is missing (a private channel the bot isn't allowed into)", () => {
+    expect(botCanPostInChannel(String(SEND | ATTACH))).toBe(false);
+  });
+
+  it("is true for Administrator (implies every permission)", () => {
+    expect(botCanPostInChannel(String(ADMIN))).toBe(true);
+  });
+
+  it("fails OPEN (true) on an absent or unparseable field, so it never wrongly nudges", () => {
+    expect(botCanPostInChannel(undefined)).toBe(true);
+    expect(botCanPostInChannel("")).toBe(true);
+    expect(botCanPostInChannel("not-a-number")).toBe(true);
+  });
+});
+
+// The ephemeral "I can't post in this channel" nudge: names the three permissions the recap/card
+// need and carries no button (granting channel permissions is a settings action, not a link).
+describe("missingPermsNudgePayload", () => {
+  const p = missingPermsNudgePayload() as { flags?: number; content?: string; components?: unknown[] };
+
+  it("is ephemeral (only the launcher sees it)", () => {
+    expect(p.flags).toBe(64);
+  });
+
+  it("names the three permissions the recap/card need", () => {
+    expect(p.content).toContain("View Channel");
+    expect(p.content).toContain("Send Messages");
+    expect(p.content).toContain("Attach Files");
+  });
+
+  it("has no button — granting channel permissions is a Discord settings action, not a link", () => {
+    expect(p.components).toBeUndefined();
   });
 });

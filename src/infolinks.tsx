@@ -187,6 +187,20 @@ function Faq(): ReactNode {
           whenever a game starts.
         </p>
       </QA>
+
+      <QA q="The recap or card isn't showing up in our channel?">
+        <p className="m-0">
+          The bot’s in your server but can’t post in that specific channel —
+          almost always a <b className={BOLD}>private channel</b> its role was
+          never added to. Open the channel’s settings, go to{" "}
+          <b className={BOLD}>Permissions</b>, and give the{" "}
+          <b className={BOLD}>Connections</b> bot (or its role){" "}
+          <b className={BOLD}>View Channel</b>,{" "}
+          <b className={BOLD}>Send Messages</b>, and{" "}
+          <b className={BOLD}>Attach Files</b>. The next nightly recap posts on
+          its own.
+        </p>
+      </QA>
     </div>
   );
 }

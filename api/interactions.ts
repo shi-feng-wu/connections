@@ -519,6 +519,26 @@ export function installNudgePayload(appId: string): object {
   };
 }
 
+// The ephemeral nudge a launcher gets when the bot IS in the server but can't post in THIS
+// channel — almost always a private channel the bot's role was never added to. The live card may
+// still appear (a command's followup rides the interaction token, not the bot's own channel
+// access), but the bot's direct posts — the nightly recap, and in-window card refreshes —
+// silently 403, so the recap never shows up. We ask, privately, for exactly the permissions those
+// posts need. No button: granting a channel's permissions is a Discord settings action, not an
+// OAuth link the way "Add to Server" is. Exported for tests.
+export function missingPermsNudgePayload(): object {
+  return {
+    content:
+      "### I can’t post in this channel\n" +
+      "Connections is added to this server, but I don’t have permission to post in this channel — " +
+      "so the nightly **recap** and the live **“who’s playing”** card can’t show up here.\n" +
+      "Ask a moderator to give the **Connections** bot (or its role) these permissions on this channel:\n" +
+      "**View Channel** · **Send Messages** · **Attach Files**\n" +
+      "-# Usually this is a private channel the bot’s role hasn’t been added to — open the channel’s settings → Permissions.",
+    flags: EPHEMERAL,
+  };
+}
+
 // Whether this interaction was authorized ONLY as a user install — the app is on the user's
 // account, not installed to this guild, so the bot isn't a member and can't post/edit the
 // card (it would 403 with Missing Access). authorizing_integration_owners keys the install
@@ -532,6 +552,34 @@ export function isUserInstallOnly(body: {
   const owners = body.authorizing_integration_owners;
   if (!owners || typeof owners !== "object") return false;
   return "1" in owners && !("0" in owners);
+}
+
+// Discord permission bits the card/recap need in a channel (compared as BigInt — the bitfield
+// exceeds 2^53). Both the live "who's playing" card and the nightly recap are PNG attachments,
+// so Attach Files is required alongside View Channel + Send Messages.
+const PERM_ADMINISTRATOR = 1n << 3n;
+const PERM_VIEW_CHANNEL = 1n << 10n;
+const PERM_SEND_MESSAGES = 1n << 11n;
+const PERM_ATTACH_FILES = 1n << 15n;
+
+// Whether the bot can post the card/recap in the channel an interaction came from, read straight
+// from Discord's app_permissions (the bot's already-computed effective permissions there — no API
+// call). This is what separates "bot is in the server but can't post in THIS channel" — typically
+// a private channel the bot's role was never added to, where the nightly recap then silently 403s
+// — from a healthy channel. Administrator implies everything. An absent or unparseable field fails
+// OPEN (returns true), so we never wrongly nudge where the bot can in fact post, matching
+// postCard's "proceed when unsure" posture elsewhere. Exported for tests.
+export function botCanPostInChannel(appPermissions?: string): boolean {
+  if (!appPermissions) return true;
+  let bits: bigint;
+  try {
+    bits = BigInt(appPermissions);
+  } catch {
+    return true;
+  }
+  if (bits & PERM_ADMINISTRATOR) return true;
+  const need = PERM_VIEW_CHANNEL | PERM_SEND_MESSAGES | PERM_ATTACH_FILES;
+  return (bits & need) === need;
 }
 
 // Fields we read off the launch interaction beyond the routing ones above.
@@ -553,6 +601,10 @@ type LaunchInteraction = Interaction & {
   message?: { id?: string };
   // Which install types authorized this interaction: "0" = guild install, "1" = user install.
   authorizing_integration_owners?: Record<string, string>;
+  // The bot's already-computed effective permissions in the channel this interaction came from,
+  // as a decimal bitfield string. Discord hands this to us, so we can tell a channel the bot
+  // can't post in (a private channel its role isn't allowed into) without an extra API call.
+  app_permissions?: string;
 };
 
 // Post or refresh the room's "who's playing" card. At most one card per room every ~2h
@@ -601,6 +653,20 @@ async function postCard(body: LaunchInteraction): Promise<void> {
     });
     await nudgeInstall(body, scope, appId, token);
     return;
+  }
+
+  // Guild-installed, but maybe not allowed to post in THIS channel — typically a private channel
+  // the bot's role was never added to. Discord hands us the bot's channel permissions on the
+  // interaction, so we check with no extra call: if the bot can't post the card/recap here,
+  // privately nudge the launcher to grant access. We DON'T return — a command launch's followup
+  // card rides the interaction token and can still post (so the live card may appear); it's the
+  // bot's own recap and in-window edits that 403, and this nudge is what gets those unblocked.
+  if (!botCanPostInChannel(body.app_permissions)) {
+    console.log("[card] bot lacks post permission in channel; nudging", {
+      scope,
+      channel: channelId,
+    });
+    await nudgeOnce(body, scope, appId, token, missingPermsNudgePayload(), "perms");
   }
 
   // Identity comes from the (Discord-verified) interaction, so no OAuth round-trip.
@@ -796,17 +862,22 @@ async function postCard(body: LaunchInteraction): Promise<void> {
     console.warn("[card] recap_optouts clear failed", optErr.message);
 }
 
-// Show the launcher of a bot-less server the ephemeral "Add to Server" pitch, at most once
-// per (room, player) per cooldown. The throttle row is claimed BEFORE the followup is sent,
-// so a double-fired interaction can't double-nudge; a send that then fails just waits out
-// the cooldown (better than risking spam the other way around). Any DB error — including
-// the install_nudges table not existing yet — skips the nudge entirely: this is a growth
-// nicety and must never noise up a launch.
-async function nudgeInstall(
+// Send an ephemeral followup to the launcher at most once per (scope, player) per
+// INSTALL_NUDGE_COOLDOWN_MS, recording the send in install_nudges. Shared by the bot-less
+// "Add to Server" nudge and the can't-post-here permissions nudge — a guild is only ever one
+// of those (bot absent vs. bot present but blocked), so they safely share the throttle table.
+// The throttle row is claimed BEFORE the followup is sent, so a double-fired interaction can't
+// double-nudge; a send that then fails just waits out the cooldown (better than risking spam the
+// other way around). Any DB error — including the install_nudges table not existing yet — skips
+// the nudge entirely: this is a growth/help nicety and must never noise up a launch. `tag` only
+// labels the logs.
+async function nudgeOnce(
   body: LaunchInteraction,
   scope: string,
   appId: string,
   token: string,
+  payload: object,
+  tag: string,
 ): Promise<void> {
   const u = body.member?.user ?? body.user;
   if (!u?.id) return;
@@ -820,10 +891,7 @@ async function nudgeInstall(
     .eq("user_id", u.id)
     .maybeSingle();
   if (selErr) {
-    console.warn(
-      "[nudge] skip: select failed (table missing?)",
-      selErr.message,
-    );
+    console.warn(`[${tag}] skip: select failed (table missing?)`, selErr.message);
     return;
   }
   const last = row?.nudged_at ? Date.parse(row.nudged_at as string) : null;
@@ -835,22 +903,29 @@ async function nudgeInstall(
     nudged_at: new Date().toISOString(),
   });
   if (upErr) {
-    console.warn("[nudge] skip: claim failed", upErr.message);
+    console.warn(`[${tag}] skip: claim failed`, upErr.message);
     return;
   }
 
   const r = await fetch(interactionFollowupUrl(appId, token), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(installNudgePayload(appId)),
+    body: JSON.stringify(payload),
   });
   if (!r.ok)
-    console.error(
-      "[nudge] followup failed",
-      { status: r.status },
-      await r.text().catch(() => ""),
-    );
-  else console.log("[nudge] sent", { scope, user: u.id });
+    console.error(`[${tag}] followup failed`, { status: r.status }, await r.text().catch(() => ""));
+  else console.log(`[${tag}] sent`, { scope, channel: body.channel_id, user: u.id });
+}
+
+// Show the launcher of a bot-less server the ephemeral "Add to Server" pitch — the highest-intent
+// install moment there is (someone is actively playing where recaps can't post).
+async function nudgeInstall(
+  body: LaunchInteraction,
+  scope: string,
+  appId: string,
+  token: string,
+): Promise<void> {
+  await nudgeOnce(body, scope, appId, token, installNudgePayload(appId), "nudge");
 }
 
 async function rawBody(req: VercelRequest): Promise<string> {

@@ -6,6 +6,10 @@
   badge and sets the app version, so add a new release at the very top.
 -->
 
+## v1.8 — Jun 24, 2026
+
+- Channel moderators can now run /unsubscribe to stop the daily recap from posting in a channel. It turns back on by itself if someone plays there again.
+
 ## v1.7 — Jun 24, 2026
 
 - The live roster now updates instantly, and you can see other players clicking tiles now.

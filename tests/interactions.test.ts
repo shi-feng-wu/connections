@@ -1,7 +1,7 @@
 import { generateKeyPairSync, sign as edSign } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { Game, LEVELS, type Puzzle } from "../src/game";
-import { installNudgePayload, isUserInstallOnly, routeInteraction, shareCard, verifyDiscordSig } from "../api/interactions";
+import { installNudgePayload, isUserInstallOnly, routeInteraction, shareCard, unsubscribeResult, verifyDiscordSig } from "../api/interactions";
 
 // api/interactions.ts: Discord signs every interaction (Ed25519); an unverified
 // request must be refused, and the recap's Play button must map to a launch.
@@ -225,6 +225,33 @@ describe("installNudgePayload", () => {
     expect(btn?.label).toBe("Add to Server");
     expect(btn?.url).toContain("client_id=app123");
     expect(btn?.url).toContain("integration_type=0");
+  });
+});
+
+// /unsubscribe replies are all ephemeral (a config action, not a channel post). "done" confirms
+// the opt-out and tells the user it re-arms on the next launch; "no-guild" is the DM case.
+describe("unsubscribeResult", () => {
+  const data = (kind: "done" | "no-guild" | "error") =>
+    (unsubscribeResult(kind) as { type: number; data: { flags?: number; content?: string } });
+
+  it("confirms the opt-out ephemerally and mentions the auto re-arm", () => {
+    const r = data("done");
+    expect(r.type).toBe(4); // CHANNEL_MESSAGE_WITH_SOURCE
+    expect(r.data.flags).toBe(64); // ephemeral
+    expect(r.data.content).toContain("won’t post here");
+    expect(r.data.content).toContain("turns back on"); // re-arms on the next launch
+  });
+
+  it("explains there's nothing to turn off in a DM/non-guild surface", () => {
+    const r = data("no-guild");
+    expect(r.data.flags).toBe(64);
+    expect(r.data.content).toContain("server channel");
+  });
+
+  it("is an ephemeral apology on a DB error", () => {
+    const r = data("error");
+    expect(r.data.flags).toBe(64);
+    expect(r.data.content).toContain("try `/unsubscribe` again");
   });
 });
 

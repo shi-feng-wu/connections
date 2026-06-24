@@ -382,6 +382,23 @@ end $$;
 
 alter table public.recap_posts enable row level security;
 
+-- Recap opt-out: one row per (scope, channel) a moderator silenced with /unsubscribe, so the
+-- daily recap stops posting there. recap_channels() subtracts this set below, so a listed
+-- channel drops out of the nightly run even though its live_cards row still exists. It re-arms
+-- the moment the Activity is launched in that channel again — postCard (api/interactions.ts)
+-- deletes the row when it (re)establishes the "who's playing" card — matching "off until
+-- someone starts the activity here again". Written only by the service role (the /unsubscribe
+-- handler and postCard); RLS with no policy denies the anon key entirely.
+create table if not exists public.recap_optouts (
+  scope_id      text        not null,
+  channel_id    text        not null,
+  opted_out_by  text,                                   -- the user who ran /unsubscribe (audit)
+  opted_out_at  timestamptz not null default now(),
+  primary key (scope_id, channel_id)
+);
+
+alter table public.recap_optouts enable row level security;
+
 -- One row per player for a single puzzle in one room, ranked richest-first
 -- (solved before unsolved, then score, fewer mistakes, faster). Backs the daily
 -- recap's "yesterday's results" block. Mirrors season_standings' shape/style.
@@ -424,6 +441,8 @@ grant execute on function public.day_results(text, date, text) to anon, authenti
 -- also include user-install servers with no bot: those 403 at post time (the vast majority)
 -- and spam the run. So a channel with an established habit still gets a card ("nobody got it…
 -- new day") on a quiet day, but only where the bot can actually post. g: scopes only.
+-- Channels a moderator silenced with /unsubscribe (a recap_optouts row) are subtracted, so the
+-- nightly run skips them until the Activity is launched there again (which clears the opt-out).
 drop function if exists public.recap_channels();
 create or replace function public.recap_channels()
 returns table (scope_id text, channel_id text)
@@ -432,7 +451,11 @@ stable
 as $$
   select distinct l.scope_id, l.channel_id
   from public.live_cards l
-  where l.scope_id like 'g:%' and l.channel_id is not null and l.message_id is not null;
+  where l.scope_id like 'g:%' and l.channel_id is not null and l.message_id is not null
+    and not exists (
+      select 1 from public.recap_optouts o
+      where o.scope_id = l.scope_id and o.channel_id = l.channel_id
+    );
 $$;
 
 grant execute on function public.recap_channels() to anon, authenticated;

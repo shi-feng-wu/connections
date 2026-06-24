@@ -65,6 +65,12 @@ const SHARE_COMMAND = "share";
 // in sync with the Ko-fi link in src/infolinks.tsx.
 const DONATE_COMMAND = "donate";
 const KOFI_URL = "https://ko-fi.com/borgardev";
+// The "/unsubscribe" command: a moderator silences the daily recap in the channel it's run in.
+// It writes a recap_optouts row that recap_channels() subtracts, so the nightly cron skips this
+// channel — until someone launches the Activity here again, which clears the row (see postCard).
+// Registered guild-install only + Manage Channels gated (scripts/register-commands.mjs), so it
+// only appears where the bot can post recaps and only for members who can configure the channel.
+const UNSUBSCRIBE_COMMAND = "unsubscribe";
 // Guild-install permissions for that button's URL — KEEP IN SYNC with scripts/configure-install.mjs
 // (View Channel | Send Messages | Embed Links | Attach Files | Read Message History).
 const INSTALL_PERMISSIONS = "117760";
@@ -137,6 +143,13 @@ function isPlayButton(body: Interaction): boolean {
 function isShareCommand(body: Interaction): boolean {
   return (
     body.type === APPLICATION_COMMAND && body.data?.name === SHARE_COMMAND
+  );
+}
+
+// The "/unsubscribe" slash command — silences the daily recap in this channel (a DB write).
+function isUnsubscribeCommand(body: Interaction): boolean {
+  return (
+    body.type === APPLICATION_COMMAND && body.data?.name === UNSUBSCRIBE_COMMAND
   );
 }
 
@@ -398,6 +411,69 @@ async function shareResponse(body: LaunchInteraction): Promise<object> {
       components: shareCard(game, { puzzleNo: puzzle.id, durationMs, score }),
     },
   };
+}
+
+// The /unsubscribe reply, by outcome. Always ephemeral — it's a config action only the invoker
+// needs to see, not a channel post. "done" confirms the opt-out and the auto-re-arm; "no-guild"
+// fires in a DM/non-guild surface where there's no channel recap to silence; "error" is a DB
+// hiccup. Pure so it's unit-testable without a request (unsubscribeResponse does the DB write).
+// Exported for tests.
+export function unsubscribeResult(kind: "done" | "no-guild" | "error"): object {
+  const content =
+    kind === "done"
+      ? "### Recaps off for this channel\n" +
+        "The **daily recap** won’t post here anymore. It turns back on automatically the next " +
+        "time someone launches Connections in this channel."
+      : kind === "no-guild"
+        ? "### Nothing to turn off here\n" +
+          "`/unsubscribe` only does something in a server channel — that’s the only place the daily recap posts."
+        : "Couldn’t update recaps for this channel just now — try `/unsubscribe` again in a moment.";
+  return {
+    type: CHANNEL_MESSAGE_WITH_SOURCE,
+    data: { content, flags: EPHEMERAL },
+  };
+}
+
+// Handle /unsubscribe: record a recap opt-out for the channel it was run in, so the daily cron
+// skips it (recap_channels subtracts recap_optouts). Re-arms on the next launch here — postCard
+// clears the row when it (re)establishes the card. Guild channels only: recaps don't post in DMs
+// or user-install surfaces, so there's nothing to silence there. The Manage-Channels gate is
+// enforced by Discord (default_member_permissions on the command), so this just does the write.
+async function unsubscribeResponse(body: LaunchInteraction): Promise<object> {
+  const guildId = typeof body.guild_id === "string" ? body.guild_id : null;
+  const channelId =
+    typeof body.channel_id === "string"
+      ? body.channel_id
+      : typeof body.channel?.id === "string"
+        ? body.channel.id
+        : null;
+  const scope = canonicalScope(guildId, channelId);
+  if (!scope || !scope.startsWith("g:") || !channelId) {
+    return unsubscribeResult("no-guild");
+  }
+
+  const db = admin();
+  if (!db) return unsubscribeResult("error");
+
+  const u = body.member?.user ?? body.user;
+  const { error } = await db.from("recap_optouts").upsert(
+    {
+      scope_id: scope,
+      channel_id: channelId,
+      opted_out_by: u?.id ?? null,
+      opted_out_at: new Date().toISOString(),
+    },
+    { onConflict: "scope_id,channel_id" },
+  );
+  if (error) {
+    console.error(
+      "[unsubscribe] upsert error (schema migrated?)",
+      error.message,
+    );
+    return unsubscribeResult("error");
+  }
+  console.log("[unsubscribe] opted out", { scope, channel: channelId, by: u?.id });
+  return unsubscribeResult("done");
 }
 
 // Ephemeral "add the bot" nudge for a launch in a server without the bot — the highest-
@@ -691,6 +767,18 @@ async function postCard(body: LaunchInteraction): Promise<void> {
       "[card] live_cards upsert error (schema migrated?)",
       upErr.message,
     );
+
+  // Launching here re-arms recaps: clear any /unsubscribe opt-out for this channel, so a channel
+  // a moderator silenced starts getting the daily recap again now that play has resumed ("off
+  // until someone starts the activity here again"). Keyed by the channel the card lives in
+  // (channelForRow == the live_cards row's channel_id, which recap_channels reads). Best-effort
+  // — a stale opt-out just costs one more night before the next launch clears it.
+  const { error: optErr } = await db
+    .from("recap_optouts")
+    .delete()
+    .match({ scope_id: scope, channel_id: channelForRow });
+  if (optErr)
+    console.warn("[card] recap_optouts clear failed", optErr.message);
 }
 
 // Show the launcher of a bot-less server the ephemeral "Add to Server" pitch, at most once
@@ -787,6 +875,21 @@ export default async function handler(
     body = JSON.parse(raw) as LaunchInteraction;
   } catch {
     res.status(400).json({ error: "bad body" });
+    return;
+  }
+
+  // "/unsubscribe" writes a recap opt-out (a DB write), so like /share it's handled off the pure
+  // router. One indexed upsert, comfortably inside the 3s deadline; a throw degrades to an
+  // ephemeral apology rather than a dead "did not respond".
+  if (isUnsubscribeCommand(body)) {
+    let response: object;
+    try {
+      response = await unsubscribeResponse(body);
+    } catch (e) {
+      console.error("[unsubscribe] threw", e instanceof Error ? e.message : e);
+      response = unsubscribeResult("error");
+    }
+    res.status(200).json(response);
     return;
   }
 

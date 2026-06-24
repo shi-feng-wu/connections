@@ -223,3 +223,38 @@ if (donate) {
   const cmd = await createRes.json();
   console.log(`Registered chat command /${cmd.name} (id ${cmd.id}).`);
 }
+
+// --- 6) unsubscribe chat-input command --------------------------------------------
+// /unsubscribe silences the daily recap in the channel it's run in (a recap_optouts row that
+// recap_channels() subtracts; re-armed on the next Activity launch there — see api/interactions
+// + postCard). Unlike the others this is GUILD-INSTALL ONLY (integration_types [0]) and GUILD
+// context ([0]): the recap only posts where the bot is in the server, so the command stays hidden
+// from user-install/DM surfaces where there's nothing to turn off. default_member_permissions
+// "16" (Manage Channels, the 1<<4 bit) gates it to members who can configure the channel, so a
+// random member can't silence recaps others want. The response is built in api/interactions.ts.
+const UNSUBSCRIBE = 'unsubscribe';
+const UNSUBSCRIBE_DESCRIPTION = 'Stop the daily recap from posting in this channel';
+const MANAGE_CHANNELS = '16'; // Discord permission bit (1 << 4)
+const unsubscribe = commands.find((c) => c.type === CHAT_INPUT && c.name === UNSUBSCRIBE);
+if (unsubscribe) {
+  console.log(`Chat command /${UNSUBSCRIBE} already registered (id ${unsubscribe.id}).`);
+} else {
+  const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({
+      name: UNSUBSCRIBE,
+      description: UNSUBSCRIBE_DESCRIPTION,
+      type: CHAT_INPUT,
+      contexts: [0], // GUILD only — recaps are a server-channel thing
+      integration_types: [0], // GUILD_INSTALL only — hidden where the bot isn't in the server
+      default_member_permissions: MANAGE_CHANNELS,
+    }),
+  });
+  if (!createRes.ok) {
+    console.error(`Failed to register /${UNSUBSCRIBE}: ${createRes.status} ${await createRes.text()}`);
+    process.exit(1);
+  }
+  const cmd = await createRes.json();
+  console.log(`Registered chat command /${cmd.name} (id ${cmd.id}).`);
+}

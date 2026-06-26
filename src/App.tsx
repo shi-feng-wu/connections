@@ -16,19 +16,19 @@ import {
 import { primeTicketCache } from "./chatview";
 import { DayTurnover, GameView, LoadingScreen } from "./components";
 import { msUntilNextEtMidnight } from "./countdown";
-import { PipThumbnail } from "./pip";
-import type { RosterScope } from "./roster";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
+import { Landing } from "./landing";
 import {
   currentSeasonStart,
   roomBoard,
   roomSelf,
   submitScore,
 } from "./leaderboard";
+import { PipThumbnail } from "./pip";
 import type { PlayerState, RosterDelta } from "./player";
-import { Landing } from "./landing";
-import { type PresenceInput, presenceSignature, setPresence } from "./presence";
+import { presenceSignature, setPresence, type PresenceInput } from "./presence";
 import { RoomLive, type TilesMsg } from "./roomlive";
+import type { RosterScope } from "./roster";
 import { canonicalScope } from "./scope";
 import type { Standings } from "./season";
 
@@ -88,7 +88,7 @@ const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
 
 // Guild-install ("Add to Server") link for the end-screen recap prompt — same scopes +
 // permissions as the /enable-posts button. KEEP IN SYNC with api/interactions.ts
-// installUrl() and scripts/configure-install.mjs.
+// installUrl() and scripts/configure-install.mjs. s
 const INSTALL_PERMISSIONS = "117760";
 function installUrl(): string {
   return (
@@ -251,7 +251,9 @@ export function App({
   const [participantIds, setParticipantIds] = useState<Set<string>>(new Set());
   // Live tile selection per player (Wordle-style "picking"), from the WS broadcast. Merged into
   // the roster memo; cleared to [] when a player deselects or submits.
-  const [pickingByUser, setPickingByUser] = useState<Record<string, string[]>>({});
+  const [pickingByUser, setPickingByUser] = useState<Record<string, string[]>>(
+    {},
+  );
   // Pickers we've already pulled a fresh roster read for (their join broadcast was missed), so a
   // burst of their tile messages triggers exactly one refetch, not one per message.
   const tileFetchRequested = useRef<Set<string>>(new Set());
@@ -331,7 +333,8 @@ export function App({
       picking: snap.picking,
       done: snap.done,
       startedAt: g.startedAt,
-      finishedAt: snap.done && g.durationMs != null ? g.startedAt + g.durationMs : null,
+      finishedAt:
+        snap.done && g.durationMs != null ? g.startedAt + g.durationMs : null,
     };
     setSelf(player);
     pushPresence();
@@ -380,7 +383,9 @@ export function App({
     // No guild → a DM/group is a single-channel scope with no Channel/Server toggle, so
     // never narrow (it's redundant and would drop legacy rows with a null channel_id).
     const chan =
-      guildIdRef.current && scopeModeRef.current === "channel" ? channelIdRef.current : null;
+      guildIdRef.current && scopeModeRef.current === "channel"
+        ? channelIdRef.current
+        : null;
     const [sBoard, sSelf, aBoard, aSelf] = await Promise.all([
       roomBoard(scopeId, monthStart, 50, chan),
       roomSelf(scopeId, monthStart, me, chan),
@@ -406,7 +411,9 @@ export function App({
       if (guildIdRef.current) qs.set("g", guildIdRef.current);
       if (channelIdRef.current) qs.set("c", channelIdRef.current);
       qs.set("view", scopeModeRef.current);
-      const r = await fetch("/api/roster?" + qs.toString(), { headers: { "x-ct": ticket } });
+      const r = await fetch("/api/roster?" + qs.toString(), {
+        headers: { "x-ct": ticket },
+      });
       if (!r.ok) return;
       const d = (await r.json()) as { players?: PlayerState[] };
       if (Array.isArray(d.players)) setServerRoster(d.players);
@@ -453,7 +460,11 @@ export function App({
     // read missed them — pull the authoritative roster once (they really opened the room, so the
     // read includes their real row). We never synthesize a row from tile data.
     const known = serverRosterRef.current.some((p) => p.userId === t.userId);
-    if (!known && t.userId !== meRef.current.id && !tileFetchRequested.current.has(t.userId)) {
+    if (
+      !known &&
+      t.userId !== meRef.current.id &&
+      !tileFetchRequested.current.has(t.userId)
+    ) {
       tileFetchRequested.current.add(t.userId);
       void fetchServerRoster();
     }
@@ -499,7 +510,8 @@ export function App({
   // the common case). Resolves false only after retries are exhausted, so the board can
   // surface a quiet "couldn't save" note. Standalone/local (no ticket) is a no-op.
   function commitGuess(guess: string[]): Promise<boolean> {
-    if (!isDailyRef.current || !authTicketRef.current) return Promise.resolve(true);
+    if (!isDailyRef.current || !authTicketRef.current)
+      return Promise.resolve(true);
     const g = gameRef.current;
     if (!g) return Promise.resolve(true);
     const date = g.puzzle.date;
@@ -513,7 +525,11 @@ export function App({
     return link;
   }
 
-  async function sendGuess(date: string, guess: string[], attempt = 0): Promise<boolean> {
+  async function sendGuess(
+    date: string,
+    guess: string[],
+    attempt = 0,
+  ): Promise<boolean> {
     try {
       const r = await fetch("/api/guess", {
         method: "POST",
@@ -552,7 +568,8 @@ export function App({
   // nicety and must never delay or block play. Only the daily on a guild has a card;
   // the server throttles the edits and establishing the card stays in /api/interactions.
   function refreshCard(): void {
-    if (!isDailyRef.current || !authTicketRef.current || !guildIdRef.current) return;
+    if (!isDailyRef.current || !authTicketRef.current || !guildIdRef.current)
+      return;
     void fetch("/api/refresh-card", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -611,7 +628,9 @@ export function App({
     }
   }
 
-  async function loadPuzzle(opts: { date?: string; random?: boolean } = {}): Promise<void> {
+  async function loadPuzzle(
+    opts: { date?: string; random?: boolean } = {},
+  ): Promise<void> {
     setPhase("loading");
     // New board → let the first Rich Presence push through (a different puzzle/status).
     lastPresenceSig.current = "";
@@ -622,7 +641,9 @@ export function App({
     if (opts.date) qs.set("date", opts.date);
     if (opts.random) qs.set("random", "1");
     try {
-      const res = await fetch("/api/puzzle?" + qs.toString(), { headers: authHeaders() });
+      const res = await fetch("/api/puzzle?" + qs.toString(), {
+        headers: authHeaders(),
+      });
       if (!res.ok) throw new Error(String(res.status));
       const puzzle = (await res.json()) as Puzzle;
 
@@ -630,7 +651,11 @@ export function App({
       // relaunch resumes the exact board (mistakes, solved groups) instead of
       // resetting. Only the daily is tracked; random/by-date practice starts clean.
       const start = isDailyRef.current ? await startSession(puzzle.date) : null;
-      const game = Game.fromGuesses(puzzle, start?.guesses ?? [], start?.startedAt);
+      const game = Game.fromGuesses(
+        puzzle,
+        start?.guesses ?? [],
+        start?.startedAt,
+      );
       // Rehydrated finished game: stamp the duration the server scored (last guess
       // minus start) so the end-screen hero matches the locked score and stays
       // stable across reopens, instead of inflating with wall-clock since start.
@@ -660,7 +685,12 @@ export function App({
   // deliberate turnover, then drop the veil to reveal the fresh board.
   async function swapToNewDay(): Promise<void> {
     const g = gameRef.current;
-    if (resettingRef.current || !isDailyRef.current || !g || etDate() === g.puzzle.date) {
+    if (
+      resettingRef.current ||
+      !isDailyRef.current ||
+      !g ||
+      etDate() === g.puzzle.date
+    ) {
       return;
     }
     resettingRef.current = true;
@@ -674,7 +704,8 @@ export function App({
     // on the loaded date so a failed swap (gameRef still on yesterday) can't show a number
     // that mismatches the new date — the pill just stays omitted instead.
     const loaded = gameRef.current;
-    if (loaded && loaded.puzzle.date === etDate()) setNewDayNo(loaded.puzzle.id);
+    if (loaded && loaded.puzzle.date === etDate())
+      setNewDayNo(loaded.puzzle.id);
     await sleep(620); // hold the "new puzzle" beat so a cached load still registers
     setResetting(false);
     resettingRef.current = false;
@@ -729,7 +760,9 @@ export function App({
         .catch(() => {});
       void sdk.commands
         .getInstanceConnectedParticipants()
-        .then((d) => setParticipantIds(new Set(d.participants.map((p) => p.id))))
+        .then((d) =>
+          setParticipantIds(new Set(d.participants.map((p) => p.id))),
+        )
         .catch(() => {});
 
       const { code } = await sdk.commands.authorize({
@@ -836,7 +869,11 @@ export function App({
       } else if (mockEmbedded) {
         // DEV standalone: skip the Discord handshake and stub an identity so the chat/inbox works
         // in a plain browser. The backend accepts it via isLocalDev(); see mockEmbedded above.
-        meRef.current = { id: "local-dev", name: "Local Dev", avatar: undefined };
+        meRef.current = {
+          id: "local-dev",
+          name: "Local Dev",
+          avatar: undefined,
+        };
         accessTokenRef.current = "dev";
         authTicketRef.current = "dev";
       } else {
@@ -877,19 +914,26 @@ export function App({
         void swapToNewDay();
         return;
       }
-      if (layoutModeRef.current === Common.LayoutModeTypeObject.PIP || document.hidden) return;
+      if (
+        layoutModeRef.current === Common.LayoutModeTypeObject.PIP ||
+        document.hidden
+      )
+        return;
       void fetchServerRoster();
     }, 300_000);
     return () => clearInterval(id);
   }, [isEmbedded]);
-
 
   // Sync the layout ref the poll reads, and catch the roster up the moment the player
   // expands out of PIP (the poll skipped while collapsed, so it may be a while stale).
   useEffect(() => {
     const wasPip = layoutModeRef.current === Common.LayoutModeTypeObject.PIP;
     layoutModeRef.current = layoutMode;
-    if (isEmbedded && wasPip && layoutMode !== Common.LayoutModeTypeObject.PIP) {
+    if (
+      isEmbedded &&
+      wasPip &&
+      layoutMode !== Common.LayoutModeTypeObject.PIP
+    ) {
       // The Realtime socket may have died silently while collapsed — re-establish it, then
       // catch the roster up in case any deltas were missed during the gap.
       void roomLiveRef.current?.resync();
@@ -975,11 +1019,14 @@ export function App({
           subject,
           puzzle: gameRef.current?.puzzle.id ?? null,
         }),
-      reply: (threadId, text) => replyTicket(accessTokenRef.current ?? "", threadId, text),
+      reply: (threadId, text) =>
+        replyTicket(accessTokenRef.current ?? "", threadId, text),
       admin: {
         inbox: () => loadInbox(accessTokenRef.current ?? ""),
-        thread: (threadId) => loadAdminThread(accessTokenRef.current ?? "", threadId),
-        reply: (threadId, text) => sendAdminReply(accessTokenRef.current ?? "", threadId, text),
+        thread: (threadId) =>
+          loadAdminThread(accessTokenRef.current ?? "", threadId),
+        reply: (threadId, text) =>
+          sendAdminReply(accessTokenRef.current ?? "", threadId, text),
         resetProgress: () => resetTodayProgress(accessTokenRef.current ?? ""),
       },
     }),
@@ -1015,13 +1062,10 @@ export function App({
     if (!isEmbedded) return;
     let timer = 0;
     const arm = (): void => {
-      timer = window.setTimeout(
-        () => {
-          void swapToNewDay();
-          arm();
-        },
-        msUntilNextEtMidnight() + 2000,
-      );
+      timer = window.setTimeout(() => {
+        void swapToNewDay();
+        arm();
+      }, msUntilNextEtMidnight() + 2000);
     };
     arm();
     return () => window.clearTimeout(timer);
@@ -1036,7 +1080,8 @@ export function App({
     if (self) byId.set(self.userId, self);
     return [...byId.values()].map((p) => ({
       ...p,
-      online: p.userId === meRef.current.id ? true : participantIds.has(p.userId),
+      online:
+        p.userId === meRef.current.id ? true : participantIds.has(p.userId),
       pickingWords: pickingByUser[p.userId],
     }));
   }, [serverRoster, self, participantIds, pickingByUser]);
@@ -1099,20 +1144,23 @@ export function App({
   // user's browser. Embedded-only by construction: botInstalled is only ever set after a
   // Discord handshake, so the prompt never renders standalone where sdkRef is null.
   const addBot = (): void => {
-    void sdkRef.current?.commands.openExternalLink({ url: installUrl() }).catch(() => {
-      /* user dismissed Discord's leave-app dialog — nothing to do */
-    });
+    void sdkRef.current?.commands
+      .openExternalLink({ url: installUrl() })
+      .catch(() => {
+        /* user dismissed Discord's leave-app dialog — nothing to do */
+      });
   };
   // The chat bundle the footer's Feedback page (and the dev Inbox) runs on: the bound api plus
   // the badge state. Embedded only — preview/landing pass nothing and get the local-only form.
-  const chatBundle: ChatBundle | undefined = isEmbedded || mockEmbedded
-    ? {
-        api: chatApi,
-        unread: chatUnread,
-        isDev: chatIsDev,
-        onUnread: setChatUnread,
-      }
-    : undefined;
+  const chatBundle: ChatBundle | undefined =
+    isEmbedded || mockEmbedded
+      ? {
+          api: chatApi,
+          unread: chatUnread,
+          isDev: chatIsDev,
+          onUnread: setChatUnread,
+        }
+      : undefined;
   // Open an external URL (the footer's Ko-fi link). Embedded, it must go through the Discord
   // SDK (which shows the leave-app consent); standalone, sdkRef is null so we window.open.
   const openExternal = (url: string): void => {
@@ -1157,7 +1205,9 @@ export function App({
         onScopeChange={guildIdRef.current ? setScopeMode : undefined}
         // End-screen recap pitch, only where it means something: a guild that positively
         // lacks the bot (false, not null/unknown — never pitch a server that has it).
-        onAddBot={guildIdRef.current && botInstalled === false ? addBot : undefined}
+        onAddBot={
+          guildIdRef.current && botInstalled === false ? addBot : undefined
+        }
         onPresence={onPresence}
         onCommit={commitGuess}
         onFinish={onFinish}

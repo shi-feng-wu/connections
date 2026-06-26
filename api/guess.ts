@@ -139,8 +139,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         const delta: RosterDelta = {
           userId: uid,
           channelId,
-          solvedCount: game.solved.length,
-          solvedLevels: game.solved.map((s) => s.level),
+          // groupsSolved / deducedLevels, NOT game.solved — on a loss submit() back-fills
+          // game.solved with every remaining group (the reveal), so broadcasting it raw would
+          // credit a loser with all four groups (inflated score + four solved bars). These
+          // deduced getters exclude the back-fill, matching what /api/roster replays, so the
+          // live delta and the cold-start read agree.
+          solvedCount: game.groupsSolved,
+          solvedLevels: game.deducedLevels,
           mistakesLeft: game.mistakesLeft,
           done,
           finishedAt: done ? Date.now() : null,

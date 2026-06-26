@@ -12,11 +12,11 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ---- in-memory tables + a Supabase-builder shim over them (only the chains api/chat.ts uses) ----
 type Row = Record<string, any>;
-const store: Record<string, Row[]> = { chat_threads: [], chat_messages: [] };
+const store: Record<string, Row[]> = { chat_threads: [], chat_messages: [], progress: [], scores: [] };
 const seq: Record<string, number> = { chat_threads: 0, chat_messages: 0 };
 
 class Q {
-  private op: "select" | "insert" | "update" = "select";
+  private op: "select" | "insert" | "update" | "delete" = "select";
   private filters: [string, unknown][] = [];
   private ord: { col: string; asc: boolean } | null = null;
   private lim: number | null = null;
@@ -36,6 +36,10 @@ class Q {
   update(obj: Row): this {
     this.op = "update";
     this.values = obj;
+    return this;
+  }
+  delete(): this {
+    this.op = "delete";
     return this;
   }
   eq(col: string, val: unknown): this {
@@ -60,7 +64,7 @@ class Q {
   then(resolve: (v: { data: unknown }) => void, reject: (e: unknown) => void): void {
     this.run().then((r) => {
       if (this.op === "insert") resolve({ data: this.returning ? (r[0] ?? null) : null });
-      else if (this.op === "update") resolve({ data: null });
+      else if (this.op === "update" || this.op === "delete") resolve({ data: null });
       else resolve({ data: r });
     }, reject);
   }
@@ -76,6 +80,10 @@ class Q {
       const row = { id, ...base, ...this.values };
       rows.push(row);
       return this.returning ? [{ ...row }] : [];
+    }
+    if (this.op === "delete") {
+      store[this.table] = rows.filter((r) => !this.filters.every(([c, v]) => r[c] === v));
+      return [];
     }
     const hit = rows.filter((r) => this.filters.every(([c, v]) => r[c] === v));
     if (this.op === "update") {
@@ -115,6 +123,7 @@ vi.mock("../api/_feedback.js", () => ({
   isCategory: (c: unknown) => c === "Bug" || c === "Idea" || c === "Other",
   postFeedbackWebhook: async () => true,
 }));
+vi.mock("../api/_nyt.js", () => ({ todayET: () => "2026-06-26" }));
 
 // Imported after the mocks are registered (vi.mock is hoisted, so this is fine).
 const { default: handler, devUnread, playerUnread } = await import("../api/chat");
@@ -158,8 +167,47 @@ beforeAll(() => {
 beforeEach(() => {
   store.chat_threads = [];
   store.chat_messages = [];
+  store.progress = [];
+  store.scores = [];
   seq.chat_threads = 0;
   seq.chat_messages = 0;
+});
+
+describe("api/chat — dev reset-progress (redo today)", () => {
+  const today = "2026-06-26"; // matches the mocked todayET
+
+  it("deletes only the dev's own progress + scores for today", async () => {
+    store.progress = [
+      { user_id: "dev1", puzzle_date: today, guesses: [] },
+      { user_id: "dev1", puzzle_date: "2026-06-25", guesses: [] }, // other day — keep
+      { user_id: "p1", puzzle_date: today, guesses: [] }, // other user — keep
+    ];
+    store.scores = [
+      { user_id: "dev1", puzzle_date: today, score: 400 },
+      { user_id: "p1", puzzle_date: today, score: 300 }, // other user — keep
+    ];
+
+    const r = await call("POST", { body: { admin: "reset-progress", accessToken: "dev1" } });
+
+    expect(r.statusCode).toBe(200);
+    expect(r.body).toEqual({ ok: true });
+    expect(store.progress).toEqual([
+      { user_id: "dev1", puzzle_date: "2026-06-25", guesses: [] },
+      { user_id: "p1", puzzle_date: today, guesses: [] },
+    ]);
+    expect(store.scores).toEqual([{ user_id: "p1", puzzle_date: today, score: 300 }]);
+  });
+
+  it("rejects a non-dev caller and deletes nothing", async () => {
+    store.progress = [{ user_id: "p1", puzzle_date: today, guesses: [] }];
+    store.scores = [{ user_id: "p1", puzzle_date: today, score: 300 }];
+
+    const r = await call("POST", { body: { admin: "reset-progress", accessToken: "p1" } });
+
+    expect(r.statusCode).toBe(403);
+    expect(store.progress).toHaveLength(1);
+    expect(store.scores).toHaveLength(1);
+  });
 });
 
 describe("api/chat handler — full ticket lifecycle", () => {

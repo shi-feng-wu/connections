@@ -5,6 +5,7 @@ import {
   FileText,
   Inbox,
   MessageCircle,
+  RefreshCw,
   X,
 } from "lucide-react";
 import {
@@ -553,12 +554,14 @@ function LinkBar({
   showBadge,
   chatUnread,
   onSelect,
+  onRedo,
   className = "",
 }: {
   links: LinkDef[];
   showBadge: boolean;
   chatUnread: boolean;
   onSelect: (l: LinkDef) => void;
+  onRedo?: () => void; // dev-only "Refresh" (replay today); undefined for everyone else
   className?: string;
 }): ReactNode {
   const linkCls =
@@ -593,6 +596,19 @@ function LinkBar({
           )}
         </button>
       ))}
+      {onRedo && (
+        // Dev-only: clear today's progress and replay. ml-auto pushes it (and the version after
+        // it) to the right edge.
+        <button
+          type="button"
+          onClick={onRedo}
+          title="Dev: clear today's progress and replay"
+          className={linkCls + " ml-auto cursor-pointer bg-transparent hover:text-zinc-100"}
+        >
+          <RefreshCw size={14} strokeWidth={2} aria-hidden />
+          <span>Refresh</span>
+        </button>
+      )}
       <span className="ml-auto font-sans text-[11px] tabular-nums text-zinc-700">
         {APP_VERSION}
       </span>
@@ -673,6 +689,19 @@ export function useInfoLinks(
     } else if (l.page) openFromSheet(l.page);
   };
 
+  // Dev-only "Refresh": clear today's progress server-side, then reload to replay from a clean
+  // board. Same gate as the Inbox entry (chat.isDev, resolved server-side from DEV_DISCORD_IDS).
+  // Desktop only — it lives in LinkBar, which the mobile sheet never renders.
+  let onRedo: (() => void) | undefined;
+  if (chat?.isDev) {
+    const api = chat.api;
+    onRedo = () => {
+      void api.admin.resetProgress().then((ok) => {
+        if (ok) window.location.reload();
+      });
+    };
+  }
+
   return {
     footer: (className = "") => (
       <LinkBar
@@ -680,6 +709,7 @@ export function useInfoLinks(
         showBadge={showBadge}
         chatUnread={chatUnread}
         onSelect={selectFromFooter}
+        onRedo={onRedo}
         className={className}
       />
     ),

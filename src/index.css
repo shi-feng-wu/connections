@@ -379,6 +379,19 @@ body {
   overflow-x: hidden;
 }
 
+/* ---- Focus ring ----
+   Replaces the browser default (a hard-to-love white/orange double outline that
+   clashed with the dark theme) with one soft ring in the app's quiet green
+   accent (#a0c35a, the same tone used elsewhere as a brand accent).
+   :focus-visible only, so it shows for keyboard navigation but stays out of the
+   way on mouse click / touch tap. The 2px offset draws the ring on the (dark)
+   page behind the element, so it reads clearly on word tiles, bars and buttons
+   alike; modern browsers round the outline to the element's own corner radius. */
+:focus-visible {
+  outline: 2px solid #a0c35a;
+  outline-offset: 2px;
+}
+
 /* ---- Spoiler cover: the last-solved group on the win screen ----
    The final group keeps its four WORDS fully readable but the CATEGORY NAME is
    shown BLURRED under a diagonal hatch, so you can still try to guess the

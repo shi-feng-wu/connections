@@ -666,22 +666,40 @@ function SpoilerBar({
     onReveal?.();
   }
   return (
-    <button
-      type="button"
+    // A <div role="button">, not a real <button>: Chrome won't let you drag-select
+    // text inside a <button>, so once revealed the category couldn't be highlighted /
+    // copied the way every other solved bar can. A div keeps the text selectable while
+    // role + tabIndex + the keydown handler preserve the tap/keyboard reveal affordance
+    // (and match the plain bars, which carry tabIndex too so ALL bars are focusable).
+    <div
       data-flip={`bar-${level}`}
-      onClick={reveal}
-      aria-label={revealed ? category : "Reveal the hidden category"}
+      role={revealed ? undefined : "button"}
+      tabIndex={0}
+      aria-label={revealed ? undefined : "Reveal the hidden category"}
+      onClick={revealed ? undefined : reveal}
+      onKeyDown={
+        revealed
+          ? undefined
+          : (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                reveal();
+              }
+            }
+      }
       className={
         // `isolate` keeps the bar's internal z-stack (cover/cat/glint/members)
         // contained — without it those z-indices leak into the root stacking
         // context and the reveal wipe paints over the end-screen score breakdown
         // popover (which is trapped inside the footer's transform stacking context).
-        "spoiler-bar relative isolate flex h-[var(--tile-h)] w-full select-none appearance-none flex-col items-center justify-center overflow-hidden rounded-lg border-0 px-2 text-center text-[#121212] transition-opacity duration-300 ease-out" +
-        // once revealed the bar does nothing on click — drop the pointer cursor
-        // and the press feedback so it reads as the static solved bar it now is
+        "spoiler-bar relative isolate flex h-[var(--tile-h)] w-full flex-col items-center justify-center overflow-hidden rounded-lg px-2 text-center text-[#121212] transition-opacity duration-300 ease-out" +
+        // covered: a tappable control — pointer cursor + press feedback, and selection
+        // is disabled so the blurred (hidden) name can't be drag-copied to peek.
+        // revealed: inert (default cursor, no press) and text becomes selectable, so it
+        // reads and behaves like the static solved bar it now is.
         (revealed
           ? " revealed cursor-default"
-          : " cursor-pointer active:scale-[0.99]") +
+          : " cursor-pointer select-none active:scale-[0.99]") +
         // a revealed failed (auto-revealed) bar reads dimmer than a solved one
         (dim && revealed ? " opacity-56" : "")
       }
@@ -697,7 +715,7 @@ function SpoilerBar({
       <div className={"relative z-[3] " + BAR_MEMBERS}>
         <MemberFaces members={members} images={images} />
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -1209,6 +1227,9 @@ export function Board({
               <div
                 key={lvl}
                 data-flip={`bar-${lvl}`}
+                // focusable like the SpoilerBar so every solved bar behaves the
+                // same under keyboard focus (text stays selectable — it's a div).
+                tabIndex={0}
                 className="flex h-[var(--tile-h)] flex-col items-center justify-center rounded-lg px-2 text-center text-[#121212]"
                 style={{ background: LEVELS[lvl].color }}
               >

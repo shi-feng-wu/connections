@@ -1,10 +1,12 @@
 {
   "functions": {
-    "api/interactions.ts": { "includeFiles": "api/_assets/**" },
+    "api/interactions.ts": { "memory": 1769 },
+    "api/post-card.ts": { "includeFiles": "api/_assets/**", "maxDuration": 60 },
     "api/join.ts": { "includeFiles": "api/_assets/**" },
     "api/refresh-card.ts": { "includeFiles": "api/_assets/**" },
     "api/cron-recap.ts": { "includeFiles": "api/_assets/**", "maxDuration": 300 }
   },
+  "crons": [{ "path": "/api/interactions", "schedule": "* * * * *" }],
   "headers": [
     {
       "source": "/",

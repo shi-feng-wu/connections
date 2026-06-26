@@ -1,7 +1,7 @@
 import { generateKeyPairSync, sign as edSign } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { Game, LEVELS, type Puzzle } from "../src/game";
-import { botCanPostInChannel, installNudgePayload, inviteWithinCooldown, isUserInstallOnly, missingPermsNudgePayload, routeInteraction, shareCard, unsubscribeResult, verifyDiscordSig } from "../api/interactions";
+import { installNudgePayload, missingPermsNudgePayload, routeInteraction, shareCard, unsubscribeResult, verifyDiscordSig } from "../api/interactions";
 
 // api/interactions.ts: Discord signs every interaction (Ed25519); an unverified
 // request must be refused, and the recap's Play button must map to a launch.
@@ -36,23 +36,6 @@ describe("verifyDiscordSig", () => {
     expect(verifyDiscordSig("{}", "", "1", pubHex)).toBe(false); // no signature
     expect(verifyDiscordSig("{}", "abcd", "1", "")).toBe(false); // no public key
     expect(verifyDiscordSig("{}", "zz", "1", pubHex)).toBe(false); // non-hex signature
-  });
-});
-
-// inviteWithinCooldown throttles the DM Play invite per channel by reusing the live-card 2h
-// cooldown, so relaunches don't spam the chat. "Never posted" (null) must not throttle.
-describe("inviteWithinCooldown", () => {
-  const now = 1_700_000_000_000;
-  it("does not throttle when never posted", () => {
-    expect(inviteWithinCooldown(null, now)).toBe(false);
-    expect(inviteWithinCooldown(undefined, now)).toBe(false);
-  });
-  it("throttles within the 2h window and clears after it", () => {
-    expect(inviteWithinCooldown(new Date(now - 60_000).toISOString(), now)).toBe(true);
-    expect(inviteWithinCooldown(new Date(now - 3 * 60 * 60 * 1000).toISOString(), now)).toBe(false);
-  });
-  it("does not throttle on an unparseable timestamp", () => {
-    expect(inviteWithinCooldown("not-a-date", now)).toBe(false);
   });
 });
 
@@ -262,58 +245,6 @@ describe("unsubscribeResult", () => {
     const r = data("error");
     expect(r.data.flags).toBe(64);
     expect(r.data.content).toContain("try `/unsubscribe` again");
-  });
-});
-
-// The card is a bot message, so it's skipped when the launch is a user install in a server
-// without the bot (only "1" present, no "0") — there it would only 403. "0" = guild install,
-// "1" = user install.
-describe("isUserInstallOnly", () => {
-  it("is true for a user-install-only launch (no guild install)", () => {
-    expect(isUserInstallOnly({ authorizing_integration_owners: { "1": "user123" } })).toBe(true);
-  });
-
-  it("is false when the app is guild-installed (bot is present)", () => {
-    expect(isUserInstallOnly({ authorizing_integration_owners: { "0": "guild123" } })).toBe(false);
-  });
-
-  it("is false when both install types authorized it", () => {
-    expect(isUserInstallOnly({ authorizing_integration_owners: { "0": "guild123", "1": "user123" } })).toBe(false);
-  });
-
-  it("is false (proceeds) when the field is absent or empty", () => {
-    expect(isUserInstallOnly({})).toBe(false);
-    expect(isUserInstallOnly({ authorizing_integration_owners: {} })).toBe(false);
-  });
-});
-
-// botCanPostInChannel reads the bot's effective channel permissions off the interaction's
-// app_permissions bitfield. The card/recap are PNG attachments, so it needs View Channel +
-// Send Messages + Attach Files — short any one (e.g. a private channel the bot's role isn't in)
-// and the recap silently 403s. Bitfield is compared as BigInt.
-describe("botCanPostInChannel", () => {
-  const VIEW = 1n << 10n, SEND = 1n << 11n, ATTACH = 1n << 15n, ADMIN = 1n << 3n;
-
-  it("is true when View Channel + Send Messages + Attach Files are all present", () => {
-    expect(botCanPostInChannel(String(VIEW | SEND | ATTACH))).toBe(true);
-  });
-
-  it("is false when Attach Files is missing (the card/recap are image attachments)", () => {
-    expect(botCanPostInChannel(String(VIEW | SEND))).toBe(false);
-  });
-
-  it("is false when View Channel is missing (a private channel the bot isn't allowed into)", () => {
-    expect(botCanPostInChannel(String(SEND | ATTACH))).toBe(false);
-  });
-
-  it("is true for Administrator (implies every permission)", () => {
-    expect(botCanPostInChannel(String(ADMIN))).toBe(true);
-  });
-
-  it("fails OPEN (true) on an absent or unparseable field, so it never wrongly nudges", () => {
-    expect(botCanPostInChannel(undefined)).toBe(true);
-    expect(botCanPostInChannel("")).toBe(true);
-    expect(botCanPostInChannel("not-a-number")).toBe(true);
   });
 });
 

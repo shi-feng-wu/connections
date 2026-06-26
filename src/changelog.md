@@ -21,7 +21,7 @@
 
 ### Added
 
-- Launch Connections in a DM and a Play button now drops into the chat, so whoever you’re talking to can tap in and play too.
+- Launch Connections in a DM or group chat and a who’s-playing card now drops in with a Play button, so whoever you’re talking to can tap in and join. It fills in as people jump in.
 
 ## v1.10.2 — Jun 26, 2026
 

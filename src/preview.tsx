@@ -1792,7 +1792,7 @@ function ChatDemo() {
         reply(id, "dev", CANNED[r++ % CANNED.length]);
         return Promise.resolve([...msgs[id]]);
       },
-      admin: { inbox: () => Promise.resolve([]), thread: () => Promise.resolve(null), reply: () => Promise.resolve(null) },
+      admin: { inbox: () => Promise.resolve([]), thread: () => Promise.resolve(null), reply: () => Promise.resolve(null), resetProgress: () => Promise.resolve(false) },
     };
   }, []);
 
@@ -1824,6 +1824,7 @@ function ChatDemo() {
           (threads[id] ??= []).push({ id: nextId(), sender: "dev", text, created_at: new Date().toISOString() });
           return Promise.resolve([...threads[id]]);
         },
+        resetProgress: () => Promise.resolve(true),
       },
     };
   }, []);

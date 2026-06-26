@@ -60,6 +60,7 @@ export type ChatApi = {
     inbox: () => Promise<InboxTicket[]>;
     thread: (threadId: number) => Promise<(TicketView & { name: string | null }) | null>;
     reply: (threadId: number, text: string) => Promise<ChatMessage[] | null>;
+    resetProgress: () => Promise<boolean>; // dev-only: clear my own progress for today, to replay
   };
 };
 
@@ -149,4 +150,11 @@ export async function sendAdminReply(
 ): Promise<ChatMessage[] | null> {
   const d = await postJson<{ messages?: ChatMessage[] }>({ accessToken, admin: 'reply', threadId, text });
   return d?.messages ?? null;
+}
+
+// Dev-only: clear the caller's OWN progress + score for today so they can replay the puzzle (for
+// testing). No-ops for everyone else — the server enforces the DEV_DISCORD_IDS allowlist.
+export async function resetTodayProgress(accessToken: string): Promise<boolean> {
+  const d = await postJson<{ ok?: boolean }>({ accessToken, admin: 'reset-progress' });
+  return !!d?.ok;
 }

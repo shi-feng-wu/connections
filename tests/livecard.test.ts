@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { botCardUrl, cardPayload, playInvitePayload, playerFinished } from "../api/_livecard";
+import { botCardUrl, cardPayload, interactionMessageUrl, playerFinished, tokenStillEditable, withinPostCooldown } from "../api/_livecard";
 import type { Puzzle } from "../src/game";
 
 // api/_livecard.ts: the room card is a bot message. On create it replies to the
@@ -27,29 +27,6 @@ describe("cardPayload", () => {
   });
 });
 
-// playInvitePayload: the DM/group-DM fallback when there's no bot to keep a live card. It's a
-// PUBLIC (not ephemeral) one-line announce + the same "Play now!" button, with no attachment
-// since it never updates.
-describe("playInvitePayload", () => {
-  it("announces the launcher with a public Play button and no attachment", () => {
-    const p = playInvitePayload("borgar") as {
-      content?: string;
-      flags?: number;
-      attachments?: unknown;
-      components?: { components: { custom_id: string; label: string }[] }[];
-    };
-    expect(p.content).toContain("borgar");
-    // Public: posts silently (SUPPRESS_NOTIFICATIONS, 4096) but is NOT ephemeral (64).
-    expect(p.flags).toBe(4096);
-    expect((p.flags ?? 0) & 64).toBe(0);
-    // Static invite — no image, so nothing ever edits it.
-    expect(p.attachments).toBeUndefined();
-    const button = p.components?.[0]?.components?.[0];
-    expect(button?.custom_id).toBe("connections_play");
-    expect(button?.label).toBe("Play now!");
-  });
-});
-
 describe("botCardUrl", () => {
   it("targets the channel for a create (POST)", () => {
     expect(botCardUrl("222")).toBe("https://discord.com/api/v10/channels/222/messages");
@@ -57,6 +34,48 @@ describe("botCardUrl", () => {
 
   it("targets the message for an edit (PATCH)", () => {
     expect(botCardUrl("222", "111")).toBe("https://discord.com/api/v10/channels/222/messages/111");
+  });
+});
+
+// interactionMessageUrl edits a DM card via the launcher's interaction token (no bot), within the
+// ~15-minute token window.
+describe("interactionMessageUrl", () => {
+  it("targets a followup message by id for a token edit (PATCH)", () => {
+    expect(interactionMessageUrl("app", "tok", "123")).toBe(
+      "https://discord.com/api/v10/webhooks/app/tok/messages/123",
+    );
+  });
+});
+
+// The no-bot card reuses the live-card 2h cooldown to decide post-fresh-vs-edit, and the
+// interaction token's ~15-min window to decide whether it can still be edited at all.
+describe("withinPostCooldown", () => {
+  const now = 1_700_000_000_000;
+  it("is false when never posted", () => {
+    expect(withinPostCooldown(null, now)).toBe(false);
+    expect(withinPostCooldown(undefined, now)).toBe(false);
+  });
+  it("is true within the 2h window and false after it", () => {
+    expect(withinPostCooldown(new Date(now - 60_000).toISOString(), now)).toBe(true);
+    expect(withinPostCooldown(new Date(now - 3 * 60 * 60 * 1000).toISOString(), now)).toBe(false);
+  });
+  it("is false on an unparseable timestamp", () => {
+    expect(withinPostCooldown("not-a-date", now)).toBe(false);
+  });
+});
+
+describe("tokenStillEditable", () => {
+  const now = 1_700_000_000_000;
+  it("is false with no stored token timestamp", () => {
+    expect(tokenStillEditable(null, now)).toBe(false);
+    expect(tokenStillEditable(undefined, now)).toBe(false);
+  });
+  it("is true inside the ~15-min window and false past it", () => {
+    expect(tokenStillEditable(new Date(now - 60_000).toISOString(), now)).toBe(true); // 1 min
+    expect(tokenStillEditable(new Date(now - 20 * 60_000).toISOString(), now)).toBe(false); // 20 min
+  });
+  it("is false on an unparseable timestamp", () => {
+    expect(tokenStillEditable("nope", now)).toBe(false);
   });
 });
 

@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { admin } from './_admin.js';
 import { bearerToken, fetchDiscordUser, type DiscordUser } from './_discord.js';
 import { isCategory, postFeedbackWebhook } from './_feedback.js';
+import { todayET } from './_nyt.js';
 import { isLocalDev, verifyAuth } from './_session.js';
 
 // Player ↔ dev feedback threads — a support-ticket model. Each note a player sends opens its own
@@ -305,6 +306,18 @@ async function adminAction(req: VercelRequest, res: VercelResponse): Promise<voi
       unread: devUnread(t),
     }));
     res.status(200).json({ tickets });
+    return;
+  }
+
+  // Dev-only "redo today": wipe this dev's OWN progress + score for today so they can replay the
+  // puzzle from scratch (for testing). Scoped to dev.id + today only — never another user or day.
+  // Deleting the scores row matters because /api/score is first-finish-wins (ignoreDuplicates), so
+  // without it a re-finish wouldn't re-score. Streaks/leaderboard self-correct off scores.
+  if (body.admin === 'reset-progress') {
+    const date = todayET();
+    await db.from('progress').delete().eq('user_id', dev.id).eq('puzzle_date', date);
+    await db.from('scores').delete().eq('user_id', dev.id).eq('puzzle_date', date);
+    res.status(200).json({ ok: true });
     return;
   }
 

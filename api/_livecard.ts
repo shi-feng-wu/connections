@@ -12,6 +12,29 @@ import { PLAY_CUSTOM_ID } from './_recap.js';
 // last post starts a fresh card; launches/joins within it edit the current one in place.
 export const CARD_POST_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours
 
+// Without a bot (DMs, group DMs), the card is edited via the launcher's interaction token, which
+// Discord only honours for ~15 minutes. We use a slightly conservative window so an edit fired
+// near the edge doesn't 404; past it the card freezes (the Play button keeps working regardless).
+export const TOKEN_EDIT_WINDOW_MS = 14 * 60 * 1000; // 14 minutes
+
+// Whether the card posted in this scope is still inside the 2h fresh-post window — within it a
+// launch edits the existing card; past it a launch posts a fresh one. Null/unparseable = never
+// posted → not in cooldown. Exported for tests.
+export function withinPostCooldown(postedAt: string | null | undefined, now: number): boolean {
+  if (!postedAt) return false;
+  const t = Date.parse(postedAt);
+  return !Number.isNaN(t) && now - t < CARD_POST_COOLDOWN_MS;
+}
+
+// Whether the interaction token that created a no-bot (DM/group-DM) card is still inside Discord's
+// edit window, so the card can be PATCHed. Past it the token 404s and the card freezes. Null = no
+// token stored → not editable. Exported for tests.
+export function tokenStillEditable(tokenAt: string | null | undefined, now: number): boolean {
+  if (!tokenAt) return false;
+  const t = Date.parse(tokenAt);
+  return !Number.isNaN(t) && now - t < TOKEN_EDIT_WINDOW_MS;
+}
+
 // Throttle live card edits so a flurry of events can't spam the webhook: an edit within
 // the window is dropped (the next event carries the latest DB state). A new player tile
 // (join) refreshes a bit faster than mid-game progress (update); a player who just
@@ -114,21 +137,6 @@ export function cardPayload(replyTo?: { messageId: string; channelId: string }):
   };
 }
 
-// A lightweight, static "Play" invite for a context where we can't keep a live card — a
-// DM/group DM, where there's no bot to edit a card all day. Posted as a PUBLIC interaction
-// followup (needs no bot or channel permission): a one-line announce plus the same "Play now!"
-// button as the card, so anyone in the chat can open the activity. It never updates (no
-// roster), so it carries no attachment and is never edited. Posted silently like the card.
-export function playInvitePayload(launcherName: string): object {
-  return {
-    content: `${launcherName} is playing today’s Connections`,
-    flags: SUPPRESS_NOTIFICATIONS,
-    components: [
-      { type: 1, components: [{ type: 2, style: 1, label: 'Play now!', custom_id: PLAY_CUSTOM_ID }] },
-    ],
-  };
-}
-
 // Send a card as a multipart message (image attachment). POST creates, PATCH edits
 // an existing message. `filename` must match the attachment referenced by the payload
 // (card.png for the live card, recap.png for the daily recap). Returns the raw Response.
@@ -156,6 +164,12 @@ export async function sendCard(
 // after that the app owns it, so the bot edits it in place via botCardUrl (no token limit).
 export function interactionFollowupUrl(appId: string, token: string): string {
   return `https://discord.com/api/v10/webhooks/${appId}/${token}?wait=true&with_components=true`;
+}
+
+// PATCH target for a specific interaction-followup message, by id, on the same token (no bot
+// needed). Keeps the DM/group-DM card live for the token's ~15-minute window (TOKEN_EDIT_WINDOW_MS).
+export function interactionMessageUrl(appId: string, token: string, messageId: string): string {
+  return `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/${messageId}`;
 }
 
 // PATCH target for the card in a channel, by message id, using the bot token (the bot can

@@ -3,7 +3,7 @@ import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import { type CardPlayer, renderRoster } from './_card.js';
 import { bearerToken } from './_discord.js';
-import { botCardUrl, CARD_UPDATE_THROTTLE_MS, cardPayload, gridFinished, sendCard, withGrids } from './_livecard.js';
+import { botCardUrl, CARD_UPDATE_THROTTLE_MS, cardPayload, gridFinished, interactionMessageUrl, sendCard, tokenStillEditable, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
 import { isLocalDev, verifyAuth } from './_session.js';
 
@@ -34,6 +34,77 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const guildId = typeof body.guildId === 'string' ? body.guildId : null;
     const channelId = typeof body.channelId === 'string' ? body.channelId : null;
     const scope = canonicalScope(guildId, channelId);
+
+    // DM/group-DM card (no bot): keep its grids live by editing via the launcher's stored
+    // interaction token, but only while it's inside Discord's ~15-min window — past that the card
+    // is frozen. We only re-render the EXISTING roster (membership is built by Play-clicks in
+    // postDmCard), so there's nothing to spoof. Same per-guess throttle as the guild path below.
+    if (scope && scope.startsWith('c:') && channelId) {
+      const db = admin();
+      if (!db) {
+        res.status(200).json({ ok: false, reason: 'unavailable' });
+        return;
+      }
+      const date = todayET();
+      const { data: card } = await db
+        .from('live_cards')
+        .select('players, message_id, interaction_token, token_at, edited_at')
+        .eq('scope_id', scope)
+        .eq('puzzle_date', date)
+        .eq('channel_id', channelId)
+        .maybeSingle();
+      const players: CardPlayer[] = Array.isArray(card?.players) ? (card.players as CardPlayer[]) : [];
+      const messageId = (card?.message_id as string | null | undefined) ?? null;
+      const editToken = (card?.interaction_token as string | null | undefined) ?? null;
+      const appId = process.env.VITE_DISCORD_CLIENT_ID ?? '';
+      // No card, no token, the window has closed, or no roster → nothing to refresh.
+      if (
+        !messageId ||
+        !editToken ||
+        !appId ||
+        !players.length ||
+        !tokenStillEditable(card?.token_at as string | null | undefined, Date.now())
+      ) {
+        res.status(200).json({ ok: false, reason: 'no-card' });
+        return;
+      }
+      let puzzle;
+      try {
+        puzzle = await fetchPuzzle(date);
+      } catch {
+        res.status(200).json({ ok: false, reason: 'no-puzzle' });
+        return;
+      }
+      const renderPlayers = await withGrids(db, puzzle, date, players);
+      // Same throttle as the guild path: a just-finished player bypasses it so the final grid lands.
+      const finished = gridFinished(renderPlayers.find((p) => p.id === uid)?.grid);
+      const lastEdit = card?.edited_at ? Date.parse(card.edited_at as string) : null;
+      if (!finished && lastEdit && Date.now() - lastEdit < CARD_UPDATE_THROTTLE_MS) {
+        res.status(200).json({ ok: true, throttled: true });
+        return;
+      }
+      const png = await renderRoster(renderPlayers, { puzzleNo: puzzle.id, puzzleDate: date });
+      const r = await sendCard(
+        interactionMessageUrl(appId, editToken, messageId),
+        cardPayload(),
+        png,
+        'PATCH',
+        'card.png',
+      );
+      if (!r.ok) {
+        res.status(200).json({ ok: false, reason: 'edit-failed', status: r.status });
+        return;
+      }
+      await db
+        .from('live_cards')
+        .update({ edited_at: new Date().toISOString() })
+        .eq('scope_id', scope)
+        .eq('puzzle_date', date)
+        .eq('channel_id', channelId);
+      res.status(200).json({ ok: true });
+      return;
+    }
+
     // The card only lives on a guild channel (same gate as /api/join); per-channel now, so
     // a channel id is required to locate the right card.
     if (!scope || !scope.startsWith('g:') || !channelId) {

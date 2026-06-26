@@ -633,8 +633,9 @@ alter table public.live_cards add column if not exists posted_at timestamptz;
 -- guesses can't spam Discord (a just-finished player bypasses the throttle).
 alter table public.live_cards add column if not exists edited_at timestamptz;
 
--- Legacy: from the earlier interaction-token card (a LAUNCH_ACTIVITY message turned out
--- not to be editable). Unused now that the card is a bot message; retained so old rows load. d
+-- The launcher's interaction token + when it was issued. A guild card is a bot message edited via
+-- the bot token, but a DM/group-DM card has no bot — it's posted and edited on this token for its
+-- ~15-minute window (api/interactions.ts postDmCard), after which the card freezes.
 alter table public.live_cards add column if not exists interaction_token text;
 alter table public.live_cards add column if not exists token_at          timestamptz;
 

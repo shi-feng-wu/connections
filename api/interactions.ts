@@ -461,10 +461,25 @@ export default async function handler(
   // game. No heavy work happens before this line, so a cold start still answers in time.
   res.status(200).json(routeInteraction(body));
 
-  // Then trigger the card render in /api/post-card (a separate, heavier function). waitUntil keeps
-  // this function alive past the response flush; the trigger is fire-and-forget — the launch is
-  // already ACKed, so a slow or failed render never blocks the game opening.
   if (isLaunchCommand(body) || isPlayButton(body)) {
+    // Observability for FAILED launches. Discord drops the launch if our ACK misses its ~3s
+    // deadline (a cold start is the usual cause), and that failure is otherwise invisible — the
+    // function still returns 200, so Vercel logs a success. `x-signature-timestamp` is (to the
+    // second) when Discord sent the request, so now − ts ≈ how long the launch took to reach us
+    // (cold start + queue + network). Flag the slow ones with console.error so failed/at-risk
+    // launches are greppable and cluster in Vercel's runtime errors. ±1s fuzzy (second-resolution
+    // timestamp); treat ~3s+ as "almost certainly dropped", 2.5–3s as "at risk".
+    const tsSec = Number(typeof ts === "string" ? ts : 0);
+    const lagMs = tsSec ? Date.now() - tsSec * 1000 : 0;
+    if (lagMs >= 2500)
+      console.error("[launch] slow ACK — may have missed Discord's 3s deadline", {
+        lagMs,
+        surface: body.type === MESSAGE_COMPONENT ? "button" : "command",
+      });
+
+    // Then trigger the card render in /api/post-card (a separate, heavier function). waitUntil
+    // keeps this function alive past the response flush; the trigger is fire-and-forget — the
+    // launch is already ACKed, so a slow or failed render never blocks the game opening.
     waitUntil(
       triggerPostCard(raw).catch((e) => {
         console.error("[card] trigger failed", e instanceof Error ? e.message : e);

@@ -1,7 +1,24 @@
 import { Bug, Check, ChevronLeft, Lightbulb, MessageSquare, Send } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import type { ChatApi, ChatMessage, ChatTicket, InboxTicket } from "./chat";
+import type { ChatApi, ChatMessage, ChatTicket, InboxTicket, TicketView } from "./chat";
 import { HoverButton } from "./hoverbutton";
+
+// Session-scoped cache for the player's Feedback page. Opening Feedback mounts a fresh subtree and
+// closing it unmounts the whole thing (DetailView is conditionally mounted), and opening a thread
+// unmounts the inbox list — so without a cache every reopen reset to null and flashed "Loading…".
+// We seed initial state from the cache so reopening shows the last-known inbox/thread instantly,
+// then refresh in the background. The app-level unread poll primes the list (primeTicketCache), so
+// even the first open is usually instant. Only the very first fetch with nothing cached shows Loading.
+let ticketCache: ChatTicket[] | null = null;
+const threadCache = new Map<number, TicketView>();
+// The dev-only Inbox is the same story (it unmounts on close), so it gets its own list + per-thread
+// caches. There's no app-level prime for it, so its very first open still fetches; reopens are instant.
+let adminCache: InboxTicket[] | null = null;
+const adminThreadCache = new Map<number, { messages: ChatMessage[]; name: string | null }>();
+
+export function primeTicketCache(tickets: ChatTicket[]): void {
+  ticketCache = tickets;
+}
 
 // The conversation surfaces for the player↔dev feedback chat (api/chat.ts) — a support-ticket
 // model laid out as a "Feedback Inbox" (claude.ai/design import). ChatPanel is the player's Feedback
@@ -183,12 +200,16 @@ function ComposeBlock({
     if (!ready || sending) return;
     setSending(true);
     setFailed(false);
-    const r = await api.create(text.trim(), cat, subject.trim());
+    const subj = subject.trim();
+    const r = await api.create(text.trim(), cat, subj);
     setSending(false);
     if (!r) {
       setFailed(true);
       return;
     }
+    // Seed the thread cache from the create response so drilling into the freshly-made thread shows
+    // it instantly instead of flashing "Loading…" while it re-fetches what we already have.
+    threadCache.set(r.threadId, { messages: r.messages, category: cat, subject: subj });
     setSubject("");
     setText("");
     setCat("Bug");
@@ -416,13 +437,14 @@ export function ChatPanel({
 }
 
 function LiveChat({ api, onUnread }: { api: ChatApi; onUnread?: (unread: boolean) => void }): ReactNode {
-  const [tickets, setTickets] = useState<ChatTicket[] | null>(null);
+  const [tickets, setTickets] = useState<ChatTicket[] | null>(ticketCache);
   const [openId, setOpenId] = useState<number | null>(null);
 
   // Re-pull the list and resync the app-level unread badge. Called after every change.
   const refresh = useCallback(async (): Promise<void> => {
     const l = await api.list();
     if (!l) return;
+    ticketCache = l.tickets;
     setTickets(l.tickets);
     onUnread?.(l.unread);
   }, [api, onUnread]);
@@ -431,7 +453,9 @@ function LiveChat({ api, onUnread }: { api: ChatApi; onUnread?: (unread: boolean
     let live = true;
     void api.list().then((l) => {
       if (!live) return;
-      setTickets(l?.tickets ?? []);
+      const next = l?.tickets ?? [];
+      ticketCache = next;
+      setTickets(next);
       if (l) onUnread?.(l.unread);
     });
     return () => {
@@ -440,8 +464,6 @@ function LiveChat({ api, onUnread }: { api: ChatApi; onUnread?: (unread: boolean
     // api/onUnread are stable (App memoizes); load once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  if (tickets === null) return <Loading />;
 
   if (openId !== null) {
     return (
@@ -473,7 +495,9 @@ function LiveChat({ api, onUnread }: { api: ChatApi; onUnread?: (unread: boolean
         </div>
         <div className="flex flex-col gap-3 border-t border-white/[0.08] pt-7 @[620px]:border-t-0 @[620px]:pt-0 @[620px]:pl-9">
           <Eyebrow>Your messages</Eyebrow>
-          {tickets.length === 0 ? (
+          {tickets === null ? (
+            <Loading />
+          ) : tickets.length === 0 ? (
             <EmptyNote>
               Your messages show up here. We read every one and reply right in the thread.
             </EmptyNote>
@@ -510,18 +534,25 @@ function TicketThread({
   onBack: () => void;
   onOpened: () => void;
 }): ReactNode {
-  const [messages, setMessages] = useState<ChatMessage[] | null>(null);
-  const [category, setCategory] = useState<string | null>(null);
-  const [subject, setSubject] = useState<string | null>(null);
+  const cached = threadCache.get(threadId);
+  const [messages, setMessages] = useState<ChatMessage[] | null>(cached?.messages ?? null);
+  const [category, setCategory] = useState<string | null>(cached?.category ?? null);
+  const [subject, setSubject] = useState<string | null>(cached?.subject ?? null);
   const endRef = useScrollToEnd(messages?.length ?? 0);
 
   useEffect(() => {
     let live = true;
     void api.open(threadId).then((d) => {
       if (!live) return;
-      setMessages(d?.messages ?? []);
-      setCategory(d?.category ?? null);
-      setSubject(d?.subject ?? null);
+      const view: TicketView = {
+        messages: d?.messages ?? [],
+        category: d?.category ?? null,
+        subject: d?.subject ?? null,
+      };
+      threadCache.set(threadId, view);
+      setMessages(view.messages);
+      setCategory(view.category);
+      setSubject(view.subject);
       onOpened(); // opening marked it read — resync the badge/list
     });
     return () => {
@@ -545,6 +576,7 @@ function TicketThread({
             const next = await api.reply(threadId, text);
             if (!next) return false;
             setMessages(next);
+            threadCache.set(threadId, { messages: next, category, subject });
             return true;
           }}
         />
@@ -608,11 +640,15 @@ function LocalForm(): ReactNode {
 // Dev-only inbox: every player's ticket, newest-active first, each openable to read + reply. Same
 // rows as the player's inbox, only with the player's identity as the avatar + a name on the preview.
 export function AdminInbox({ api }: { api: ChatApi }): ReactNode {
-  const [tickets, setTickets] = useState<InboxTicket[] | null>(null);
+  const [tickets, setTickets] = useState<InboxTicket[] | null>(adminCache);
   const [open, setOpen] = useState<InboxTicket | null>(null);
 
   const refresh = useCallback((): void => {
-    void api.admin.inbox().then(setTickets);
+    void api.admin.inbox().then((t) => {
+      if (!t) return; // a failed refresh keeps the last-known list rather than blanking to a spinner
+      adminCache = t;
+      setTickets(t);
+    });
   }, [api]);
   useEffect(refresh, [refresh]);
 
@@ -665,15 +701,19 @@ function AdminThread({
   ticket: InboxTicket;
   onBack: () => void;
 }): ReactNode {
-  const [messages, setMessages] = useState<ChatMessage[] | null>(null);
-  const [name, setName] = useState<string | null>(ticket.name);
+  const cached = adminThreadCache.get(ticket.threadId);
+  const [messages, setMessages] = useState<ChatMessage[] | null>(cached?.messages ?? null);
+  const [name, setName] = useState<string | null>(cached?.name ?? ticket.name);
   const endRef = useScrollToEnd(messages?.length ?? 0);
 
   useEffect(() => {
     let live = true;
     void api.admin.thread(ticket.threadId).then((d) => {
       if (!live) return;
-      setMessages(d?.messages ?? []);
+      const msgs = d?.messages ?? [];
+      const nm = d?.name ?? ticket.name;
+      adminThreadCache.set(ticket.threadId, { messages: msgs, name: nm });
+      setMessages(msgs);
       if (d?.name) setName(d.name);
     });
     return () => {
@@ -696,6 +736,7 @@ function AdminThread({
             const next = await api.admin.reply(ticket.threadId, text);
             if (!next) return false;
             setMessages(next);
+            adminThreadCache.set(ticket.threadId, { messages: next, name });
             return true;
           }}
         />

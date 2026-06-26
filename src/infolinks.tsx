@@ -196,11 +196,24 @@ function Faq(): ReactNode {
   );
 }
 
+// Keep-a-Changelog category accents. The label color (and its matching bullet dot) lets you
+// scan feature vs. fix at a glance — mirroring the SemVer bump: Added → minor, Fixed → patch,
+// a breaking Changed/Removed → major. Unknown labels fall back to a neutral zinc.
+const SECTION_TONE: Record<string, { text: string; dot: string }> = {
+  Added: { text: "text-[#a3c65b]", dot: "before:bg-[#a3c65b]" },
+  Changed: { text: "text-[#7ea8d6]", dot: "before:bg-[#7ea8d6]" },
+  Fixed: { text: "text-[#d6a45e]", dot: "before:bg-[#d6a45e]" },
+  Deprecated: { text: "text-[#d6a45e]", dot: "before:bg-[#d6a45e]" },
+  Removed: { text: "text-[#d67e7e]", dot: "before:bg-[#d67e7e]" },
+  Security: { text: "text-[#d67e7e]", dot: "before:bg-[#d67e7e]" },
+};
+const SECTION_FALLBACK = { text: "text-zinc-500", dot: "before:bg-zinc-600" };
+
 function Changelog(): ReactNode {
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-7">
       {CHANGELOG.map((e) => (
-        <div key={e.v} className="flex flex-col gap-2.25">
+        <div key={e.v} className="flex flex-col gap-3">
           <div className="flex items-center gap-2.5">
             <span className="text-[15px] font-bold tabular-nums text-zinc-100">
               {e.v}
@@ -212,16 +225,33 @@ function Changelog(): ReactNode {
             )}
             <span className="ml-auto text-[12px] text-zinc-500">{e.d}</span>
           </div>
-          <div className="flex flex-col gap-1.75">
-            {e.items.map((it, i) => (
-              <div
-                key={i}
-                className="relative pl-4 text-[13.5px] leading-[1.45] text-zinc-400 before:absolute before:left-0.5 before:top-2 before:h-1.25 before:w-1.25 before:rounded-full before:bg-zinc-600 before:content-['']"
-              >
-                {it}
+          {e.sections.map((s, si) => {
+            const tone = SECTION_TONE[s.label] ?? SECTION_FALLBACK;
+            return (
+              <div key={si} className="flex flex-col gap-1.75">
+                {s.label && (
+                  <div
+                    className={
+                      "text-[10.5px] font-bold uppercase tracking-[0.14em] " + tone.text
+                    }
+                  >
+                    {s.label}
+                  </div>
+                )}
+                {s.items.map((it, i) => (
+                  <div
+                    key={i}
+                    className={
+                      "relative pl-4 text-[13.5px] leading-[1.45] text-zinc-400 before:absolute before:left-0.5 before:top-2 before:h-1.25 before:w-1.25 before:rounded-full before:content-[''] " +
+                      tone.dot
+                    }
+                  >
+                    {it}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
       ))}
     </div>

@@ -15,19 +15,24 @@ import {
 } from "../src/discord-messages.js";
 import { Game, type Puzzle } from "../src/game.js";
 import { canonicalScope } from "../src/scope.js";
-import { admin } from "./_admin.js";
 import type { CardPlayer } from "./_card.js";
 import {
   botCardUrl,
   CARD_POST_COOLDOWN_MS,
   cardPayload,
   interactionFollowupUrl,
+  playInvitePayload,
   playerFinished,
   sendCard,
   withGrids,
 } from "./_livecard.js";
-import { fetchPuzzle, todayET } from "./_nyt.js";
 import { PLAY_CUSTOM_ID } from "./_recap.js";
+
+// `admin` (the Supabase SDK — a heavy module) and `_nyt` (which imports `admin`) are loaded
+// lazily inside the handlers that need them, NOT at module top, so a cold instance can return
+// the LAUNCH_ACTIVITY ACK inside Discord's 3s deadline without first evaluating the Supabase
+// SDK. The launch ACK touches none of it; the card work (postCard) runs after the ACK via
+// waitUntil and loads it then — exactly like @napi-rs/canvas at the `_card` import in postCard.
 
 // Discord interactions webhook. Discord POSTs here for: the typed /connections command,
 // the App-Launcher Entry Point command, the card/recap "Play now!" button, and a PING.
@@ -220,6 +225,9 @@ async function shareResponse(body: LaunchInteraction): Promise<object> {
   const u = body.member?.user ?? body.user;
   if (!u?.id) return ephemeral("Couldn’t read your Discord account — try again.");
 
+  // Heavy deps loaded here, off the launch-ACK cold path (see the import note up top).
+  const { admin } = await import("./_admin.js");
+  const { fetchPuzzle, todayET } = await import("./_nyt.js");
   const db = admin();
   if (!db) return ephemeral("Sharing is unavailable right now — try again in a bit.");
 
@@ -297,6 +305,7 @@ async function unsubscribeResponse(body: LaunchInteraction): Promise<object> {
     return unsubscribeResult("no-guild");
   }
 
+  const { admin } = await import("./_admin.js");
   const db = admin();
   if (!db) return unsubscribeResult("error");
 
@@ -399,6 +408,86 @@ type LaunchInteraction = Interaction & {
   app_permissions?: string;
 };
 
+// Whether a Play invite was posted in this scope recently enough to stay quiet — the live-card
+// 2h cooldown (CARD_POST_COOLDOWN_MS) reused as a per-channel throttle so relaunches can't spam.
+// A null/unparseable timestamp means "never posted" → not throttled. Exported for tests.
+export function inviteWithinCooldown(
+  postedAt: string | null | undefined,
+  now: number,
+): boolean {
+  if (!postedAt) return false;
+  const t = Date.parse(postedAt);
+  return !Number.isNaN(t) && now - t < CARD_POST_COOLDOWN_MS;
+}
+
+// Post a one-off, PUBLIC "Play" invite for a launch with no live card — currently a DM/group DM
+// (Phase 1). It rides the interaction-followup token, so it needs no bot and no channel perms: a
+// one-line announce + the same "Play now!" button as the card, so anyone in the chat can open the
+// activity. Throttled per channel by reusing the live_cards cooldown; the stored row carries NO
+// message_id, so /api/refresh-card + /api/join short-circuit and nothing ever tries to edit it.
+// Best-effort — runs after the launch ACK, so any failure just means no invite, never blocks play.
+async function postPlayInvite(
+  body: LaunchInteraction,
+  scope: string,
+  channelId: string,
+  appId: string,
+  token: string,
+): Promise<void> {
+  const { admin } = await import("./_admin.js");
+  const { todayET } = await import("./_nyt.js");
+  const db = admin();
+  if (!db) {
+    console.warn("[invite] skip: no db (admin client unconfigured)");
+    return;
+  }
+  const date = todayET();
+
+  const { data: row, error: selErr } = await db
+    .from("live_cards")
+    .select("posted_at")
+    .eq("scope_id", scope)
+    .eq("puzzle_date", date)
+    .eq("channel_id", channelId)
+    .maybeSingle();
+  if (selErr) console.error("[invite] live_cards select error", selErr.message);
+  if (inviteWithinCooldown(row?.posted_at as string | null | undefined, Date.now())) {
+    console.log("[invite] skip: within cooldown", { scope, channel: channelId });
+    return;
+  }
+
+  const u = body.member?.user ?? body.user;
+  const name = u?.global_name ?? u?.username ?? "Someone";
+  const r = await fetch(interactionFollowupUrl(appId, token), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(playInvitePayload(name)),
+  });
+  if (!r.ok) {
+    console.error(
+      "[invite] followup failed",
+      { status: r.status },
+      await r.text().catch(() => ""),
+    );
+    return;
+  }
+  console.log("[invite] posted", { scope, channel: channelId });
+
+  // Record posted_at only (no message_id) so the cooldown throttles future launches while the
+  // live-edit routes stay hands-off.
+  const nowIso = new Date().toISOString();
+  const { error: upErr } = await db.from("live_cards").upsert(
+    {
+      scope_id: scope,
+      puzzle_date: date,
+      channel_id: channelId,
+      posted_at: nowIso,
+      updated_at: nowIso,
+    },
+    { onConflict: "scope_id,puzzle_date,channel_id" },
+  );
+  if (upErr) console.error("[invite] live_cards upsert error", upErr.message);
+}
+
 // Post or refresh the room's "who's playing" card. At most one card per room every ~2h
 // (CARD_POST_COOLDOWN_MS): the launch that opens a window creates it — a /connections
 // command as an interaction followup (no bot), the "Play now!" button as a bot reply to
@@ -416,7 +505,11 @@ async function postCard(body: LaunchInteraction): Promise<void> {
     return;
   }
 
-  // The card is a room board, so only guild channels get one (mirrors /api/join's gate).
+  // The live "who's playing" card is a room board kept live by the bot, so only guild channels
+  // get one (mirrors /api/join's gate). A DM/group DM has no guild scope and no bot to maintain a
+  // card — but we can still drop a one-off PUBLIC "Play" invite on the interaction-followup token
+  // (no bot/perms needed) so whoever's in the chat can join. (Bot-less + no-perms servers get the
+  // same invite in a later phase; for now they keep the behaviour below.)
   const guildId = typeof body.guild_id === "string" ? body.guild_id : null;
   const channelId =
     typeof body.channel_id === "string"
@@ -425,12 +518,13 @@ async function postCard(body: LaunchInteraction): Promise<void> {
         ? body.channel.id
         : null;
   const scope = canonicalScope(guildId, channelId);
-  if (!scope || !scope.startsWith("g:") || !channelId) {
-    console.warn("[card] skip: no guild scope/channel", {
-      guildId,
-      channelId,
-      scope,
-    });
+  if (!scope || !channelId) {
+    console.warn("[card] skip: no scope/channel", { guildId, channelId, scope });
+    return;
+  }
+  if (!scope.startsWith("g:")) {
+    // DM / group DM — no guild, no bot to keep a card live. Post the static Play invite and stop.
+    await postPlayInvite(body, scope, channelId, appId, token);
     return;
   }
 
@@ -475,6 +569,9 @@ async function postCard(body: LaunchInteraction): Promise<void> {
       : null,
   };
 
+  // Heavy deps loaded here, off the launch-ACK cold path (see the import note up top).
+  const { admin } = await import("./_admin.js");
+  const { fetchPuzzle, todayET } = await import("./_nyt.js");
   const db = admin();
   if (!db) {
     console.warn("[card] skip: no db (admin client unconfigured)");
@@ -673,6 +770,7 @@ async function nudgeOnce(
 ): Promise<void> {
   const u = body.member?.user ?? body.user;
   if (!u?.id) return;
+  const { admin } = await import("./_admin.js");
   const db = admin();
   if (!db) return;
 

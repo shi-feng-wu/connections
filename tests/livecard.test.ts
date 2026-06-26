@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { botCardUrl, cardPayload, playerFinished } from "../api/_livecard";
+import { botCardUrl, cardPayload, playInvitePayload, playerFinished } from "../api/_livecard";
 import type { Puzzle } from "../src/game";
 
 // api/_livecard.ts: the room card is a bot message. On create it replies to the
@@ -24,6 +24,29 @@ describe("cardPayload", () => {
   it("suppresses notifications on create and reply", () => {
     expect((cardPayload() as { flags?: number }).flags).toBe(4096);
     expect((cardPayload({ messageId: "1", channelId: "2" }) as { flags?: number }).flags).toBe(4096);
+  });
+});
+
+// playInvitePayload: the DM/group-DM fallback when there's no bot to keep a live card. It's a
+// PUBLIC (not ephemeral) one-line announce + the same "Play now!" button, with no attachment
+// since it never updates.
+describe("playInvitePayload", () => {
+  it("announces the launcher with a public Play button and no attachment", () => {
+    const p = playInvitePayload("borgar") as {
+      content?: string;
+      flags?: number;
+      attachments?: unknown;
+      components?: { components: { custom_id: string; label: string }[] }[];
+    };
+    expect(p.content).toContain("borgar");
+    // Public: posts silently (SUPPRESS_NOTIFICATIONS, 4096) but is NOT ephemeral (64).
+    expect(p.flags).toBe(4096);
+    expect((p.flags ?? 0) & 64).toBe(0);
+    // Static invite — no image, so nothing ever edits it.
+    expect(p.attachments).toBeUndefined();
+    const button = p.components?.[0]?.components?.[0];
+    expect(button?.custom_id).toBe("connections_play");
+    expect(button?.label).toBe("Play now!");
   });
 });
 

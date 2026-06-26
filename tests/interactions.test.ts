@@ -1,7 +1,7 @@
 import { generateKeyPairSync, sign as edSign } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { Game, LEVELS, type Puzzle } from "../src/game";
-import { botCanPostInChannel, installNudgePayload, isUserInstallOnly, missingPermsNudgePayload, routeInteraction, shareCard, unsubscribeResult, verifyDiscordSig } from "../api/interactions";
+import { botCanPostInChannel, installNudgePayload, inviteWithinCooldown, isUserInstallOnly, missingPermsNudgePayload, routeInteraction, shareCard, unsubscribeResult, verifyDiscordSig } from "../api/interactions";
 
 // api/interactions.ts: Discord signs every interaction (Ed25519); an unverified
 // request must be refused, and the recap's Play button must map to a launch.
@@ -36,6 +36,23 @@ describe("verifyDiscordSig", () => {
     expect(verifyDiscordSig("{}", "", "1", pubHex)).toBe(false); // no signature
     expect(verifyDiscordSig("{}", "abcd", "1", "")).toBe(false); // no public key
     expect(verifyDiscordSig("{}", "zz", "1", pubHex)).toBe(false); // non-hex signature
+  });
+});
+
+// inviteWithinCooldown throttles the DM Play invite per channel by reusing the live-card 2h
+// cooldown, so relaunches don't spam the chat. "Never posted" (null) must not throttle.
+describe("inviteWithinCooldown", () => {
+  const now = 1_700_000_000_000;
+  it("does not throttle when never posted", () => {
+    expect(inviteWithinCooldown(null, now)).toBe(false);
+    expect(inviteWithinCooldown(undefined, now)).toBe(false);
+  });
+  it("throttles within the 2h window and clears after it", () => {
+    expect(inviteWithinCooldown(new Date(now - 60_000).toISOString(), now)).toBe(true);
+    expect(inviteWithinCooldown(new Date(now - 3 * 60 * 60 * 1000).toISOString(), now)).toBe(false);
+  });
+  it("does not throttle on an unparseable timestamp", () => {
+    expect(inviteWithinCooldown("not-a-date", now)).toBe(false);
   });
 });
 

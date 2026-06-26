@@ -114,6 +114,21 @@ export function cardPayload(replyTo?: { messageId: string; channelId: string }):
   };
 }
 
+// A lightweight, static "Play" invite for a context where we can't keep a live card — a
+// DM/group DM, where there's no bot to edit a card all day. Posted as a PUBLIC interaction
+// followup (needs no bot or channel permission): a one-line announce plus the same "Play now!"
+// button as the card, so anyone in the chat can open the activity. It never updates (no
+// roster), so it carries no attachment and is never edited. Posted silently like the card.
+export function playInvitePayload(launcherName: string): object {
+  return {
+    content: `${launcherName} is playing today’s Connections`,
+    flags: SUPPRESS_NOTIFICATIONS,
+    components: [
+      { type: 1, components: [{ type: 2, style: 1, label: 'Play now!', custom_id: PLAY_CUSTOM_ID }] },
+    ],
+  };
+}
+
 // Send a card as a multipart message (image attachment). POST creates, PATCH edits
 // an existing message. `filename` must match the attachment referenced by the payload
 // (card.png for the live card, recap.png for the daily recap). Returns the raw Response.

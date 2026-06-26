@@ -5,23 +5,28 @@ describe("parseChangelog", () => {
   const sample = [
     "<!-- a comment mentioning ## and - that must be ignored -->",
     "",
-    "## v2.0 — Jul 1, 2026",
+    "## v2.0.0 — Jul 1, 2026",
+    "### Added",
     "- First item.",
     "- Second item — with an em dash inside.",
+    "### Fixed",
+    "- A fix.",
     "",
-    "## v1.9 — Jun 1, 2026",
+    "## v1.9.0 — Jun 1, 2026",
+    "### Added",
     "- Only item.",
   ].join("\n");
 
-  it("parses headers into version + date and lines into items", () => {
+  it("parses headers into version + date and sections into labelled item lists", () => {
     const out = parseChangelog(sample);
     expect(out).toHaveLength(2);
-    expect(out[0]).toMatchObject({ v: "v2.0", d: "Jul 1, 2026" });
-    expect(out[0].items).toEqual([
-      "First item.",
-      "Second item — with an em dash inside.",
+    expect(out[0]).toMatchObject({ v: "v2.0.0", d: "Jul 1, 2026" });
+    expect(out[0].sections).toEqual([
+      { label: "Added", items: ["First item.", "Second item — with an em dash inside."] },
+      { label: "Fixed", items: ["A fix."] },
     ]);
-    expect(out[1]).toMatchObject({ v: "v1.9", d: "Jun 1, 2026", items: ["Only item."] });
+    expect(out[1]).toMatchObject({ v: "v1.9.0", d: "Jun 1, 2026" });
+    expect(out[1].sections).toEqual([{ label: "Added", items: ["Only item."] }]);
   });
 
   it("flags only the first (newest) release as new", () => {
@@ -31,9 +36,19 @@ describe("parseChangelog", () => {
   });
 
   it("ignores the top comment, blank lines, and stray text", () => {
-    const out = parseChangelog("intro line\n\n## v1.0 — Jan 1, 2026\nnot an item\n- Real.\n");
+    const out = parseChangelog(
+      "intro line\n\n## v1.0.0 — Jan 1, 2026\n### Added\nnot an item\n- Real.\n",
+    );
     expect(out).toHaveLength(1);
-    expect(out[0].items).toEqual(["Real."]);
+    expect(out[0].sections).toEqual([{ label: "Added", items: ["Real."] }]);
+  });
+
+  it("collects items before any section into an implicit untitled one", () => {
+    const out = parseChangelog("## v1.0.0 — Jan 1, 2026\n- Loose item.\n### Added\n- Grouped.");
+    expect(out[0].sections).toEqual([
+      { label: "", items: ["Loose item."] },
+      { label: "Added", items: ["Grouped."] },
+    ]);
   });
 });
 
@@ -48,12 +63,21 @@ describe("CHANGELOG (parsed from changelog.md)", () => {
     expect(APP_VERSION).toBe(CHANGELOG[0].v);
   });
 
-  it("gives every release a version, a date, and at least one non-empty item", () => {
+  it("uses three-part SemVer versions (vMAJOR.MINOR.PATCH)", () => {
     for (const e of CHANGELOG) {
-      expect(e.v).toMatch(/^v\d/);
+      expect(e.v).toMatch(/^v\d+\.\d+\.\d+$/);
+    }
+  });
+
+  it("gives every release a date and at least one non-empty item in a labelled section", () => {
+    for (const e of CHANGELOG) {
       expect(e.d.length).toBeGreaterThan(0);
-      expect(e.items.length).toBeGreaterThan(0);
-      expect(e.items.every((it) => it.trim().length > 0)).toBe(true);
+      expect(e.sections.length).toBeGreaterThan(0);
+      const items = e.sections.flatMap((s) => s.items);
+      expect(items.length).toBeGreaterThan(0);
+      expect(items.every((it) => it.trim().length > 0)).toBe(true);
+      // Real releases always label their sections (Added / Changed / Fixed / …).
+      expect(e.sections.every((s) => s.label.trim().length > 0)).toBe(true);
     }
   });
 });

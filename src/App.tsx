@@ -12,6 +12,7 @@ import {
   type ChatApi,
   type ChatBundle,
 } from "./chat";
+import { primeTicketCache } from "./chatview";
 import { DayTurnover, GameView, LoadingScreen } from "./components";
 import { msUntilNextEtMidnight } from "./countdown";
 import { PipThumbnail } from "./pip";
@@ -991,6 +992,7 @@ export function App({
     const refresh = (): void => {
       void chatApi.list().then((l) => {
         if (!l) return;
+        primeTicketCache(l.tickets); // seed the Feedback page so its first open shows instantly
         setChatUnread(l.unread);
         setChatIsDev(l.isDev);
       });

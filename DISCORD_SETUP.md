@@ -36,14 +36,19 @@ https://your-project.vercel.app/api/discord-callback
 
 | Prefix      | Target                                |
 | ----------- | ------------------------------------- |
-| `/`         | `your-project.vercel.app`        |
 | `/supabase` | `<your-project>.supabase.co`          |
+| `/relay`    | `<your-relay-host>` (Railway, `scripts/relay.mjs`) |
+| `/`         | `your-project.vercel.app`             |
 
 - Discord Activities sandbox **all** network requests through `*.discordsays.com`. A
   direct connection to Supabase (its realtime WebSocket + REST) is blocked
   (*"websocket is not available, the operation is insecure"*).
 - The `/supabase` mapping + `patchUrlMappings()` in `src/main.tsx` route Supabase
   through the proxy. The prefix here **must match** the one in `patchUrlMappings`.
+- `/relay` proxies the live-roster SSE relay (`src/roomlive.ts`, reached by relative
+  `/relay/...` paths — no `patchUrlMappings` needed). Without it the live roster is dark.
+- ⚠️ Ordering: Discord globs prefixes, so the catch-all `/` **must be last** or it
+  swallows `/supabase` and `/relay`.
 
 ## 3. General Information → Interactions Endpoint URL
 

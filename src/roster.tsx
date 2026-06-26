@@ -823,8 +823,8 @@ export function Roster({
             />
           </div>
         ) : (
-          // tabs stay live even with no scores; this is where they land
-          <StandingsEmpty key={panelKey} window={view === "all" ? "all" : "season"} />
+          // tabs stay live even with no scores; this is where they land (intentionally blank)
+          <StandingsEmpty key={panelKey} />
         )
       ) : (
         <FlipList

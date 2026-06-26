@@ -1,6 +1,17 @@
 import { Common, DiscordSDK } from "@discord/embedded-app-sdk";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BoardSnapshot } from "./board";
+import {
+  createTicket,
+  listChat,
+  loadAdminThread,
+  loadInbox,
+  openTicket,
+  replyTicket,
+  sendAdminReply,
+  type ChatApi,
+  type ChatBundle,
+} from "./chat";
 import { DayTurnover, GameView, LoadingScreen } from "./components";
 import { msUntilNextEtMidnight } from "./countdown";
 import { PipThumbnail } from "./pip";
@@ -254,10 +265,19 @@ export function App({
   const [phase, setPhase] = useState<"loading" | "ready" | "error" | "blocked">(
     "loading",
   );
+  // Dev-only: in a plain browser (not embedded in Discord) we still want the embedded-only chat/
+  // inbox usable for local testing. mockEmbedded ungates JUST that surface and pairs with the stub
+  // identity set at boot; the live roster/presence stay Discord-only. The backend (/api/chat) takes
+  // the stub via isLocalDev(), so threads read/write against the local Supabase.
+  const mockEmbedded = !isEmbedded && import.meta.env.DEV;
   // Whether this guild has the bot (guild install): the live answer from /api/join,
   // seeded from the per-guild localStorage cache at handshake so a repeat launch
   // targets the loading tip immediately. null = unknown / not a guild → show nothing.
   const [botInstalled, setBotInstalled] = useState<boolean | null>(null);
+  // Player↔dev chat badge state, loaded after the handshake: whether a reply is waiting (the
+  // dot on the Feedback entry) and whether this player is a dev (surfaces the admin Inbox).
+  const [chatUnread, setChatUnread] = useState(false);
+  const [chatIsDev, setChatIsDev] = useState(false);
   // Midnight day-rollover veil (src/components.tsx DayTurnover): `resetting` drives the
   // overlay; the ref guards swapToNewDay so the precise timer and the 30s poll can't both
   // fire a swap; newDayDate is the date we're rolling into, shown on the veil; newDayNo is
@@ -811,12 +831,18 @@ export function App({
           setPhase("blocked");
           return;
         }
-      } else if (!import.meta.env.DEV) {
+      } else if (mockEmbedded) {
+        // DEV standalone: skip the Discord handshake and stub an identity so the chat/inbox works
+        // in a plain browser. The backend accepts it via isLocalDev(); see mockEmbedded above.
+        meRef.current = { id: "local-dev", name: "Local Dev", avatar: undefined };
+        accessTokenRef.current = "dev";
+        authTicketRef.current = "dev";
+      } else {
         // Opened outside Discord in a real build — nothing to play here.
         setPhase("blocked");
         return;
       }
-      // Embedded + authenticated, or the DEV-only standalone fallback.
+      // Embedded + authenticated, or the DEV standalone fallback.
       await loadPuzzle();
       await refreshLeaderboard();
     })();
@@ -932,6 +958,51 @@ export function App({
     return () => clearInterval(id);
   }, [isEmbedded]);
 
+  // The player↔dev chat handlers, bound to this player's identity (refs) + the current puzzle.
+  // Stable, so the chat UI loads its inbox once on mount instead of refetching every render.
+  // Reads go through the cheap signed ticket; writes/admin actions through the live Discord token.
+  const chatApi = useMemo<ChatApi>(
+    () => ({
+      list: () => listChat(authTicketRef.current ?? ""),
+      open: (threadId) => openTicket(authTicketRef.current ?? "", threadId),
+      create: (text, category, subject) =>
+        createTicket({
+          accessToken: accessTokenRef.current ?? "",
+          text,
+          category,
+          subject,
+          puzzle: gameRef.current?.puzzle.id ?? null,
+        }),
+      reply: (threadId, text) => replyTicket(accessTokenRef.current ?? "", threadId, text),
+      admin: {
+        inbox: () => loadInbox(accessTokenRef.current ?? ""),
+        thread: (threadId) => loadAdminThread(accessTokenRef.current ?? "", threadId),
+        reply: (threadId, text) => sendAdminReply(accessTokenRef.current ?? "", threadId, text),
+      },
+    }),
+    [],
+  );
+
+  // Once the handshake is done, list tickets for the unread dot + the dev's Inbox entry, and
+  // re-check when the tab regains focus (a reply may have landed while away). Embedded only:
+  // preview/landing have no ticket and fall back to the local form.
+  useEffect(() => {
+    if ((!isEmbedded && !mockEmbedded) || phase !== "ready") return;
+    const refresh = (): void => {
+      void chatApi.list().then((l) => {
+        if (!l) return;
+        setChatUnread(l.unread);
+        setChatIsDev(l.isDev);
+      });
+    };
+    refresh();
+    const onVisible = (): void => {
+      if (!document.hidden) refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [isEmbedded, mockEmbedded, phase, chatApi]);
+
   // Precise midnight-ET swap: a self-rescheduling one-shot timer fires at the exact reset
   // (+2s so NYT has published the new puzzle), then re-arms for the next day. swapToNewDay
   // is single-flight and self-checks the date, so a foreground tab gets the swap the instant
@@ -1028,30 +1099,16 @@ export function App({
       /* user dismissed Discord's leave-app dialog — nothing to do */
     });
   };
-  // Send a feedback note to /api/feedback, which relays it to the dev's Discord webhook.
-  // We pass the Discord token (the endpoint verifies identity + tags the note) and the
-  // current puzzle number for context. Returns whether it landed, so the form can show a
-  // real success vs. a "try again".
-  const submitFeedback = async (
-    category: string,
-    text: string,
-  ): Promise<boolean> => {
-    try {
-      const r = await fetch("/api/feedback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accessToken: accessTokenRef.current,
-          category,
-          text,
-          puzzle: gameRef.current?.puzzle.id ?? null,
-        }),
-      });
-      return r.ok && ((await r.json()) as { ok?: boolean }).ok === true;
-    } catch {
-      return false;
-    }
-  };
+  // The chat bundle the footer's Feedback page (and the dev Inbox) runs on: the bound api plus
+  // the badge state. Embedded only — preview/landing pass nothing and get the local-only form.
+  const chatBundle: ChatBundle | undefined = isEmbedded || mockEmbedded
+    ? {
+        api: chatApi,
+        unread: chatUnread,
+        isDev: chatIsDev,
+        onUnread: setChatUnread,
+      }
+    : undefined;
   // Open an external URL (the footer's Ko-fi link). Embedded, it must go through the Discord
   // SDK (which shows the leave-app consent); standalone, sdkRef is null so we window.open.
   const openExternal = (url: string): void => {
@@ -1100,7 +1157,7 @@ export function App({
         onPresence={onPresence}
         onCommit={commitGuess}
         onFinish={onFinish}
-        onSubmitFeedback={submitFeedback}
+        chat={chatBundle}
         onOpenExternal={openExternal}
         initialRevealed={revealedLevelsOf(gameRef.current)}
       />

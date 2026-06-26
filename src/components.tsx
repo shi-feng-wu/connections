@@ -1,6 +1,8 @@
+import { Menu } from "lucide-react";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import iconUrl from "./assets/connections-nyt.png";
 import { Board, type BoardSnapshot } from "./board";
+import type { ChatBundle } from "./chat";
 import { HoverButton } from "./hoverbutton";
 import { useInfoLinks } from "./infolinks";
 import { LEVELS, type Game, type Puzzle } from "./game";
@@ -282,6 +284,67 @@ function Header({
   );
 }
 
+// Mobile masthead (min-[800px]:hidden): the in-flow top bar mirroring the desktop Header's
+// editorial lockup — brick logo · "Connections" wordmark on the left, the serif date over
+// the puzzle number on the right — but capped with the info-menu hamburger (mobile has no
+// desktop footer, so this is where the links live). Making the trigger an in-flow header
+// element rather than a button floating over the roster is the whole point: a fixed
+// bottom-right button sat on top of the scrolling live list and the next-puzzle countdown.
+// The unread dot rides the hamburger. Discord draws its own activity bar above us, so this
+// stays slim; on a very narrow phone the wordmark ellipsizes before it can shove the
+// dateline/menu off (min-w-0 + truncate), while the right cluster holds its size (flex-none).
+function MobileMasthead({
+  puzzle,
+  hasNew,
+  onOpenMenu,
+}: {
+  puzzle: Puzzle;
+  hasNew: boolean;
+  onOpenMenu: () => void;
+}) {
+  const dateLabel = new Date(`${puzzle.date}T00:00:00`).toLocaleDateString(
+    "en-US",
+    { year: "numeric", month: "long", day: "numeric" },
+  );
+  return (
+    <header className="mb-2.5 flex flex-none items-center justify-between gap-3 border-b border-white/[0.08] pb-2.5 min-[800px]:hidden">
+      {/* left lockup — brick icon · serif wordmark (scaled down from the desktop masthead) */}
+      <div className="flex min-w-0 items-center gap-2">
+        <img
+          src={iconUrl}
+          alt=""
+          className="h-[22px] w-[22px] flex-none object-contain"
+        />
+        <span className="min-w-0 truncate font-display text-[21px] font-bold leading-none tracking-[-0.025em] text-[#efefe6] [text-box:trim-both_cap_alphabetic]">
+          Connections
+        </span>
+      </div>
+      {/* right cluster — the dateline (serif date over uppercase No.) then the menu */}
+      <div className="flex flex-none items-center gap-2.5">
+        <div className="flex flex-col items-end gap-[2px] text-right">
+          <span className="whitespace-nowrap font-display text-[12.5px] font-semibold leading-[1.05] text-zinc-300">
+            {dateLabel}
+          </span>
+          <span className="whitespace-nowrap text-[9px] font-semibold uppercase leading-none tracking-[0.08em] tabular-nums text-zinc-600">
+            No. {puzzle.id}
+          </span>
+        </div>
+        <HoverButton
+          onClick={onOpenMenu}
+          hover="opacity-70"
+          aria-label="Open menu"
+          className="relative grid h-9 w-9 flex-none cursor-pointer place-items-center rounded-lg text-zinc-300 transition-opacity active:opacity-60"
+        >
+          <Menu size={20} strokeWidth={2.2} aria-hidden />
+          {hasNew && (
+            <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[#a0c35a] ring-2 ring-black" />
+          )}
+        </HoverButton>
+      </div>
+    </header>
+  );
+}
+
 // Responsive game shell. Mobile / tablet: a single column — header, board + footer,
 // then the players section (Live / Season / All-time tabs + list) — capped at
 // max-w-480 and centered, so the in-between (tablet) band reads as a roomy phone
@@ -405,7 +468,7 @@ export function GameView({
   onPresence,
   onCommit,
   onFinish,
-  onSubmitFeedback,
+  chat,
   onOpenExternal,
   initialRevealed,
 }: {
@@ -428,9 +491,10 @@ export function GameView({
   onPresence: (snap: BoardSnapshot) => void;
   onCommit?: (guess: string[]) => Promise<boolean>;
   onFinish: () => void;
-  // Sends a feedback note (the footer's "Send feedback" form). Returns whether it landed.
-  // Omitted by the dev preview / landing, where the form falls back to a local thank-you.
-  onSubmitFeedback?: (category: string, text: string) => Promise<boolean>;
+  // The player↔dev chat (the footer's "Feedback" page): its bound api plus the unread/isDev
+  // badge state. Omitted by the dev preview / landing, where the page falls back to a
+  // local-only form.
+  chat?: ChatBundle;
   // Opens an external URL (the footer's Ko-fi link). App routes it through the Discord SDK
   // when embedded; omitted in preview/landing, where useInfoLinks falls back to window.open.
   onOpenExternal?: (url: string) => void;
@@ -470,7 +534,7 @@ export function GameView({
   // under the game on desktop; a kebab (⋮) in the players-tab row → bottom sheet on
   // mobile. Both open the same full-screen DetailView (changelog / FAQ / feedback).
   // overlays (sheet + detail screen) portal to <body>.
-  const info = useInfoLinks(onSubmitFeedback, onOpenExternal);
+  const info = useInfoLinks(chat, onOpenExternal);
 
   return (
     // Mobile: the unit fills the viewport (#app content box = 100dvh − top safe-area
@@ -500,6 +564,13 @@ export function GameView({
         >
           {/* board area — desktop padding insets the board from the rounded card edge */}
           <div className="flex min-h-[calc(100dvh_-_max(0.75rem,var(--sait))_-_max(1.5rem,var(--saib)))] w-full flex-col min-[800px]:min-h-0 min-[800px]:p-[22px]">
+            {/* mobile-only masthead (branding + info menu); the game box below flex-grows
+              into the rest. Desktop hides it — its masthead sits atop the players rail. */}
+            <MobileMasthead
+              puzzle={game.puzzle}
+              hasNew={info.hasNew}
+              onOpenMenu={info.openMenu}
+            />
             {/* game box — desktop: occupies the board's VISUAL box (boxWidth × boxHeight)
               in flow, with the scaled board filling it from the top-left so the frame hugs
               it exactly. Mobile: the column fills the viewport (the box just wraps it). */}

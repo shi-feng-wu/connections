@@ -6,6 +6,14 @@
   badge and sets the app version, so add a new release at the very top.
 -->
 
+## v2.1 — Jun 25, 2026
+
+- On phones, the date, puzzle number, and menu now live in a header at the top of the screen. The menu button used to float in the bottom corner, where it could cover the next-puzzle countdown once your run was over.
+
+## v2.0 — Jun 24, 2026
+
+- Feedback is a conversation now. Give each message a subject and it becomes its own thread in your Feedback inbox — open any one to see our replies and write back. The inbox shows the latest line from either side, with a dot when there’s something new.
+
 ## v1.9 — Jun 24, 2026
 
 - If the bot can’t post in your channel (usually a private one), launching the game there now shows a private tip with the exact permissions to grant, so the recap and who’s-playing card can appear.

@@ -1,10 +1,9 @@
 import {
-  Check,
   ChevronRight,
   CircleHelp,
   Coffee,
   FileText,
-  Menu,
+  Inbox,
   MessageCircle,
   X,
 } from "lucide-react";
@@ -18,11 +17,12 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { APP_VERSION, CHANGELOG } from "./changelog";
-import { HoverButton } from "./hoverbutton";
+import type { ChatBundle } from "./chat";
+import { AdminInbox, ChatPanel } from "./chatview";
 
 // Info links from the redesign ("Desktop/Mobile Connections" handoff). Desktop surfaces
-// them as a LinkBar footer beneath the game; mobile as a kebab (⋮) in the players-tab row
-// that opens a UtilitySheet bottom sheet. Both routes open the same full-screen DetailView
+// them as a LinkBar footer beneath the game; mobile as a hamburger in the masthead that
+// opens a UtilitySheet bottom sheet. Both routes open the same full-screen DetailView
 // — a screen that slides over the game, not a modal.
 //
 // Three links, all internal: Changelog (rolled up from the commit history), How it works
@@ -34,7 +34,7 @@ import { HoverButton } from "./hoverbutton";
 // module keep resolving it here.
 export { APP_VERSION };
 
-type LinkId = "changelog" | "faq" | "feedback";
+type LinkId = "changelog" | "faq" | "feedback" | "inbox";
 type LinkDef = {
   key: string;
   label: string;
@@ -71,6 +71,10 @@ const LINKS: LinkDef[] = [
   },
 ];
 
+// Dev-only entry, appended to the link list when the chat load reports isDev. Opens the admin
+// inbox (every player's thread) on the same DetailView the other pages use.
+const INBOX_LINK: LinkDef = { key: "inbox", label: "Inbox", Icon: Inbox, page: "inbox" };
+
 // The DetailView header (centered title card): a tracked eyebrow over a big serif title.
 // The eyebrow is the section/nav name; the title reads editorial.
 const META: Record<LinkId, { eyebrow: string; title: string }> = {
@@ -86,26 +90,13 @@ const META: Record<LinkId, { eyebrow: string; title: string }> = {
     eyebrow: "Feedback",
     title: "Bugs, Ideas, General Thoughts",
   },
+  inbox: {
+    eyebrow: "Admin",
+    title: "Inbox",
+  },
 };
 
 // ---- content screens ----
-
-function Section({
-  h,
-  children,
-}: {
-  h: string;
-  children: ReactNode;
-}): ReactNode {
-  return (
-    <div className="flex flex-col gap-2.25">
-      <div className="font-sans text-[11px] font-bold uppercase tracking-[0.07em] text-zinc-500">
-        {h}
-      </div>
-      {children}
-    </div>
-  );
-}
 
 // One Q&A pair — a question heading over its answer.
 function QA({ q, children }: { q: string; children: ReactNode }): ReactNode {
@@ -237,102 +228,6 @@ function Changelog(): ReactNode {
   );
 }
 
-function FeedbackForm({
-  onSubmit,
-}: {
-  onSubmit?: (category: string, text: string) => Promise<boolean>;
-}): ReactNode {
-  const [cat, setCat] = useState("Bug");
-  const [text, setText] = useState("");
-  const [sent, setSent] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [failed, setFailed] = useState(false);
-
-  const send = async (): Promise<void> => {
-    const note = text.trim();
-    if (!note || sending) return;
-    // No opener (dev preview / landing, no Discord): keep the local thank-you.
-    if (!onSubmit) {
-      setSent(true);
-      return;
-    }
-    setSending(true);
-    setFailed(false);
-    const ok = await onSubmit(cat, note);
-    setSending(false);
-    if (ok) setSent(true);
-    else setFailed(true);
-  };
-
-  if (sent) {
-    return (
-      <div className="flex flex-col items-center gap-3.25 px-4 py-11 text-center">
-        <span className="grid h-14 w-14 place-items-center rounded-full bg-emerald-400/[0.13] text-emerald-400">
-          <Check size={26} strokeWidth={2.25} aria-hidden />
-        </span>
-        <div className="font-display text-[21px] font-bold text-[#efefe6]">
-          Thanks, got it!
-        </div>
-        <p className="m-0 max-w-[280px] text-[14px] leading-[1.55] text-zinc-400">
-          It comes straight to us, and we read every one.
-        </p>
-      </div>
-    );
-  }
-
-  const CHIPS = ["Bug", "Idea", "Other"];
-  return (
-    // gap between the chips block, the details block, and the button — without this
-    // wrapper they'd stack flush (Faq/Changelog get their rhythm the same way).
-    <div className="flex flex-col gap-6">
-      <Section h="What’s this about?">
-        <div className="flex flex-wrap gap-2">
-          {CHIPS.map((c) => (
-            // Design's `.fchip:hover { color: zinc-100; border-color: zinc-600 }` — CSS
-            // :hover on the unselected chips only (the selected one is filled).
-            <button
-              key={c}
-              type="button"
-              onClick={() => setCat(c)}
-              className={
-                "cursor-pointer rounded-full border px-3.75 py-2 font-sans text-[13px] font-semibold transition-colors " +
-                (cat === c
-                  ? "border-zinc-100 bg-zinc-100 text-zinc-900"
-                  : "border-zinc-700 bg-transparent text-zinc-400 hover:border-zinc-600 hover:text-zinc-100")
-              }
-            >
-              {c}
-            </button>
-          ))}
-        </div>
-      </Section>
-      <Section h="Details">
-        <textarea
-          className="min-h-[130px] w-full resize-y rounded-xl border border-zinc-700 bg-white/[0.03] px-3.5 py-3.25 font-sans text-[14px] leading-[1.5] text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-zinc-500"
-          placeholder="Tell us what broke, or what you’d love to see…"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-        />
-      </Section>
-      <div className="flex flex-col gap-2.5">
-        {failed && (
-          <p className="m-0 text-[13px] text-[#e06c75]">
-            Couldn’t send that. Mind trying again in a sec?
-          </p>
-        )}
-        <HoverButton
-          hover="opacity-85"
-          disabled={!text.trim() || sending}
-          onClick={send}
-          className="h-[46px] w-full cursor-pointer rounded-full bg-zinc-100 font-sans text-[14px] font-semibold text-zinc-900 transition-opacity disabled:cursor-default disabled:opacity-40"
-        >
-          {sending ? "Sending…" : "Send it"}
-        </HoverButton>
-      </div>
-    </div>
-  );
-}
-
 // Full-screen content view that slides over the game (a screen, not a modal): opaque
 // app background, its own header with a back button. Portaled to <body> with fixed
 // positioning so it covers the whole game and escapes GameView's desktop scale
@@ -355,11 +250,11 @@ function useScrollLock(): void {
 function DetailView({
   id,
   onBack,
-  onSubmitFeedback,
+  chat,
 }: {
   id: LinkId;
   onBack: () => void;
-  onSubmitFeedback?: (category: string, text: string) => Promise<boolean>;
+  chat?: ChatBundle;
 }): ReactNode {
   useScrollLock();
   useEffect(() => {
@@ -389,7 +284,14 @@ function DetailView({
       {/* Content top padding clears the close button AND the same safe area (pt-14 + --sait),
         so the title never tucks under Discord's mobile header either. */}
       <div className="scrollbar-thin h-full overflow-y-auto px-5 pt-[calc(3.5rem_+_var(--sait))] pb-[max(2rem,var(--saib))] min-[800px]:pt-16">
-        <div className="mx-auto w-full max-w-[600px]">
+        {/* Feedback/Inbox run wider so the composer and message list can sit side by side; the
+          other pages stay in a comfortable reading column. */}
+        <div
+          className={
+            "mx-auto w-full " +
+            (id === "feedback" || id === "inbox" ? "max-w-[760px]" : "max-w-[600px]")
+          }
+        >
           {/* centered title card over a hairline; the content below stays left-aligned */}
           <header className="mb-7 flex flex-col items-center border-b border-white/[0.08] pb-7 text-center">
             <div className="font-sans text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
@@ -401,7 +303,8 @@ function DetailView({
           </header>
           {id === "faq" && <Faq />}
           {id === "changelog" && <Changelog />}
-          {id === "feedback" && <FeedbackForm onSubmit={onSubmitFeedback} />}
+          {id === "feedback" && <ChatPanel api={chat?.api} onUnread={chat?.onUnread} />}
+          {id === "inbox" && chat && <AdminInbox api={chat.api} />}
         </div>
       </div>
     </div>,
@@ -409,14 +312,16 @@ function DetailView({
   );
 }
 
-// One row inside the bottom sheet: icon · label (+ "New") · sub · chevron.
+// One row inside the bottom sheet: icon · label (+ "New" / unread dot) · sub · chevron.
 function SheetRow({
   l,
   showBadge,
+  chatUnread,
   onSelect,
 }: {
   l: LinkDef;
   showBadge: boolean;
+  chatUnread: boolean;
   onSelect: (l: LinkDef) => void;
 }): ReactNode {
   return (
@@ -438,6 +343,9 @@ function SheetRow({
               New
             </span>
           )}
+          {l.key === "feedback" && chatUnread && (
+            <span className="h-2 w-2 rounded-full bg-[#a0c35a]" aria-label="New reply" />
+          )}
         </span>
         <span className="font-sans text-[12px] text-zinc-500">
           {l.page ? META[l.page].title : l.sub}
@@ -452,11 +360,15 @@ function SheetRow({
 
 // Mobile bottom sheet (scrim + sheet) listing the links. Slides up from the bottom.
 function UtilitySheet({
+  links,
   showBadge,
+  chatUnread,
   onSelect,
   onClose,
 }: {
+  links: LinkDef[];
   showBadge: boolean;
+  chatUnread: boolean;
   onSelect: (l: LinkDef) => void;
   onClose: () => void;
 }): ReactNode {
@@ -588,11 +500,12 @@ function UtilitySheet({
         {/* Grab handle: the swipe-down affordance (no header/close button anymore). */}
         <div className="mx-auto mb-3 mt-1 h-1.5 w-10 rounded-full bg-zinc-600" />
         <div className="flex flex-col gap-0.5">
-          {LINKS.map((l) => (
+          {links.map((l) => (
             <SheetRow
               key={l.key}
               l={l}
               showBadge={showBadge}
+              chatUnread={chatUnread}
               onSelect={onSelect}
             />
           ))}
@@ -606,11 +519,15 @@ function UtilitySheet({
 // Desktop footer: a full-width link row beneath the game. Each link opens the DetailView.
 // Version sits at the far right.
 function LinkBar({
+  links,
   showBadge,
+  chatUnread,
   onSelect,
   className = "",
 }: {
+  links: LinkDef[];
   showBadge: boolean;
+  chatUnread: boolean;
   onSelect: (l: LinkDef) => void;
   className?: string;
 }): ReactNode {
@@ -623,7 +540,7 @@ function LinkBar({
         className
       }
     >
-      {LINKS.map((l) => (
+      {links.map((l) => (
         // CSS :hover (not HoverButton): the footer is desktop-only (mouse), and a real
         // `hover:` variant reliably beats the base text-zinc-500 — a plain appended class
         // loses to it on source order. Matches the design's `.lbl-link:hover { color:
@@ -641,6 +558,9 @@ function LinkBar({
           {showBadge && l.badge && (
             <span className="h-1.5 w-1.5 rounded-full bg-[#a0c35a]" />
           )}
+          {l.key === "feedback" && chatUnread && (
+            <span className="h-1.5 w-1.5 rounded-full bg-[#a0c35a]" aria-label="New reply" />
+          )}
         </button>
       ))}
       <span className="ml-auto font-sans text-[11px] tabular-nums text-zinc-700">
@@ -650,45 +570,20 @@ function LinkBar({
   );
 }
 
-// Mobile menu trigger: a hamburger pinned to the bottom-right, fixed to the viewport so
-// it's always on screen without scrolling and never crowds the players-tab row (the desktop
-// footer surfaces these links instead, so this is min-[800px]:hidden). Sits above the
-// home-indicator safe area. Portaled to <body> so `fixed` ignores any ancestor and it stacks
-// below the sheet/detail (z-40 < z-50). A white fill (matching the Submit button) makes it
-// pop off the near-black game. A dot marks unseen news.
-function MenuTrigger({
-  hasNew,
-  onClick,
-}: {
-  hasNew: boolean;
-  onClick: () => void;
-}): ReactNode {
-  return createPortal(
-    <HoverButton
-      onClick={onClick}
-      hover="opacity-85"
-      aria-label="Open menu"
-      className="fixed bottom-[max(1rem,var(--saib))] right-4 z-40 grid h-10 w-10 cursor-pointer place-items-center rounded-xl bg-zinc-100 text-zinc-900 shadow-[0_6px_20px_rgba(0,0,0,0.5)] transition-opacity min-[800px]:hidden"
-    >
-      <Menu size={19} strokeWidth={2.2} aria-hidden />
-      {hasNew && (
-        <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#a0c35a] ring-2 ring-zinc-100" />
-      )}
-    </HoverButton>,
-    document.body,
-  );
-}
-
-// Controller wiring the two entry points (desktop footer + mobile fixed hamburger) to one
-// DetailView, with a shared "New" badge gate. GameView renders `footer` under the game
-// (desktop) and `overlays` once — the latter holding the mobile trigger, the bottom sheet,
-// and the detail screen (all portaled to <body>).
+// Controller wiring the two entry points (desktop footer link-bar + the mobile masthead's
+// hamburger) to one DetailView, with a shared "New" badge gate. GameView renders `footer`
+// under the game (desktop) and `overlays` once (the bottom sheet + detail screen, portaled
+// to <body>); on mobile it draws its own hamburger in the masthead, wired to the returned
+// `openMenu` / `hasNew` (so the trigger is an in-flow header element, not a button floating
+// over the scrolling roster).
 export function useInfoLinks(
-  onSubmitFeedback?: (category: string, text: string) => Promise<boolean>,
+  chat?: ChatBundle,
   onOpenExternal?: (url: string) => void,
 ): {
   footer: (className?: string) => ReactNode;
   overlays: ReactNode;
+  openMenu: () => void;
+  hasNew: boolean;
 } {
   const [active, setActive] = useState<LinkId | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -699,6 +594,10 @@ export function useInfoLinks(
   // Show the "New" badge until the player has opened the current version's changelog.
   const [seen, setSeen] = useState<string | null>(() => readSeen());
   const showBadge = seen !== APP_VERSION;
+  // A dev (per the chat load) also gets the admin Inbox entry; everyone sees the unread dot
+  // for a reply waiting on their own thread.
+  const links = chat?.isDev ? [...LINKS, INBOX_LINK] : LINKS;
+  const chatUnread = !!chat?.unread;
 
   const markSeen = (id: LinkId): void => {
     if (id === "changelog" && seen !== APP_VERSION) {
@@ -747,28 +646,28 @@ export function useInfoLinks(
   return {
     footer: (className = "") => (
       <LinkBar
+        links={links}
         showBadge={showBadge}
+        chatUnread={chatUnread}
         onSelect={selectFromFooter}
         className={className}
       />
     ),
+    // The mobile masthead owns the hamburger; it opens the same sheet the footer's links do.
+    openMenu: () => setMenuOpen(true),
+    hasNew: showBadge || chatUnread,
     overlays: (
       <>
-        <MenuTrigger hasNew={showBadge} onClick={() => setMenuOpen(true)} />
         {menuOpen && (
           <UtilitySheet
+            links={links}
             showBadge={showBadge}
+            chatUnread={chatUnread}
             onSelect={selectFromSheet}
             onClose={() => setMenuOpen(false)}
           />
         )}
-        {active && (
-          <DetailView
-            id={active}
-            onBack={closeDetail}
-            onSubmitFeedback={onSubmitFeedback}
-          />
-        )}
+        {active && <DetailView id={active} onBack={closeDetail} chat={chat} />}
       </>
     ),
   };

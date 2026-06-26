@@ -640,10 +640,9 @@ alter table public.live_cards add column if not exists token_at          timesta
 
 -- Per-channel cards: channel_id joins the key so each channel gets its own "who's playing"
 -- card per day (matching the Wordle Activity), instead of one card per guild living in the
--- first channel to launch. A row with a null channel_id is at most today's pre-migration
--- card (ephemeral UI, rebuilt on the next launch), so it's safe to drop before channel_id
--- becomes a PK member. Guarded so re-running the schema is a no-op once the PK is widened.
-delete from public.live_cards where channel_id is null;
+-- first channel to launch. The whole reshape — dropping null-channel rows and widening the PK —
+-- runs only while the PK is still the old (scope_id, puzzle_date), so replaying the schema is a
+-- true no-op once it's widened: nothing is deleted or altered on a re-run.
 do $$
 declare pk_cols text;
 begin
@@ -653,6 +652,9 @@ begin
   join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any(c.conkey)
   where c.conrelid = 'public.live_cards'::regclass and c.contype = 'p';
   if pk_cols is distinct from 'scope_id,puzzle_date,channel_id' then
+    -- A null channel_id is at most today's pre-migration card (ephemeral UI, rebuilt on the next
+    -- launch), so it's safe to drop before channel_id becomes a PK member.
+    delete from public.live_cards where channel_id is null;
     alter table public.live_cards alter column channel_id set not null;
     alter table public.live_cards drop constraint if exists live_cards_pkey;
     alter table public.live_cards add constraint live_cards_pkey primary key (scope_id, puzzle_date, channel_id);
@@ -743,3 +745,63 @@ end $$;
 
 revoke all on function public.roster_bundle(text, date, text, text) from public;
 grant execute on function public.roster_bundle(text, date, text, text) to service_role;
+
+-- Player ↔ dev feedback threads. Replaces the old one-shot feedback webhook. Each note a player
+-- sends opens its OWN thread (a support ticket), so a player has an inbox of separate
+-- conversations — one per feedback — each carrying our replies, rather than one merged stream.
+-- chat_threads is one row per ticket (its own id, owned by a Discord user_id); chat_messages are
+-- its back-and-forth. Written and read only by the service role (api/chat.ts), which verifies the
+-- Discord identity first — a player only ever touches their own tickets, the dev (gated by
+-- DEV_DISCORD_IDS) sees all. RLS on with NO policy: anon sees nothing (same posture as
+-- progress/presence/live_cards). DISCORD_FEEDBACK_WEBHOOK_URL mirrors both sides (api/_feedback.ts)
+-- as a notification — it's no longer the system of record.
+
+-- Feedback tickets, one row per ticket (one-thread-per-feedback). Created if absent and never
+-- dropped here, so replaying the schema never wipes a live conversation. (An earlier
+-- one-thread-per-player shape was reshaped pre-launch; a dev DB still carrying the old tables —
+-- which hold no real data — should be dropped once by hand rather than bake a replayable DROP in.)
+
+-- One feedback ticket. category/subject/puzzle_id capture the opening note (its tag, the
+-- player-written title, and the puzzle in play); last_*/read cursors drive ordering and the unread
+-- badges, and last_text is the latest line shown beneath the title. Bumped in place as the
+-- conversation continues (never appended).
+create table if not exists public.chat_threads (
+  id                bigint      generated always as identity primary key,
+  user_id           text        not null,                 -- the player who opened the ticket
+  name              text,                                  -- their latest display identity (for the dev inbox)
+  avatar            text,
+  category          text,                                  -- 'Bug'|'Idea'|'Other' — the opening note's tag
+  subject           text,                                  -- player-written title that names the ticket (the inbox row title)
+  puzzle_id         integer,                               -- puzzle in play when the ticket was opened
+  last_message_at   timestamptz not null default now(),
+  last_sender       text        not null default 'user',  -- 'user' | 'dev' — who sent the latest message
+  last_text         text,                                  -- latest message from either side, truncated — the inbox preview line
+  user_last_read_at timestamptz not null default now(),   -- player has read this ticket up to here
+  dev_last_read_at  timestamptz,                            -- dev has read it up to here (null = never)
+  msg_count         integer     not null default 0,
+  created_at        timestamptz not null default now()
+);
+
+-- player unread  = last_sender = 'dev'  and last_message_at > user_last_read_at
+-- dev unread/new  = last_sender = 'user' and (dev_last_read_at is null or last_message_at > dev_last_read_at)
+-- A player's inbox lists their tickets newest-active first; the dev inbox orders the same globally.
+create index if not exists chat_threads_user_idx on public.chat_threads (user_id, last_message_at desc);
+create index if not exists chat_threads_recent_idx on public.chat_threads (last_message_at desc);
+
+alter table public.chat_threads enable row level security;
+
+-- One message in a ticket, oldest-first. author_id/author_name record who actually sent it (the
+-- player, or the replying dev). Cascades with its ticket.
+create table if not exists public.chat_messages (
+  id          bigint      generated always as identity primary key,
+  thread_id   bigint      not null references public.chat_threads(id) on delete cascade,
+  sender      text        not null check (sender in ('user','dev')),
+  author_id   text        not null,
+  author_name text,
+  text        text        not null,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists chat_messages_thread_idx on public.chat_messages (thread_id, created_at);
+
+alter table public.chat_messages enable row level security;

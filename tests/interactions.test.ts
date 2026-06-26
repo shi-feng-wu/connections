@@ -79,22 +79,8 @@ describe("routeInteraction", () => {
     expect(btn?.url).toContain("integration_type=0");
   });
 
-  it("/enable-posts in a DM says to play in a server instead of the server copy", () => {
-    const r = routeInteraction({
-      type: 2,
-      data: { name: "enable-posts" },
-      application_id: "app123",
-      // No guild_id: DMs aren't in a guild.
-      authorizing_integration_owners: { "1": "user123" },
-    }) as { type: number; data: { flags?: number; content?: string; components?: { components: { style?: number; url?: string }[] }[] } };
-    expect(r.type).toBe(4);
-    expect(r.data.flags).toBe(64);
-    expect(r.data.content).not.toContain("this server"); // no "this channel"/"this server" framing in a DM
-    expect(r.data.content).toContain("Play in a server");
-    const btn = r.data.components?.[0].components[0];
-    expect(btn?.style).toBe(5);
-    expect(btn?.url).toContain("client_id=app123");
-  });
+  // /enable-posts is registered GUILD-only (no DM context — see scripts/register-commands.mjs),
+  // so there's no DM-flavoured response to test: it can't be invoked in a DM.
 
   it("/enable-posts says recaps are already on when the bot is guild-installed", () => {
     const r = routeInteraction({
@@ -238,8 +224,8 @@ describe("unsubscribeResult", () => {
     const r = data("done");
     expect(r.type).toBe(4); // CHANNEL_MESSAGE_WITH_SOURCE
     expect(r.data.flags).toBeUndefined(); // public, not ephemeral
-    expect(r.data.content).toContain("won’t post here");
-    expect(r.data.content).toContain("turns back on"); // re-arms on the next launch
+    expect(r.data.content).toContain("off for this channel");
+    expect(r.data.content).toContain("come back automatically"); // re-arms on the next launch
     expect(r.data.content).toContain("View Channel"); // permanent-mute path
   });
 

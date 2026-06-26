@@ -134,14 +134,33 @@ if (chat) {
 
 // --- 3) enable-posts chat-input command -------------------------------------------
 // In a server without the bot, /enable-posts replies (privately) with a one-click "Add to
-// Server" button — the only way the daily recap + live card can post there. Same contexts and
-// integration types as the launch command so it's available in bot-less (user-install) servers.
-// The response is built in api/interactions.ts (routeInteraction); this only registers the name.
+// Server" button — the only way the daily recap + live card can post there. GUILD context only
+// (no DM): recaps are a server-channel thing, so the command is meaningless in a DM and shouldn't
+// show up there. integration_types stays [0,1] so it's still available in bot-less (user-install)
+// servers. The response is built in api/interactions.ts (routeInteraction).
 const ENABLE_POSTS = 'enable-posts';
 const ENABLE_POSTS_DESCRIPTION = 'Add the bot to this server to unlock the daily recap and live card';
+const ENABLE_POSTS_CONTEXTS = [0]; // GUILD only — hidden in DMs
 const enable = commands.find((c) => c.type === CHAT_INPUT && c.name === ENABLE_POSTS);
 if (enable) {
-  console.log(`Chat command /${ENABLE_POSTS} already registered (id ${enable.id}).`);
+  // Already registered — but it may predate the GUILD-only change (it used to allow DM contexts).
+  // PATCH the contexts if they differ so re-running this script hides it from DMs.
+  const current = JSON.stringify((enable.contexts ?? []).slice().sort());
+  const want = JSON.stringify(ENABLE_POSTS_CONTEXTS.slice().sort());
+  if (current === want) {
+    console.log(`Chat command /${ENABLE_POSTS} already registered, GUILD-only (id ${enable.id}).`);
+  } else {
+    const patchRes = await fetch(`${API}/applications/${APP_ID}/commands/${enable.id}`, {
+      method: 'PATCH',
+      headers: auth,
+      body: JSON.stringify({ contexts: ENABLE_POSTS_CONTEXTS }),
+    });
+    if (!patchRes.ok) {
+      console.error(`Failed to update /${ENABLE_POSTS} contexts: ${patchRes.status} ${await patchRes.text()}`);
+      process.exit(1);
+    }
+    console.log(`Updated /${ENABLE_POSTS} contexts ${enable.contexts ?? '[]'} -> ${JSON.stringify(ENABLE_POSTS_CONTEXTS)} (GUILD only, id ${enable.id}).`);
+  }
 } else {
   const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
     method: 'POST',
@@ -150,7 +169,7 @@ if (enable) {
       name: ENABLE_POSTS,
       description: ENABLE_POSTS_DESCRIPTION,
       type: CHAT_INPUT,
-      contexts: CONTEXTS,
+      contexts: ENABLE_POSTS_CONTEXTS,
       integration_types: INTEGRATION_TYPES,
     }),
   });
@@ -159,7 +178,7 @@ if (enable) {
     process.exit(1);
   }
   const cmd = await createRes.json();
-  console.log(`Registered chat command /${cmd.name} (id ${cmd.id}).`);
+  console.log(`Registered chat command /${cmd.name} (id ${cmd.id}), GUILD only.`);
 }
 
 // --- 4) share chat-input command --------------------------------------------------

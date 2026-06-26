@@ -20,7 +20,21 @@ import {
   type RecapData,
   recapLayout,
 } from "./card-draw";
+import type { ChatApi, ChatMessage, ChatTicket, InboxTicket } from "./chat";
+import { AdminInbox, ChatPanel } from "./chatview";
 import { DayTurnover, GameView, LoadingScreen } from "./components";
+import { DiscordMessage } from "./discord-message-preview";
+import {
+  donateMessage,
+  enablePostsAddBot,
+  enablePostsAlreadyEnabled,
+  installNudgePayload,
+  IS_COMPONENTS_V2,
+  type MessageData,
+  missingPermsNudgePayload,
+  shareCard,
+  unsubscribeMessage,
+} from "./discord-messages";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
 import { DemoBoard, DemoGame, DemoRoster, Landing } from "./landing";
 import type { BoardRow, SelfStanding } from "./leaderboard";
@@ -1166,10 +1180,12 @@ const known = [
   "blocked",
   "simulate",
   "feedback",
+  "chat",
   "card",
   "pip",
   "scope",
   "recap",
+  "messages",
   "turnover",
   "device",
   "landing",
@@ -1188,9 +1204,11 @@ const onlySim = pick === "simulate" || pick === "feedback";
 const onlyCard = pick === "card";
 const onlyPip = pick === "pip";
 // #scope isolates the roster panel that carries the Channel/Server toggle; #recap
-// isolates the daily recap card (server/channel eyebrow).
+// isolates the daily recap card (server/channel eyebrow); #messages isolates the bot's
+// Discord text messages (the ephemeral command replies + nudges + the /share card).
 const onlyScope = pick === "scope";
 const onlyRecap = pick === "recap";
+const onlyMessages = pick === "messages";
 // #turnover isolates the midnight day-rollover veil (src/components.tsx DayTurnover),
 // shown over a sample in-progress board so you can check the lockup over real content.
 const onlyTurnover = pick === "turnover";
@@ -1212,6 +1230,8 @@ const onlyCover = pick === "cover";
 const onlyBg = pick === "bg";
 // #anim isolates the interactive roster-animation playground (replay buttons).
 const onlyAnim = pick === "anim";
+// #chat isolates the interactive player↔dev chat playground (ChatPanel + AdminInbox).
+const onlyChat = pick === "chat";
 const shown =
   known.includes(pick) && !onlySim && !onlyCard && !onlyPip
     ? STATES.filter((s) => String(s.props.label).toLowerCase().includes(pick))
@@ -1224,6 +1244,8 @@ const showSim = pick === "" || onlySim;
 const showCards = pick === "" || onlyCard;
 const showPips = pick === "" || onlyPip;
 const showTurnover = pick === "" || onlyTurnover;
+// #messages rides at the bottom by default; #messages isolates it.
+const showMessages = pick === "" || onlyMessages;
 // #device isolates the narrow-width device frames (320/360px iframes of the end screen).
 const showDevice = pick === "" || pick === "device";
 
@@ -1480,6 +1502,58 @@ const RECAPS = (
   </>
 );
 
+// The bot's text/interaction messages, rendered the way Discord paints them (avatar + APP
+// badge + ephemeral footer). Payloads come from src/discord-messages.ts — the SAME builders
+// api/interactions.ts sends — so this is the real copy, not a replica. A stand-in app id
+// (the "Add to Server" link isn't clicked here). The /share card replays the `won` game.
+const PREVIEW_APP_ID = "000000000000000000";
+const SHARE_PAYLOAD: MessageData = {
+  flags: IS_COMPONENTS_V2,
+  components: shareCard(won, {
+    puzzleNo: puzzle.id,
+    durationMs: 134_000,
+    score: 372,
+  }),
+};
+const MESSAGES = (
+  <>
+    <DiscordMessage
+      label="/enable-posts · server without the bot"
+      payload={enablePostsAddBot(PREVIEW_APP_ID)}
+    />
+    <DiscordMessage
+      label="/enable-posts · bot already added"
+      payload={enablePostsAlreadyEnabled()}
+    />
+    <DiscordMessage
+      label="Launch nudge · server without the bot"
+      payload={installNudgePayload(PREVIEW_APP_ID)}
+    />
+    <DiscordMessage
+      label="Launch nudge · bot can’t post in this channel"
+      payload={missingPermsNudgePayload()}
+    />
+    <DiscordMessage
+      label="/unsubscribe · recaps turned off"
+      payload={unsubscribeMessage("done")}
+    />
+    <DiscordMessage
+      label="/unsubscribe · already off"
+      payload={unsubscribeMessage("already")}
+    />
+    <DiscordMessage
+      label="/unsubscribe · not in a server"
+      payload={unsubscribeMessage("no-guild")}
+    />
+    <DiscordMessage
+      label="/unsubscribe · couldn’t update"
+      payload={unsubscribeMessage("error")}
+    />
+    <DiscordMessage label="/donate" payload={donateMessage()} />
+    <DiscordMessage label="/share · result grid" payload={SHARE_PAYLOAD} />
+  </>
+);
+
 // ——— page chrome, full (no-hash) view only. Isolated #views stay bare sections so
 // screenshot workflows keep a clean capture. The hash is read ONCE at load, so the
 // filter links force a reload after the browser applies the new hash.
@@ -1498,9 +1572,11 @@ const FILTERS = [
   "blocked",
   "simulate",
   "feedback",
+  "chat",
   "scope",
   "card",
   "recap",
+  "messages",
   "pip",
   "device",
   "turnover",
@@ -1663,6 +1739,129 @@ function AnimDemo() {
   );
 }
 
+// Interactive chat playground (#chat): the player↔dev feedback chat (src/chatview.tsx) driven by an
+// in-memory mock api, so the real ChatPanel + AdminInbox can be exercised with no Discord or
+// Supabase. The player panel seeds two tickets (their inbox); opening one shows the conversation,
+// and "New" / replying appends a note plus a canned dev reply. The dev inbox lists tickets across
+// players; open one to reply. (The real app fetches on open and shows replies on the next load —
+// this fakes an instant reply purely so the back-and-forth is visible in one window.)
+const CANNED = [
+  "Got it — taking a look now.",
+  "Nice, that's a great idea. Adding it to the list!",
+  "Appreciate the detail, that really helps. On it.",
+];
+
+function ChatDemo() {
+  const iso = (minAgo: number): string => new Date(Date.now() - minAgo * 60000).toISOString();
+  let idSeq = 1000;
+  const nextId = (): number => (idSeq += 1);
+
+  const playerApi = useMemo<ChatApi>(() => {
+    const tickets: ChatTicket[] = [
+      { id: 1, category: "Bug", subject: "Timer resets when I reopen on mobile", preview: "Thanks for flagging! That was a resume bug on relaunch — pushed a fix today.", lastMessageAt: iso(40), lastSender: "dev", unread: true },
+      { id: 2, category: "Idea", subject: "Could we get a dark-mode toggle?", preview: "Could we get a dark-mode toggle for the board?", lastMessageAt: iso(1440), lastSender: "user", unread: false },
+    ];
+    const msgs: Record<number, ChatMessage[]> = {
+      1: [
+        { id: 101, sender: "user", text: "The timer resets when I reopen the activity on mobile — I lose my mistakes count.", created_at: iso(120) },
+        { id: 102, sender: "dev", text: "Thanks for flagging! That was a resume bug on relaunch — pushed a fix today. Should hold now.", created_at: iso(40) },
+      ],
+      2: [{ id: 201, sender: "user", text: "Could we get a dark-mode toggle for the board?", created_at: iso(1440) }],
+    };
+    let r = 0;
+    const reply = (id: number, sender: "user" | "dev", text: string): void => {
+      (msgs[id] ??= []).push({ id: nextId(), sender, text, created_at: new Date().toISOString() });
+    };
+    return {
+      list: () => Promise.resolve({ tickets: [...tickets], unread: tickets.some((t) => t.unread), isDev: false }),
+      open: (id) => {
+        const t = tickets.find((x) => x.id === id);
+        if (t) t.unread = false;
+        return Promise.resolve({ messages: [...(msgs[id] ?? [])], category: t?.category ?? null, subject: t?.subject ?? null });
+      },
+      create: (text, category, subject) => {
+        const id = nextId();
+        reply(id, "user", text);
+        const canned = CANNED[r++ % CANNED.length];
+        reply(id, "dev", canned);
+        tickets.unshift({ id, category, subject: (subject || text).slice(0, 140), preview: canned, lastMessageAt: new Date().toISOString(), lastSender: "dev", unread: false });
+        return Promise.resolve({ threadId: id, messages: [...msgs[id]] });
+      },
+      reply: (id, text) => {
+        reply(id, "user", text);
+        reply(id, "dev", CANNED[r++ % CANNED.length]);
+        return Promise.resolve([...msgs[id]]);
+      },
+      admin: { inbox: () => Promise.resolve([]), thread: () => Promise.resolve(null), reply: () => Promise.resolve(null) },
+    };
+  }, []);
+
+  const adminApi = useMemo<ChatApi>(() => {
+    const inbox: InboxTicket[] = [
+      { threadId: 1, userId: "u1", name: "Aria Voss", avatar: null, category: "Idea", subject: "Dark-mode toggle for the board?", preview: "Could we get a dark-mode toggle for the board?", lastMessageAt: iso(5), lastSender: "user", unread: true },
+      { threadId: 2, userId: "u2", name: "Theo Lindqvist", avatar: null, category: "Bug", subject: "Share button doesn't copy on Firefox", preview: "Fixed in today's build — give it another go!", lastMessageAt: iso(90), lastSender: "dev", unread: false },
+      { threadId: 3, userId: "u3", name: "Mei Tanaka", avatar: null, category: "Other", subject: "Love the new recap cards", preview: "Love the new recap cards 🙌", lastMessageAt: iso(1440), lastSender: "user", unread: true },
+    ];
+    const threads: Record<number, ChatMessage[]> = {
+      1: [{ id: 11, sender: "user", text: "Could we get a dark-mode toggle for the board?", created_at: iso(5) }],
+      2: [
+        { id: 21, sender: "user", text: "Share button doesn't copy on Firefox.", created_at: iso(180) },
+        { id: 22, sender: "dev", text: "Fixed in today's build — give it another go!", created_at: iso(90) },
+      ],
+      3: [{ id: 31, sender: "user", text: "Love the new recap cards 🙌", created_at: iso(1440) }],
+    };
+    const meta = (id: number): InboxTicket | undefined => inbox.find((t) => t.threadId === id);
+    return {
+      list: () => Promise.resolve({ tickets: [], unread: false, isDev: true }),
+      open: () => Promise.resolve(null),
+      create: () => Promise.resolve(null),
+      reply: () => Promise.resolve(null),
+      admin: {
+        inbox: () => Promise.resolve(inbox),
+        thread: (id) =>
+          Promise.resolve({ messages: [...(threads[id] ?? [])], name: meta(id)?.name ?? null, category: meta(id)?.category ?? null, subject: meta(id)?.subject ?? null }),
+        reply: (id, text) => {
+          (threads[id] ??= []).push({ id: nextId(), sender: "dev", text, created_at: new Date().toISOString() });
+          return Promise.resolve([...threads[id]]);
+        },
+      },
+    };
+  }, []);
+
+  const Panel = ({
+    label,
+    width = "w-[380px]",
+    children,
+  }: {
+    label: string;
+    width?: string;
+    children: ReactNode;
+  }) => (
+    <div className={"flex max-w-full flex-col " + width}>
+      <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">{label}</div>
+      <div className="rounded-2xl border border-white/[0.08] bg-zinc-950 p-5">{children}</div>
+    </div>
+  );
+
+  // The combined compose+inbox is a container query, so the same ChatPanel lays out two-up on a wide
+  // surface (mirrors the real Feedback page width) and stacks on a narrow one (mobile).
+  return (
+    <div className="flex w-full max-w-[1240px] flex-col items-center gap-8 px-4">
+      <Panel label="Player inbox · desktop (compose + messages side by side)" width="w-[760px]">
+        <ChatPanel api={playerApi} />
+      </Panel>
+      <div className="flex w-full flex-wrap items-start justify-center gap-8">
+        <Panel label="Player inbox · mobile (stacked)">
+          <ChatPanel api={playerApi} />
+        </Panel>
+        <Panel label="Dev inbox · open a ticket and reply">
+          <AdminInbox api={adminApi} />
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
 const fullPage = (
   <div className="flex flex-col items-center gap-24 pb-28 pt-12">
     <PageHeader />
@@ -1674,6 +1873,9 @@ const fullPage = (
     </Group>
     <Group title="Playground" hash="simulate">
       <Simulate />
+    </Group>
+    <Group title="Player ↔ dev chat" hash="chat">
+      <ChatDemo />
     </Group>
     <Group title="Roster panels" hash="scope">
       <div className="flex w-full max-w-[1240px] flex-wrap items-start justify-center gap-8 px-4">
@@ -1687,6 +1889,9 @@ const fullPage = (
         {CARDS}
         {RECAPS}
       </div>
+    </Group>
+    <Group title="Discord messages" hash="messages">
+      <div className="flex w-full flex-col items-center gap-10">{MESSAGES}</div>
     </Group>
     <Group title="PIP thumbnails" hash="pip">
       {PIPS}
@@ -1722,6 +1927,10 @@ createRoot(document.getElementById("preview")!).render(
     <div className="flex justify-center py-10">
       <AnimDemo />
     </div>
+  ) : onlyChat ? (
+    <div className="flex justify-center py-10">
+      <ChatDemo />
+    </div>
   ) : (
     <div className="flex flex-col items-center gap-16 py-10">
       {onlyLanding && LANDING}
@@ -1732,10 +1941,12 @@ createRoot(document.getElementById("preview")!).render(
       {showPips && PIPS}
       {showCards && CARDS}
       {(showCards || onlyRecap) && RECAPS}
+      {showMessages && MESSAGES}
       {!onlySim &&
         !onlyCard &&
         !onlyScope &&
         !onlyRecap &&
+        !onlyMessages &&
         !onlyTurnover &&
         !onlyLanding &&
         ROSTER_LIVE}
@@ -1743,12 +1954,14 @@ createRoot(document.getElementById("preview")!).render(
         !onlyCard &&
         !onlyScope &&
         !onlyRecap &&
+        !onlyMessages &&
         !onlyTurnover &&
         !onlyLanding &&
         ROSTER_EMPTY}
       {!onlySim &&
         !onlyCard &&
         !onlyRecap &&
+        !onlyMessages &&
         !onlyTurnover &&
         !onlyLanding &&
         ROSTER_SEASON}

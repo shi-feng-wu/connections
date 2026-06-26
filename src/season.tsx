@@ -208,28 +208,11 @@ const toEntry = (r: BoardRow, rank: number, delta: number | null): LedgerEntry =
 
 export type Standings = { board: BoardRow[]; self: SelfStanding | null };
 
-// Empty state shown under the Season / All-time tabs before any game has been scored,
-// so the tabs are never dead ends. Just a headline + a line of copy — spoiler-safe (no
-// puzzle content) and with no fake standings rows.
-export function StandingsEmpty({ window }: { window: "season" | "all" }) {
-  const allTime = window === "all";
-  return (
-    // Desktop: the rail starts this block below the header+tabs yet runs down past
-    // the grid into the footer, so a plain center lands ~71px low. The extra bottom
-    // padding lifts the centered text back onto the grid's vertical midline (offset
-    // is fixed by the header/tabs/footer heights — independent of --tile-h).
-    <div className="flex min-h-0 flex-1 animate-tab-in flex-col items-center justify-center gap-5 px-6 py-12 text-center min-[800px]:pt-0 min-[800px]:pb-[140px]">
-      <div className="flex flex-col gap-1.5">
-        <h3 className="text-balance font-display text-[19px] font-semibold leading-tight tracking-[-0.01em] text-[#efefe6]">
-          First place is open
-        </h3>
-        <p className="mx-auto max-w-[32ch] text-pretty font-sans text-[13px] leading-[1.55] text-zinc-400">
-          No scores on the {allTime ? "all-time" : "season"} board yet — finish
-          today’s puzzle to put the first one up.
-        </p>
-      </div>
-    </div>
-  );
+// Shown under the Season / All-time tabs before any game has been scored, so the tabs are
+// never dead ends. Intentionally blank — no placeholder copy and no fake rows; the panel just
+// holds its space (flex-1) and stays empty until the first game is scored.
+export function StandingsEmpty() {
+  return <div className="flex min-h-0 flex-1 flex-col" aria-hidden />;
 }
 
 // The standings table for one window (season or all-time): top players with your

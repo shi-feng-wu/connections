@@ -14,7 +14,8 @@
     "node": "24.x"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --open /preview.html",
+    "dev:api": "vercel dev",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

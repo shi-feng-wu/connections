@@ -1,7 +1,19 @@
 import { waitUntil } from "@vercel/functions";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createPublicKey, verify as edVerify } from "node:crypto";
-import { Game, MAX_MISTAKES, type Puzzle } from "../src/game.js";
+import {
+  CHANNEL_MESSAGE_WITH_SOURCE,
+  donateMessage,
+  enablePostsAddBot,
+  enablePostsAlreadyEnabled,
+  EPHEMERAL,
+  installNudgePayload,
+  IS_COMPONENTS_V2,
+  missingPermsNudgePayload,
+  shareCard,
+  unsubscribeResult,
+} from "../src/discord-messages.js";
+import { Game, type Puzzle } from "../src/game.js";
 import { canonicalScope } from "../src/scope.js";
 import { admin } from "./_admin.js";
 import type { CardPlayer } from "./_card.js";
@@ -33,19 +45,14 @@ import { PLAY_CUSTOM_ID } from "./_recap.js";
 
 export const config = { api: { bodyParser: false } };
 
-// Discord interaction + callback type numbers we use.
+// Discord interaction + callback type numbers we use. The message flags + Components V2
+// type numbers, and the message payload builders themselves, live in src/discord-messages.ts
+// (node-free) so the offline preview harness renders the exact same messages.
 const PING = 1;
 const APPLICATION_COMMAND = 2;
 const MESSAGE_COMPONENT = 3;
 const PONG = 1;
-const CHANNEL_MESSAGE_WITH_SOURCE = 4;
 const LAUNCH_ACTIVITY = 12;
-const EPHEMERAL = 64; // message flag
-const IS_COMPONENTS_V2 = 1 << 15; // message flag: render via the component tree, not content/embeds
-// Components V2 component type numbers (the framed share card below is built from these).
-const CONTAINER = 17; // the bordered box (Wordle-style frame); carries an optional accent bar
-const TEXT_DISPLAY = 10; // a markdown text block
-const SEPARATOR = 14; // a divider/spacer between blocks
 
 // Command names that should open the Activity. Both the Entry Point command (App Launcher)
 // and the chat-input command arrive as APPLICATION_COMMAND interactions named `connections`.
@@ -64,25 +71,23 @@ const SHARE_COMMAND = "share";
 // app footer. Connections is free and ad-free; donations cover the server costs. KEEP the URL
 // in sync with the Ko-fi link in src/infolinks.tsx.
 const DONATE_COMMAND = "donate";
-const KOFI_URL = "https://ko-fi.com/borgardev";
 // The "/unsubscribe" command: a moderator silences the daily recap in the channel it's run in.
 // It writes a recap_optouts row that recap_channels() subtracts, so the nightly cron skips this
 // channel — until someone launches the Activity here again, which clears the row (see postCard).
 // Registered guild-install only + Manage Channels gated (scripts/register-commands.mjs), so it
 // only appears where the bot can post recaps and only for members who can configure the channel.
 const UNSUBSCRIBE_COMMAND = "unsubscribe";
-// Guild-install permissions for that button's URL — KEEP IN SYNC with scripts/configure-install.mjs
-// (View Channel | Send Messages | Embed Links | Attach Files | Read Message History).
-const INSTALL_PERMISSIONS = "117760";
 
-// Guild-install ("Add to Server") link: bot + commands scopes with the recap permissions.
-// integration_type=0 opens the server picker directly instead of the two-option chooser.
-function installUrl(appId: string): string {
-  return (
-    `https://discord.com/oauth2/authorize?client_id=${appId}` +
-    `&integration_type=0&scope=bot+applications.commands&permissions=${INSTALL_PERMISSIONS}`
-  );
-}
+// The message payload builders + their flags/constants now live in src/discord-messages.ts
+// (node-free, shared with the preview harness): installUrl, the /enable-posts + /donate +
+// /unsubscribe replies, the install/permission nudges, and the /share card. Re-exported below
+// so existing importers (tests, callers) keep their import path.
+export {
+  installNudgePayload,
+  missingPermsNudgePayload,
+  shareCard,
+  unsubscribeResult,
+};
 
 // 32-byte raw Ed25519 public key -> a KeyObject, via the fixed SPKI DER prefix.
 // crypto can't ingest the bare key, but wrapping it in the standard Ed25519 SPKI
@@ -171,78 +176,19 @@ export function routeInteraction(body: Interaction): object {
     body.type === APPLICATION_COMMAND &&
     body.data?.name === ENABLE_POSTS_COMMAND
   ) {
-    // In a DM there's no server channel to post to (no guild_id — a user-install launch in a
-    // bot-less server still has one), so the server-flavoured copy would be nonsense here.
-    if (!body.guild_id) {
-      const appId =
-        body.application_id ?? process.env.VITE_DISCORD_CLIENT_ID ?? "";
-      return {
-        type: CHANNEL_MESSAGE_WITH_SOURCE,
-        data: {
-          content:
-            "### Recaps live in servers\n" +
-            "This command doesn’t do anything in a DM — the **daily recap** and the live **“who’s playing”** card post to a server channel.\n\n" +
-            "Play in a server and add the bot there to enable them. The button below opens the server picker (adding it needs **Manage Server**).",
-          flags: EPHEMERAL,
-          components: [
-            {
-              type: 1,
-              components: [
-                {
-                  type: 2,
-                  style: 5,
-                  label: "Add to Server",
-                  url: installUrl(appId),
-                },
-              ],
-            },
-          ],
-        },
-      };
-    }
+    const appId = body.application_id ?? process.env.VITE_DISCORD_CLIENT_ID ?? "";
+    // The command is registered GUILD-only (no DM context — see scripts/register-commands.mjs),
+    // so it always runs in a server; no DM-flavoured copy needed.
     // Positively guild-installed ("0" present) → the bot is already here. Otherwise (user-install
     // only, or unknown) show the button — so we never wrongly tell a bot-less server it's all set.
     const owners = body.authorizing_integration_owners;
     if (owners && "0" in owners) {
       return {
         type: CHANNEL_MESSAGE_WITH_SOURCE,
-        data: {
-          content:
-            "### You’re all set\n" +
-            "The bot’s already in this server, so the **daily recap** posts here every morning after the puzzle resets.",
-          flags: EPHEMERAL,
-        },
+        data: enablePostsAlreadyEnabled(),
       };
     }
-    const appId =
-      body.application_id ?? process.env.VITE_DISCORD_CLIENT_ID ?? "";
-    return {
-      type: CHANNEL_MESSAGE_WITH_SOURCE,
-      data: {
-        content:
-          "### Enable daily recaps for this server\n" +
-          "Add the bot and it’ll post a **daily recap** — yesterday’s results plus the season leaderboard — " +
-          "and a live **“who’s playing”** card, right in this channel.\n\n" +
-          "**Two ways to add it:**\n" +
-          "- **In the activity:** Activities → **Connections** → **⋯** (top-right) → **Add App** → **Add to Server**\n" +
-          "- **Or** tap the button below\n\n" +
-          "-# Adding the bot needs the **Manage Server** permission. No access? Ask a server admin to run `/enable-posts`.",
-        flags: EPHEMERAL,
-        components: [
-          {
-            type: 1,
-            components: [
-              {
-                type: 2,
-                style: 5,
-                label: "Add to Server",
-                url: installUrl(appId),
-              },
-            ],
-          },
-        ],
-      },
-    };
+    return { type: CHANNEL_MESSAGE_WITH_SOURCE, data: enablePostsAddBot(appId) };
   }
   // "/donate": a private reply with the Ko-fi link button (the footer's "Help cover the
   // server costs" link). Ephemeral — it's a personal nudge, not a channel post.
@@ -250,92 +196,12 @@ export function routeInteraction(body: Interaction): object {
     body.type === APPLICATION_COMMAND &&
     body.data?.name === DONATE_COMMAND
   ) {
-    return {
-      type: CHANNEL_MESSAGE_WITH_SOURCE,
-      data: {
-        content:
-          "### Support Connections ☕\n" +
-          "Connections is free and ad-free — donations go straight to the server costs that keep " +
-          "the daily puzzle, live card, and recaps running. Any amount helps, and thank you!",
-        flags: EPHEMERAL,
-        components: [
-          {
-            type: 1,
-            components: [
-              {
-                type: 2,
-                style: 5,
-                label: "Donate on Ko-fi",
-                emoji: { name: "☕" },
-                url: KOFI_URL,
-              },
-            ],
-          },
-        ],
-      },
-    };
+    return { type: CHANNEL_MESSAGE_WITH_SOURCE, data: donateMessage() };
   }
   return {
     type: CHANNEL_MESSAGE_WITH_SOURCE,
     data: { content: "Unsupported interaction.", flags: EPHEMERAL },
   };
-}
-
-// "1:34" for a minute-plus solve, "42s" under a minute, "" when no duration is known.
-// (The scored row carries duration_ms; an unscored finish leaves the time off the line.)
-function formatShareDuration(ms?: number | null): string {
-  if (ms == null || !Number.isFinite(ms) || ms <= 0) return "";
-  const sec = Math.round(ms / 1000);
-  if (sec < 60) return `${sec}s`;
-  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
-}
-
-// The /share result as a Components V2 card — a plain bordered Container (Wordle's framed box, no
-// accent stripe) holding a Wordle-style plain title line ("Connections #N x/4", x = groups solved
-// out of four) above the colour-square grid (one row per guess, from Game.shareGrid), then a
-// divider and a small subtext stat line. The ✅/❌ in that line is the only win/loss cue (the
-// frame is uncoloured by design). Returns the message `components` array (one container); the
-// response pairs it with the IS_COMPONENTS_V2 flag — a V2 message carries NO content/embeds. Pure
-// and finished-game-only — shareResponse gates on game.status before calling it. duration/score
-// come from the scored row when present and are simply omitted otherwise. Exported for tests.
-export function shareCard(
-  game: Game,
-  opts: { puzzleNo?: number; durationMs?: number | null; score?: number | null } = {},
-): object[] {
-  const mistakes = MAX_MISTAKES - game.mistakesLeft;
-  // Mistakes as the in-game 4-dot tracker: one circle per slot, light ⚪ for a remaining mistake
-  // and dark ⚫ for a spent one (mirrors the board's light=remaining/dark=spent dots, remaining
-  // first). So mistakes-remaining-out-of-4 reads at a glance: a flawless win is ⚪⚪⚪⚪, a loss
-  // ⚫⚫⚫⚫. Then time, then score — no ✅/❌ (the title's x/4 already says win vs loss). On
-  // Discord's dark theme the spent ⚫ dots sit faint against the card; the remaining ⚪ dots carry
-  // the count.
-  const dots = "⚪".repeat(game.mistakesLeft) + "⚫".repeat(mistakes);
-  const stats: string[] = [dots];
-  const dur = formatShareDuration(opts.durationMs);
-  if (dur) stats.push(dur);
-  if (typeof opts.score === "number") stats.push(`${opts.score} pts`);
-
-  // Plain text, like Wordle's "Wordle 1828 4/6" — no bold/heading. groupsSolved excludes a loss's
-  // forced back-fill, so a win is 4/4 and a loss is however many groups were actually deduced.
-  const title = ["Connections", opts.puzzleNo ? `#${opts.puzzleNo}` : null, `${game.groupsSolved}/4`]
-    .filter(Boolean)
-    .join(" ");
-  // Title, grid, and stats are separate blocks so spacers sit between them: equal line-less gaps
-  // above AND below the grid (Wordle's breathing room, symmetric), then a thin divider before the
-  // stat line.
-  return [
-    {
-      type: CONTAINER,
-      components: [
-        { type: TEXT_DISPLAY, content: title },
-        { type: SEPARATOR, divider: false, spacing: 1 },
-        { type: TEXT_DISPLAY, content: game.shareGrid() },
-        { type: SEPARATOR, divider: false, spacing: 1 },
-        { type: SEPARATOR, divider: true, spacing: 1 },
-        { type: TEXT_DISPLAY, content: `-# ${stats.join(" · ")}` },
-      ],
-    },
-  ];
 }
 
 // Build the /share interaction response from the player's own stored guesses. A public message
@@ -413,37 +279,6 @@ async function shareResponse(body: LaunchInteraction): Promise<object> {
   };
 }
 
-// The /unsubscribe reply, by outcome. "done" is a PUBLIC channel post (no ephemeral flag) so the
-// channel sees the recap was turned off and how to undo/permanently mute it. The rest stay
-// ephemeral so re-runs and edge cases don't post noise: "already" (recaps were already off and
-// haven't been re-armed by a launch since — so a re-run doesn't re-post the public confirmation),
-// "no-guild" (a DM/non-guild surface with no channel recap to silence), and "error" (a DB hiccup).
-// Pure so it's unit-testable without a request (unsubscribeResponse does the DB write). Exported.
-export function unsubscribeResult(kind: "done" | "already" | "no-guild" | "error"): object {
-  if (kind === "done") {
-    return {
-      type: CHANNEL_MESSAGE_WITH_SOURCE,
-      data: {
-        content:
-          "### Recaps off for this channel\n" +
-          "The daily recap won’t post here anymore. It turns back on automatically the next time someone launches Connections in this channel.\n" +
-          "If you want to permanently mute it, just don’t give the bot **View Channel** permission for the channel.",
-      },
-    };
-  }
-  const content =
-    kind === "already"
-      ? "Recaps are already off in this channel — they’ll come back if someone launches Connections here again."
-      : kind === "no-guild"
-        ? "### Nothing to turn off here\n" +
-          "`/unsubscribe` only does something in a server channel — that’s the only place the daily recap posts."
-        : "Couldn’t update recaps for this channel just now — try `/unsubscribe` again in a moment.";
-  return {
-    type: CHANNEL_MESSAGE_WITH_SOURCE,
-    data: { content, flags: EPHEMERAL },
-  };
-}
-
 // Handle /unsubscribe: record a recap opt-out for the channel it was run in, so the daily cron
 // skips it (recap_channels subtracts recap_optouts). Re-arms on the next launch here — postCard
 // clears the row when it (re)establishes the card. Guild channels only: recaps don't post in DMs
@@ -491,53 +326,10 @@ async function unsubscribeResponse(body: LaunchInteraction): Promise<object> {
   return unsubscribeResult("done");
 }
 
-// Ephemeral "add the bot" nudge for a launch in a server without the bot — the highest-
-// intent install moment there is (someone is actively playing where recaps can't post).
-// Re-shown to the same player in the same room at most once per cooldown.
+// Ephemeral "add the bot" nudge (installNudgePayload) for a launch in a server without the
+// bot — the highest-intent install moment there is (someone is actively playing where recaps
+// can't post). Re-shown to the same player in the same room at most once per cooldown.
 const INSTALL_NUDGE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
-
-// The nudge message: /enable-posts' pitch + admin handoff, compressed for an ephemeral
-// (Discord already labels it "Only you can see this"). Unlike /enable-posts it fires
-// mid-launch, so it leads with the live card — the payoff the launcher would see right
-// now — and the recap rides along second. Exported for tests.
-export function installNudgePayload(appId: string): object {
-  return {
-    content:
-      "### See who’s playing!\n" +
-      "Add the bot and a live **“who’s playing”** card posts in this channel while games are on, " +
-      "plus a **nightly recap** on reset: yesterday’s results and the season leaderboard.\n" +
-      "-# Adding it needs **Manage Server** permission. Not an admin? Ask one to run `/enable-posts`.",
-    flags: EPHEMERAL,
-    components: [
-      {
-        type: 1,
-        components: [
-          { type: 2, style: 5, label: "Add to Server", url: installUrl(appId) },
-        ],
-      },
-    ],
-  };
-}
-
-// The ephemeral nudge a launcher gets when the bot IS in the server but can't post in THIS
-// channel — almost always a private channel the bot's role was never added to. The live card may
-// still appear (a command's followup rides the interaction token, not the bot's own channel
-// access), but the bot's direct posts — the nightly recap, and in-window card refreshes —
-// silently 403, so the recap never shows up. We ask, privately, for exactly the permissions those
-// posts need. No button: granting a channel's permissions is a Discord settings action, not an
-// OAuth link the way "Add to Server" is. Exported for tests.
-export function missingPermsNudgePayload(): object {
-  return {
-    content:
-      "### I can’t post in this channel\n" +
-      "Connections is added to this server, but I don’t have permission to post in this channel — " +
-      "so the nightly **recap** and the live **“who’s playing”** card can’t show up here.\n" +
-      "Ask a moderator to give the **Connections** bot (or its role) these permissions on this channel:\n" +
-      "**View Channel** · **Send Messages** · **Attach Files**\n" +
-      "-# Usually this is a private channel the bot’s role hasn’t been added to — open the channel’s settings → Permissions.",
-    flags: EPHEMERAL,
-  };
-}
 
 // Whether this interaction was authorized ONLY as a user install — the app is on the user's
 // account, not installed to this guild, so the bot isn't a member and can't post/edit the

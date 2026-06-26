@@ -634,7 +634,7 @@ alter table public.live_cards add column if not exists posted_at timestamptz;
 alter table public.live_cards add column if not exists edited_at timestamptz;
 
 -- Legacy: from the earlier interaction-token card (a LAUNCH_ACTIVITY message turned out
--- not to be editable). Unused now that the card is a bot message; retained so old rows load.
+-- not to be editable). Unused now that the card is a bot message; retained so old rows load. d
 alter table public.live_cards add column if not exists interaction_token text;
 alter table public.live_cards add column if not exists token_at          timestamptz;
 

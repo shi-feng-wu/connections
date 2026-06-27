@@ -1,6 +1,9 @@
 import { waitUntil } from "@vercel/functions";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { installNudgePayload, missingPermsNudgePayload } from "../src/discord-messages.js";
+import {
+  installNudgePayload,
+  missingPermsNudgePayload,
+} from "../src/discord-messages.js";
 import type { Puzzle } from "../src/game.js";
 import { canonicalScope } from "../src/scope.js";
 import type { CardPlayer } from "./_card.js";
@@ -133,7 +136,8 @@ async function postDmCard(
     .eq("puzzle_date", date)
     .eq("channel_id", channelId)
     .maybeSingle();
-  if (selErr) console.error("[dm-card] live_cards select error", selErr.message);
+  if (selErr)
+    console.error("[dm-card] live_cards select error", selErr.message);
 
   let puzzle: Puzzle | null = null;
   try {
@@ -144,14 +148,21 @@ async function postDmCard(
   // A launcher who already finished today isn't playing anymore — don't (re)add them or post on
   // their click (mirrors the guild card). Puzzle null = can't tell → treat as still playing.
   if (puzzle && (await playerFinished(db, puzzle, player.id, date))) {
-    console.log("[dm-card] skip: launcher already finished today", { scope, user: player.id });
+    console.log("[dm-card] skip: launcher already finished today", {
+      scope,
+      user: player.id,
+    });
     return;
   }
 
   const now = Date.now();
   const messageId = (row?.message_id as string | null | undefined) ?? null;
-  const editToken = (row?.interaction_token as string | null | undefined) ?? null;
-  const withinCooldown = withinPostCooldown(row?.posted_at as string | null | undefined, now);
+  const editToken =
+    (row?.interaction_token as string | null | undefined) ?? null;
+  const withinCooldown = withinPostCooldown(
+    row?.posted_at as string | null | undefined,
+    now,
+  );
   const startingFresh = !messageId || !withinCooldown;
   const existing: CardPlayer[] = Array.isArray(row?.players)
     ? (row.players as CardPlayer[])
@@ -166,12 +177,20 @@ async function postDmCard(
       !messageId ||
       !tokenStillEditable(row?.token_at as string | null | undefined, now)
     ) {
-      console.log("[dm-card] skip: card frozen (token expired)", { scope, channel: channelId });
+      console.log("[dm-card] skip: card frozen (token expired)", {
+        scope,
+        channel: channelId,
+      });
       return;
     }
     const players = mergePlayer(existing, player).players;
-    const renderPlayers = puzzle ? await withGrids(db, puzzle, date, players) : players;
-    const png = await renderRoster(renderPlayers, { puzzleNo: puzzle?.id, puzzleDate: date });
+    const renderPlayers = puzzle
+      ? await withGrids(db, puzzle, date, players)
+      : players;
+    const png = await renderRoster(renderPlayers, {
+      puzzleNo: puzzle?.id,
+      puzzleDate: date,
+    });
     const er = await sendCard(
       interactionMessageUrl(appId, editToken, messageId),
       cardPayload(),
@@ -180,7 +199,14 @@ async function postDmCard(
       "card.png",
     );
     if (!er.ok) {
-      console.error("[dm-card] edit failed", { status: er.status }, await er.text().catch(() => ""));
+      // 404 = the launcher deleted the card (Unknown Message) or the token lapsed mid-window —
+      // expected for a best-effort DM card, so just stop (don't repost something they removed).
+      const log = er.status === 404 ? console.warn : console.error;
+      log(
+        "[dm-card] edit failed",
+        { status: er.status },
+        await er.text().catch(() => ""),
+      );
       return;
     }
     await db
@@ -189,15 +215,24 @@ async function postDmCard(
       .eq("scope_id", scope)
       .eq("puzzle_date", date)
       .eq("channel_id", channelId);
-    console.log("[dm-card] edited", { scope, channel: channelId, players: players.length });
+    console.log("[dm-card] edited", {
+      scope,
+      channel: channelId,
+      players: players.length,
+    });
     return;
   }
 
   // Fresh card (none yet, or the 2h window rolled): reset the roster to this launcher, post on
   // this launch's token, and store the token + token_at so the next ~15 min of joins can edit it.
   const players = [player];
-  const renderPlayers = puzzle ? await withGrids(db, puzzle, date, players) : players;
-  const png = await renderRoster(renderPlayers, { puzzleNo: puzzle?.id, puzzleDate: date });
+  const renderPlayers = puzzle
+    ? await withGrids(db, puzzle, date, players)
+    : players;
+  const png = await renderRoster(renderPlayers, {
+    puzzleNo: puzzle?.id,
+    puzzleDate: date,
+  });
   const r = await sendCard(
     interactionFollowupUrl(appId, token),
     cardPayload(),
@@ -206,7 +241,14 @@ async function postDmCard(
     "card.png",
   );
   if (!r.ok) {
-    console.error("[dm-card] post failed", { status: r.status }, await r.text().catch(() => ""));
+    // 404 (Unknown Webhook) = the launcher's interaction token expired before this background post
+    // ran (a slow cold start) — expected, nothing to retry. Other failures are unexpected.
+    const log = r.status === 404 ? console.warn : console.error;
+    log(
+      "[dm-card] post failed",
+      { status: r.status },
+      await r.text().catch(() => ""),
+    );
     return;
   }
   const newId = ((await r.json()) as { id?: string }).id ?? null;
@@ -266,7 +308,11 @@ async function postCard(body: LaunchInteraction): Promise<void> {
         : null;
   const scope = canonicalScope(guildId, channelId);
   if (!scope || !channelId) {
-    console.warn("[card] skip: no scope/channel", { guildId, channelId, scope });
+    console.warn("[card] skip: no scope/channel", {
+      guildId,
+      channelId,
+      scope,
+    });
     return;
   }
   if (!scope.startsWith("g:")) {
@@ -294,12 +340,20 @@ async function postCard(body: LaunchInteraction): Promise<void> {
   // privately nudge the launcher to grant access. We DON'T return — a command launch's followup
   // card rides the interaction token and can still post (so the live card may appear); it's the
   // bot's own recap and in-window edits that 403, and this nudge is what gets those unblocked.
-  if (!botCanPostInChannel(body.app_permissions)) {
+  const canPost = botCanPostInChannel(body.app_permissions);
+  if (!canPost) {
     console.log("[card] bot lacks post permission in channel; nudging", {
       scope,
       channel: channelId,
     });
-    await nudgeOnce(body, scope, appId, token, missingPermsNudgePayload(), "perms");
+    await nudgeOnce(
+      body,
+      scope,
+      appId,
+      token,
+      missingPermsNudgePayload(),
+      "perms",
+    );
   }
 
   // Identity comes from the (Discord-verified) interaction, so no OAuth round-trip.
@@ -389,8 +443,9 @@ async function postCard(body: LaunchInteraction): Promise<void> {
 
   // Cooldown — at most one card per room every CARD_POST_COOLDOWN_MS (2h). A launch within
   // that window edits the current card in place (bot token); a deleted card (404) falls
-  // through to a fresh post.
-  if (messageId && withinCooldown && botToken) {
+  // through to a fresh post. Skip when the bot can't post here (app_permissions already told
+  // us — we nudged above): a bot-token PATCH would only 403 "Missing Access".
+  if (messageId && withinCooldown && botToken && canPost) {
     const er = await sendCard(
       botCardUrl(cardChannel, messageId),
       cardPayload(),
@@ -413,6 +468,19 @@ async function postCard(body: LaunchInteraction): Promise<void> {
   // a command posts it as an interaction followup. `?wait=true` returns the new message id.
   if (!messageId || !withinCooldown) {
     const viaButton = body.type === MESSAGE_COMPONENT;
+    // A button card is a bot-token reply, so it needs channel perms. If the bot can't post here
+    // (app_permissions already told us — we nudged above), don't bother: it would only 403. A
+    // command launch's followup rides the interaction token (no perms), so it still proceeds.
+    if (viaButton && !canPost) {
+      console.log(
+        "[card] skip: bot can't post button card here (nudged for perms)",
+        {
+          scope,
+          channel: channelId,
+        },
+      );
+      return;
+    }
     let r: Response;
     if (viaButton) {
       const replyTo = body.message?.id
@@ -426,6 +494,18 @@ async function postCard(body: LaunchInteraction): Promise<void> {
         "card.png",
         botToken ? { Authorization: `Bot ${botToken}` } : undefined,
       );
+      // The bot can post but lacks Read Message History, so it can't reply to the launch message
+      // (403, code 160002). Retry once as a plain card (no reply reference) so it still lands.
+      if (!r.ok && r.status === 403 && replyTo) {
+        r = await sendCard(
+          botCardUrl(channelId),
+          cardPayload(),
+          png,
+          "POST",
+          "card.png",
+          botToken ? { Authorization: `Bot ${botToken}` } : undefined,
+        );
+      }
     } else {
       r = await sendCard(
         interactionFollowupUrl(appId, token),
@@ -481,8 +561,7 @@ async function postCard(body: LaunchInteraction): Promise<void> {
     .from("recap_optouts")
     .delete()
     .match({ scope_id: scope, channel_id: channelForRow });
-  if (optErr)
-    console.warn("[card] recap_optouts clear failed", optErr.message);
+  if (optErr) console.warn("[card] recap_optouts clear failed", optErr.message);
 }
 
 // Send an ephemeral followup to the launcher at most once per (scope, player) per
@@ -511,7 +590,10 @@ async function nudgeOnce(
     .eq("user_id", u.id)
     .maybeSingle();
   if (selErr) {
-    console.warn(`[${tag}] skip: select failed (table missing?)`, selErr.message);
+    console.warn(
+      `[${tag}] skip: select failed (table missing?)`,
+      selErr.message,
+    );
     return;
   }
   const last = row?.nudged_at ? Date.parse(row.nudged_at as string) : null;
@@ -532,9 +614,21 @@ async function nudgeOnce(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!r.ok)
-    console.error(`[${tag}] followup failed`, { status: r.status }, await r.text().catch(() => ""));
-  else console.log(`[${tag}] sent`, { scope, channel: body.channel_id, user: u.id });
+  if (!r.ok) {
+    // 404 (Unknown Webhook) = the launcher's interaction token lapsed before this best-effort
+    // nudge fired — expected, not an error (the nudge must never noise up a launch).
+    const log = r.status === 404 ? console.warn : console.error;
+    log(
+      `[${tag}] followup failed`,
+      { status: r.status },
+      await r.text().catch(() => ""),
+    );
+  } else
+    console.log(`[${tag}] sent`, {
+      scope,
+      channel: body.channel_id,
+      user: u.id,
+    });
 }
 
 // Show the launcher of a bot-less server the ephemeral "Add to Server" pitch.
@@ -544,7 +638,14 @@ async function nudgeInstall(
   appId: string,
   token: string,
 ): Promise<void> {
-  await nudgeOnce(body, scope, appId, token, installNudgePayload(appId), "nudge");
+  await nudgeOnce(
+    body,
+    scope,
+    appId,
+    token,
+    installNudgePayload(appId),
+    "nudge",
+  );
 }
 
 // Internal endpoint: /api/interactions calls this (server-to-server) after it has ACKed the launch,

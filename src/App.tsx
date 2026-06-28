@@ -1140,6 +1140,25 @@ export function App({
       await refreshLeaderboard();
     })();
   };
+  // Embedded-only recovery from a failed Discord handshake. A transient cold-start / RPC hiccup in
+  // setupDiscord() returns false and dead-ends the player on the "blocked" screen with no way out;
+  // this re-runs the WHOLE handshake (authorize() mints a fresh single-use OAuth code each call, so
+  // a retry is clean) and then loads the puzzle. Deliberately a manual button, not an auto-loop: a
+  // genuinely-not-in-Discord frame would otherwise sit through repeated 8s ready() timeouts before
+  // showing anything. A "mounted" launch beacon with no following /api/token is the server-side
+  // fingerprint of the failures this recovers.
+  const retryHandshake = (): void => {
+    if (!isEmbedded) return;
+    setPhase("loading");
+    void (async () => {
+      if (!(await setupDiscord())) {
+        setPhase("blocked");
+        return;
+      }
+      await loadPuzzle();
+      await refreshLeaderboard();
+    })();
+  };
   // Open Discord's guild-install consent (the same link as /enable-posts' button) in the
   // user's browser. Embedded-only by construction: botInstalled is only ever set after a
   // Discord handshake, so the prompt never renders standalone where sdkRef is null.
@@ -1182,6 +1201,9 @@ export function App({
         error={phase === "error"}
         blocked={phase === "blocked"}
         onRetry={retry}
+        // Embedded-blocked is a recoverable handshake failure (non-embedded blocked renders
+        // <Landing/> above and never reaches here), so offer a retry instead of a dead end.
+        onRetryHandshake={isEmbedded ? retryHandshake : undefined}
         date={etDate()}
         number={cachedPuzzleNo(etDate())}
         // Tip only where it can act: a guild that positively lacks the bot. Installed

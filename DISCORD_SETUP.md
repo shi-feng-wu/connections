@@ -49,6 +49,33 @@ https://your-project.vercel.app/api/discord-callback
   `/relay/...` paths — no `patchUrlMappings` needed). Without it the live roster is dark.
 - ⚠️ Ordering: Discord globs prefixes, so the catch-all `/` **must be last** or it
   swallows `/supabase` and `/relay`.
+- ⚠️ **Supported Platforms** (Activities → Settings): enable every surface you expect
+  (Desktop, **iOS, Android**, Web). A platform left off presents as *"nothing opens at
+  all"* on that client while desktop works — i.e. the launch ACK succeeds and the
+  "who's playing" card still posts, but no activity window ever appears. This is
+  invisible to the bot API; it can only be checked/fixed in the Developer Portal UI.
+
+### Activity "won't open" / stuck after a deploy
+
+Symptom: the launch is acknowledged and the card posts, but **no window opens**; further
+launches **in that same channel** keep failing, yet launching in a **different** channel
+works immediately (and the original channel then recovers). That is a **stuck per-channel
+activity _instance_**: Discord ties a running activity to a per-channel instance and only
+sends the SDK's `READY` event **once per instance/frame** (see embedded-app-sdk issue #41).
+A deploy orphans any active/recent instance, so a relaunch re-enters the dead one and
+`sdk.ready()` never resolves (the app caps it at 8s, then shows the "Couldn't start the
+activity" screen). A fresh channel is a fresh instance, so it works.
+
+Post-deploy checklist when testing a launch:
+- **Fully quit and reopen the Discord desktop client** (the client caches activity/command
+  metadata; Cmd/Ctrl+R is not always enough — quit it from the tray).
+- If it still won't open in a channel, **launch once in a different channel** to clear the
+  stuck instance, then retry the original.
+- Confirm **Supported Platforms** (above) covers the client you're testing on.
+- The `[launch] ack {lagMs}` log (`api/interactions.ts`) + the `[launch] beacon`
+  stages (`api/launch-beacon.ts`) tell you which layer failed: a fast `ack` with **no
+  `boot` beacon** = Discord never opened the iframe (stuck instance / platform / cache),
+  not a slow ACK or a client crash.
 
 ## 3. General Information → Interactions Endpoint URL
 

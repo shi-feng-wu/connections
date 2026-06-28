@@ -93,6 +93,7 @@ export function LoadingScreen({
   error = false,
   blocked = false,
   onRetry,
+  onRetryHandshake,
   date,
   number,
   tip = false,
@@ -100,6 +101,9 @@ export function LoadingScreen({
   error?: boolean;
   blocked?: boolean;
   onRetry: () => void;
+  // Re-run the Discord handshake from the blocked screen. App passes this only when embedded
+  // (a recoverable handshake failure); absent → the screen just shows the "open in Discord" copy.
+  onRetryHandshake?: () => void;
   date?: string;
   number?: number;
   // show the /enable-posts tip — App passes true only in a guild that positively
@@ -107,15 +111,35 @@ export function LoadingScreen({
   tip?: boolean;
 }) {
   const inner = blocked ? (
-    <>
-      <div className="text-balance text-sm font-medium text-zinc-300">
-        Open in Discord to play.
-      </div>
-      <div className="text-pretty text-xs text-zinc-500">
-        Connections runs as a Discord Activity — launch it from a server or
-        call.
-      </div>
-    </>
+    onRetryHandshake ? (
+      <>
+        <div className="text-balance text-sm font-medium text-zinc-300">
+          Couldn’t start the activity.
+        </div>
+        <div className="text-pretty text-xs text-zinc-500">
+          Discord may still think it’s open in this channel. Try again, or
+          relaunch it in a different channel.
+        </div>
+        <HoverButton
+          type="button"
+          onClick={onRetryHandshake}
+          hover="opacity-85"
+          className="mt-1 cursor-pointer rounded-full border border-zinc-100 bg-zinc-100 px-5.5 py-2.5 text-sm font-semibold text-zinc-900 transition-opacity duration-150 ease-out"
+        >
+          Try again
+        </HoverButton>
+      </>
+    ) : (
+      <>
+        <div className="text-balance text-sm font-medium text-zinc-300">
+          Open in Discord to play.
+        </div>
+        <div className="text-pretty text-xs text-zinc-500">
+          Connections runs as a Discord Activity — launch it from a server or
+          call.
+        </div>
+      </>
+    )
   ) : error ? (
     <>
       <div className="text-balance text-sm font-medium text-zinc-300">

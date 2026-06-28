@@ -13,3 +13,12 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+// Set by the inline self-healing boot script in index.html and cleared/read by src/main.tsx.
+// __appMounted flips true once React's render() runs; __cxBootMounted disarms the white-screen
+// watchdog and clears the one-shot reload guard.
+interface Window {
+  __appMounted?: boolean;
+  __cxBootMounted?: () => void;
+  __cxRetried?: boolean;
+}

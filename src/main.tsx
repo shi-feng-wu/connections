@@ -27,3 +27,18 @@ createRoot(document.getElementById('app')!).render(
     <Analytics />
   </>,
 );
+
+// The module graph evaluated and render() ran, so the bundle loaded fine — disarm the inline
+// boot watchdog in index.html (it only fires if React never reached this line) and clear the
+// one-shot reload guard so the NEXT launch starts fresh. Emit a "mounted" beacon: a launch with
+// a "boot" beacon but no "mounted" one is a dead/blank bundle, vs one that mounts then fails the
+// Discord handshake (which reaches /api/token). See api/launch-beacon.ts for the full funnel.
+window.__appMounted = true;
+window.__cxBootMounted?.();
+try {
+  navigator.sendBeacon?.(
+    `/api/launch-beacon?stage=mounted&embedded=${isEmbedded ? 1 : 0}&t=${Math.round(performance.now())}`,
+  );
+} catch {
+  /* beacon is best-effort telemetry — never let it touch the boot */
+}

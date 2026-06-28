@@ -457,26 +457,36 @@ export default async function handler(
     return;
   }
 
-  // ACK first (Discord enforces a 3s deadline) — this is the LAUNCH_ACTIVITY that opens the
-  // game. No heavy work happens before this line, so a cold start still answers in time.
-  res.status(200).json(routeInteraction(body));
+  const launch = isLaunchCommand(body) || isPlayButton(body);
 
-  if (isLaunchCommand(body) || isPlayButton(body)) {
-    // Observability for FAILED launches. Discord drops the launch if our ACK misses its ~3s
-    // deadline (a cold start is the usual cause), and that failure is otherwise invisible — the
-    // function still returns 200, so Vercel logs a success. `x-signature-timestamp` is (to the
-    // second) when Discord sent the request, so now − ts ≈ how long the launch took to reach us
-    // (cold start + queue + network). Flag the slow ones with console.error so failed/at-risk
-    // launches are greppable and cluster in Vercel's runtime errors. ±1s fuzzy (second-resolution
-    // timestamp); treat ~3s+ as "almost certainly dropped", 2.5–3s as "at risk".
+  // Log the launch ACK timing BEFORE the response is flushed. This MUST run pre-response:
+  // Vercel does NOT reliably drain stdout written after res.json() (the function suspends once the
+  // response is sent), which is why the previous post-response slow-ACK probe never appeared —
+  // its silence meant "never logged", NOT "ACK was fast". So we had no lagMs data at all. Logging
+  // here (the same pre-response phase whose logs DO survive) finally surfaces it. Cost is one
+  // Date.now() subtraction + one console.log — sub-millisecond, nowhere near Discord's 3s budget,
+  // so the ACK still lands in time even on a cold start. `x-signature-timestamp` is (to the second)
+  // when Discord sent the request, so now − ts ≈ inbound launch latency (cold start + queue +
+  // network); it's whole-seconds so it OVER-estimates by up to ~1s (never hides a slow ACK). This
+  // only sees INBOUND latency — a launch dropped for a non-latency reason, or one where Discord
+  // never opens the iframe (a stuck/zombie per-channel instance), still logs a fast ack here and is
+  // distinguished by whether /api/launch-beacon's "boot" stage ever fires.
+  if (launch) {
     const tsSec = Number(typeof ts === "string" ? ts : 0);
     const lagMs = tsSec ? Date.now() - tsSec * 1000 : 0;
-    if (lagMs >= 2500)
-      console.error("[launch] slow ACK — may have missed Discord's 3s deadline", {
+    const surface = body.type === MESSAGE_COMPONENT ? "button" : "command";
+    console.log("[launch] ack", { lagMs, surface });
+    if (lagMs >= 2000)
+      console.error("[launch] slow ACK — at risk of missing Discord's 3s deadline", {
         lagMs,
-        surface: body.type === MESSAGE_COMPONENT ? "button" : "command",
+        surface,
       });
+  }
 
+  // ACK (Discord enforces a 3s deadline) — this is the LAUNCH_ACTIVITY that opens the game.
+  res.status(200).json(routeInteraction(body));
+
+  if (launch) {
     // Then trigger the card render in /api/post-card (a separate, heavier function). waitUntil
     // keeps this function alive past the response flush; the trigger is fire-and-forget — the
     // launch is already ACKed, so a slow or failed render never blocks the game opening.

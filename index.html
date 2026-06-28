@@ -10,6 +10,86 @@
          preload to cut the score/wordmark serif's flash-of-fallback. -->
     <link rel="preload" href="/fonts/newsreader.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/libre-franklin.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- Self-healing boot watchdog. The Activity loads as one eager content-hashed ES-module graph
+         (the module tag below + its modulepreload chunks) over Discord's *.discordsays.com proxy,
+         with no dynamic-import fallback: if ANY one of those requests drops — a transient proxy
+         blip, or a stale-cached entry document pointing at a prior deploy's now-purged chunk right
+         after a deploy — React never mounts and the iframe stays blank forever ("the activity
+         didn't start"). The server can't see this; it's downstream of a fast LAUNCH_ACTIVITY ACK.
+         This INLINE script (runs even when the module graph dies) catches a failed boot resource
+         and the dead-mount case, then reloads ONCE — and because '/' and '/index.html' are no-store
+         (vercel.json), the reload re-fetches fresh HTML with the current deploy's hashes and retries
+         the failed request. It also beacons each boot stage so the failure stops being invisible. -->
+    <script>
+      (function () {
+        var KEY = "cx:boot-retry";
+        var embedded = /[?&]frame_id=/.test(location.search) ? 1 : 0;
+        function beacon(stage, extra) {
+          try {
+            var p = "stage=" + stage + "&embedded=" + embedded + "&t=" + Math.round(performance.now());
+            if (extra) for (var k in extra) p += "&" + k + "=" + encodeURIComponent(extra[k]);
+            var url = "/api/launch-beacon?" + p;
+            if (navigator.sendBeacon) navigator.sendBeacon(url);
+            else new Image().src = url;
+          } catch (e) {}
+        }
+        // One-shot guard. sessionStorage can throw / not persist in a sandboxed cross-origin iframe,
+        // so fall back to a window flag — either way we reload AT MOST once before showing a static
+        // fallback, never an infinite reload loop.
+        function retried() {
+          try { return sessionStorage.getItem(KEY) === "1"; } catch (e) { return window.__cxRetried === true; }
+        }
+        function markRetried() {
+          try { sessionStorage.setItem(KEY, "1"); } catch (e) { window.__cxRetried = true; }
+        }
+        function fallback() {
+          var el = document.getElementById("app");
+          if (el)
+            el.innerHTML =
+              '<div style="margin:auto;padding:2rem;text-align:center;color:#a1a1aa;' +
+              'font:500 14px/1.6 system-ui,sans-serif">Couldn’t load Connections.<br>' +
+              "Close the activity and open it again.</div>";
+        }
+        function recover(reason, resUrl) {
+          beacon("boot-error", { reason: reason, res: resUrl || "" });
+          if (retried()) { fallback(); return; }
+          markRetried();
+          location.reload();
+        }
+        // A failed boot chunk/stylesheet fires a non-bubbling 'error' on its element — caught in the
+        // capture phase. Fatal ONLY for the Vite build output under /assets/ (the entry module + its
+        // chunks + the stylesheet): the entry <script> owns the whole import graph, so a 404 on any
+        // static dependency surfaces as an error on it. Everything else is excluded on purpose — a
+        // dropped font preload or favicon (the app boots fine with fallback fonts) and, critically,
+        // the runtime-injected analytics script (/_vercel/insights/script.js, which an ad-blocker can
+        // fail) must NEVER reload, or we'd manufacture the very failure we're trying to cure.
+        window.addEventListener(
+          "error",
+          function (e) {
+            var t = e && e.target;
+            if (!t || !t.tagName) return;
+            var tag = t.tagName.toUpperCase();
+            var url = t.src || t.href || "";
+            if (url.indexOf("/assets/") === -1) return; // only the build output is boot-fatal
+            if (tag === "SCRIPT" || (tag === "LINK" && t.rel === "stylesheet"))
+              recover("asset", url);
+          },
+          true,
+        );
+        // White-screen watchdog. main.tsx sets __appMounted right after render() — BEFORE the 8s
+        // Discord handshake — so this can only fire on a genuinely dead module graph, never on a
+        // slow-but-working handshake. 12s is generous so a slow mobile-webview download isn't killed
+        // mid-flight.
+        var t = setTimeout(function () {
+          if (!window.__appMounted) recover("watchdog", "");
+        }, 12000);
+        window.__cxBootMounted = function () {
+          clearTimeout(t);
+          try { sessionStorage.removeItem(KEY); } catch (e) {}
+        };
+        beacon("boot"); // the iframe document loaded and inline JS is executing
+      })();
+    </script>
   </head>
   <body class="bg-black text-zinc-100 antialiased">
     <!-- min-h-dvh tracks the Discord iframe height. Vertical centering is done with

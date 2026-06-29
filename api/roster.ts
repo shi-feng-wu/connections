@@ -4,6 +4,7 @@ import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import type { CardPlayer } from './_card.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
+import { query } from './_query.js';
 
 // Persistent "who's played this room today" roster for the live panel. Returns every player
 // we can identify who has played today — replayed server-side from their committed guesses
@@ -211,8 +212,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   // Identity was verified at the edge (middleware.ts) via the x-ct ticket, ahead of the cache,
   // so this handler is purely a per-room read — no uid, no write — which is what makes the
   // response cacheable and shareable. Scope rides in the query string so it keys the cache.
-  const guildId = typeof req.query.g === 'string' ? req.query.g : null;
-  const channelId = typeof req.query.c === 'string' ? req.query.c : null;
+  const q = query(req);
+  const guildId = q.get('g');
+  const channelId = q.get('c');
   const scope = canonicalScope(guildId, channelId);
   const db = admin();
   // No scope or no store (standalone/DM with no persistent roster) → empty, and don't cache
@@ -232,7 +234,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   // Channel narrowing only applies to a guild scope, where one guild spans many channels. A
   // c: DM/group scope IS a single channel, so narrowing is redundant and would drop legacy
   // rows written before channel_id existed — skip it (guildId is null for a DM/group).
-  const wantChannel = req.query.view !== 'server';
+  const wantChannel = q.get('view') !== 'server';
   const narrowTo = wantChannel && channelId && guildId ? channelId : null;
 
   const now = Date.now();

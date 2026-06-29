@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { query } from "./_query.js";
 
 // Launch-funnel beacon. The client fires this from the inline boot script in index.html — the very
 // first JS that runs inside the Activity iframe, BEFORE the Discord SDK handshake — and again once
@@ -17,18 +18,16 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 export const config = { api: { bodyParser: false } };
 
 export default function handler(req: VercelRequest, res: VercelResponse): void {
-  const q = (req.query ?? {}) as Record<string, string | string[] | undefined>;
-  const str = (v: string | string[] | undefined): string | undefined =>
-    typeof v === "string" ? v : Array.isArray(v) ? v[0] : undefined;
+  const q = query(req);
 
   const data: Record<string, unknown> = {
-    stage: str(q.stage) ?? "boot", // "boot" | "mounted" | "boot-error"
-    embedded: str(q.embedded) === "1",
-    t: str(q.t), // client ms since navigation start (performance.now), best-effort
+    stage: q.get("stage") ?? "boot", // "boot" | "mounted" | "boot-error"
+    embedded: q.get("embedded") === "1",
+    t: q.get("t") ?? undefined, // client ms since navigation start (performance.now), best-effort
   };
-  const reason = str(q.reason);
+  const reason = q.get("reason");
   if (reason) data.reason = reason.slice(0, 40); // "asset" | "watchdog"
-  const failed = str(q.res);
+  const failed = q.get("res");
   if (failed) data.res = failed.slice(0, 300); // the failed resource URL (boot-error only)
 
   // One greppable line per launch stage. "[launch] beacon" + the existing "[launch] ack" together

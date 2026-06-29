@@ -42,6 +42,14 @@ const PERM_VIEW_CHANNEL = 1n << 10n;
 const PERM_SEND_MESSAGES = 1n << 11n;
 const PERM_ATTACH_FILES = 1n << 15n;
 
+// The card is best-effort, and Discord returns statuses that are EXPECTED rather than bugs:
+// 403 (the bot lacks or lost access to the channel), 404 (the interaction webhook/message expired
+// or was deleted), 429 (the "edits to messages older than 1 hour" rate limit). Log those at warn so
+// the Vercel runtime-errors view stays a list of REAL problems; anything else (5xx, etc.) keeps
+// error level. Mirrors the per-status handling the DM-card path already used inline.
+const cardLog = (status: number): ((...args: unknown[]) => void) =>
+  status === 403 || status === 404 || status === 429 ? console.warn : console.error;
+
 type DiscordUserLite = {
   id?: string;
   username?: string;
@@ -201,7 +209,7 @@ async function postDmCard(
     if (!er.ok) {
       // 404 = the launcher deleted the card (Unknown Message) or the token lapsed mid-window —
       // expected for a best-effort DM card, so just stop (don't repost something they removed).
-      const log = er.status === 404 ? console.warn : console.error;
+      const log = cardLog(er.status);
       log(
         "[dm-card] edit failed",
         { status: er.status },
@@ -243,7 +251,7 @@ async function postDmCard(
   if (!r.ok) {
     // 404 (Unknown Webhook) = the launcher's interaction token expired before this background post
     // ran (a slow cold start) — expected, nothing to retry. Other failures are unexpected.
-    const log = r.status === 404 ? console.warn : console.error;
+    const log = cardLog(r.status);
     log(
       "[dm-card] post failed",
       { status: r.status },
@@ -456,7 +464,7 @@ async function postCard(body: LaunchInteraction): Promise<void> {
     );
     if (er.status === 404) messageId = null;
     else if (!er.ok)
-      console.error(
+      cardLog(er.status)(
         "[card] edit failed",
         { status: er.status },
         await er.text().catch(() => ""),
@@ -516,7 +524,7 @@ async function postCard(body: LaunchInteraction): Promise<void> {
       );
     }
     if (!r.ok) {
-      console.error(
+      cardLog(r.status)(
         "[card] post failed",
         { via: viaButton ? "button" : "command", status: r.status },
         await r.text().catch(() => ""),
@@ -617,7 +625,7 @@ async function nudgeOnce(
   if (!r.ok) {
     // 404 (Unknown Webhook) = the launcher's interaction token lapsed before this best-effort
     // nudge fired — expected, not an error (the nudge must never noise up a launch).
-    const log = r.status === 404 ? console.warn : console.error;
+    const log = cardLog(r.status);
     log(
       `[${tag}] followup failed`,
       { status: r.status },

@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { query } from './_query.js';
 
 // Same-origin proxy for NYT Connections card images. The April-Fools "image puzzle"
 // format (e.g. 2025-04-01) renders each card as an SVG glyph hosted on NYT's asset
@@ -19,7 +20,7 @@ const ALLOWED_HOST =
 const FETCH_TIMEOUT_MS = 4000;
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
-  const raw = typeof req.query.u === 'string' ? req.query.u : '';
+  const raw = query(req).get('u') ?? '';
   let url: URL;
   try {
     url = new URL(raw);

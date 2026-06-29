@@ -4,6 +4,7 @@ import { renderRecap } from './_card.js';
 import { fetchChannelName, fetchGuildName } from './_discord.js';
 import { sendCard } from './_livecard.js';
 import { fetchPuzzle, todayET, yesterdayET } from './_nyt.js';
+import { query } from './_query.js';
 import { type DayRow, recapPayload, recapText, type SeasonRow, toRecapData } from './_recap.js';
 import { Game, type Puzzle } from '../src/game.js';
 import { rankMap, rankDelta } from '../src/rank-delta.js';
@@ -111,16 +112,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   // test server without spamming every room. force=1 clears that channel's ledger row first so
   // it re-posts. With no params it's the normal cron (all channels, yesterday). See
   // scripts/test-recap.mjs.
-  const q = req.query;
-  const onlyScope = typeof q.scope === 'string' && q.scope ? q.scope : undefined;
-  const onlyChannel = typeof q.channel === 'string' && q.channel ? q.channel : undefined;
-  const force = q.force === '1';
+  const q = query(req);
+  const onlyScope = q.get('scope') || undefined;
+  const onlyChannel = q.get('channel') || undefined;
+  const force = q.get('force') === '1';
   if (!!onlyScope !== !!onlyChannel) {
     res.status(400).json({ error: 'scope and channel must be provided together' });
     return;
   }
 
-  const date = typeof q.date === 'string' && q.date ? q.date : yesterdayET();
+  const date = q.get('date') || yesterdayET();
   const since = `${date.slice(0, 8)}01`; // month start of the puzzle's day (avoids a month-boundary skew)
 
   // Day before yesterday, for the "was a streak broken?" check below (noon-UTC anchor so the

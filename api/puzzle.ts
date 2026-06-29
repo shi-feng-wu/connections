@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { bearerToken } from './_discord.js';
 import { fetchPuzzle, todayET, randomDate, isValidDate, FIRST_DATE } from './_nyt.js';
+import { query } from './_query.js';
 import { isLocalDev, verifyAuth } from './_session.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
@@ -14,12 +15,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       res.status(401).json({ error: 'unauthenticated' });
       return;
     }
-    const dateParam = typeof req.query.date === 'string' ? req.query.date : undefined;
+    const q = query(req);
+    const dateParam = q.get('date') ?? undefined;
     if (dateParam && !isValidDate(dateParam)) {
       res.status(400).json({ error: `Date must be between ${FIRST_DATE} and ${todayET()}.` });
       return;
     }
-    const date = dateParam ?? (req.query.random ? randomDate() : todayET());
+    const date = dateParam ?? (q.get('random') ? randomDate() : todayET());
     const puzzle = await fetchPuzzle(date);
     // Per-user (auth-gated) response: browser may cache, shared CDN must not, or it
     // could serve a puzzle to an unauthenticated request. fetchPuzzle's in-memory

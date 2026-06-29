@@ -475,11 +475,25 @@ export default async function handler(
     const tsSec = Number(typeof ts === "string" ? ts : 0);
     const lagMs = tsSec ? Date.now() - tsSec * 1000 : 0;
     const surface = body.type === MESSAGE_COMPONENT ? "button" : "command";
-    console.log("[launch] ack", { lagMs, surface });
+    // Stamp the ack with the channel/guild it launched in. This is the correlation key for
+    // detecting a FAILED launch: a "[launch] ack" whose channel never gets a following
+    // "[launch] beacon stage=boot" (the inline index.html script stamps the beacon with the same
+    // channel_id from the iframe URL) is a launch Discord acked but never opened. channel_id is the
+    // only id shared by both sides — the iframe instance_id doesn't exist yet at ack time. guild is
+    // null in a DM, so channel alone keys a DM launch.
+    const channel =
+      typeof body.channel_id === "string"
+        ? body.channel_id
+        : typeof body.channel?.id === "string"
+          ? body.channel.id
+          : null;
+    const guild = typeof body.guild_id === "string" ? body.guild_id : null;
+    console.log("[launch] ack", { lagMs, surface, channel, guild });
     if (lagMs >= 2000)
       console.error("[launch] slow ACK — at risk of missing Discord's 3s deadline", {
         lagMs,
         surface,
+        channel,
       });
   }
 

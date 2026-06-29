@@ -24,11 +24,24 @@
       (function () {
         var KEY = "cx:boot-retry";
         var embedded = /[?&]frame_id=/.test(location.search) ? 1 : 0;
+        // Discord stamps the activity iframe URL with the launch ids. channel_id is the key that
+        // correlates this boot beacon back to the server's "[launch] ack" for the SAME launch — so a
+        // "[launch] ack" whose channel never produces a "boot" beacon is a launch Discord acked but
+        // never opened (the failed-launch signature). Empty string if Discord omits a field.
+        var qp;
+        try { qp = new URLSearchParams(location.search); } catch (e) { qp = null; }
+        function ctxParam(name) {
+          try { return qp ? (qp.get(name) || "") : ""; } catch (e) { return ""; }
+        }
+        var ctx =
+          "&channel=" + encodeURIComponent(ctxParam("channel_id")) +
+          "&guild=" + encodeURIComponent(ctxParam("guild_id")) +
+          "&instance=" + encodeURIComponent(ctxParam("instance_id"));
         function beacon(stage, extra) {
           try {
             var p = "stage=" + stage + "&embedded=" + embedded + "&t=" + Math.round(performance.now());
             if (extra) for (var k in extra) p += "&" + k + "=" + encodeURIComponent(extra[k]);
-            var url = "/api/launch-beacon?" + p;
+            var url = "/api/launch-beacon?" + p + ctx;
             if (navigator.sendBeacon) navigator.sendBeacon(url);
             else new Image().src = url;
           } catch (e) {}

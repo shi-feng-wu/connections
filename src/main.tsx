@@ -36,8 +36,14 @@ createRoot(document.getElementById('app')!).render(
 window.__appMounted = true;
 window.__cxBootMounted?.();
 try {
+  // Same channel/guild correlation key as the inline boot beacon (index.html), so a launch's
+  // funnel — ack → boot → mounted — can be matched end to end by channel_id.
+  const ctx =
+    `&channel=${encodeURIComponent(params.get('channel_id') ?? '')}` +
+    `&guild=${encodeURIComponent(params.get('guild_id') ?? '')}` +
+    `&instance=${encodeURIComponent(params.get('instance_id') ?? '')}`;
   navigator.sendBeacon?.(
-    `/api/launch-beacon?stage=mounted&embedded=${isEmbedded ? 1 : 0}&t=${Math.round(performance.now())}`,
+    `/api/launch-beacon?stage=mounted&embedded=${isEmbedded ? 1 : 0}&t=${Math.round(performance.now())}${ctx}`,
   );
 } catch {
   /* beacon is best-effort telemetry — never let it touch the boot */

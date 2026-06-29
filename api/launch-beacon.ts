@@ -23,6 +23,12 @@ export default function handler(req: VercelRequest, res: VercelResponse): void {
   const data: Record<string, unknown> = {
     stage: q.get("stage") ?? "boot", // "boot" | "mounted" | "boot-error"
     embedded: q.get("embedded") === "1",
+    // channel_id is the correlation key back to /api/interactions' "[launch] ack" — a launch whose
+    // ack channel never produces a "boot" beacon is one Discord acked but never opened. guild is
+    // null in a DM; instance_id is Discord's per-launch activity instance (present once it opens).
+    channel: q.get("channel") || undefined,
+    guild: q.get("guild") || undefined,
+    instance: q.get("instance") || undefined,
     t: q.get("t") ?? undefined, // client ms since navigation start (performance.now), best-effort
   };
   const reason = q.get("reason");

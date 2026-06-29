@@ -40,7 +40,86 @@ export function tokenStillEditable(tokenAt: string | null | undefined, now: numb
 // (join) refreshes a bit faster than mid-game progress (update); a player who just
 // finished bypasses the update throttle so the final grid always lands.
 export const CARD_JOIN_THROTTLE_MS = 15_000; // 15s
-export const CARD_UPDATE_THROTTLE_MS = 60_000; // 60s
+// 30s: a counted guess now drives the card server-side (api/guess -> api/refresh-card), so the
+// grids fill in during play; this caps that at one edit per 30s per card. Was 60s, which — because
+// post-card seeds edited_at at launch — usually threw away every mid-game edit and left only the
+// finish (the bypass below), making the card look like it "only updated on solve".
+export const CARD_UPDATE_THROTTLE_MS = 30_000; // 30s
+
+// Whether the card was edited within the update-throttle window (so a fresh edit should be skipped).
+// Null/unset edited_at (e.g. a just-posted DM card) = not throttled. The cheap pre-check
+// api/guess uses to skip a self-call it knows would be throttled; the authoritative gate is the
+// atomic claimEditSlot below. Exported for tests.
+export function withinUpdateThrottle(editedAt: string | null | undefined, now: number): boolean {
+  if (!editedAt) return false;
+  const t = Date.parse(editedAt);
+  return !Number.isNaN(t) && now - t < CARD_UPDATE_THROTTLE_MS;
+}
+
+// Cheap gate for api/guess's server-side refresh trigger: is there a card in this room that's due
+// for a re-render? Skips the /api/refresh-card self-call entirely when there's no card to edit
+// (most guesses — user-install guilds, channels nobody launched in), when a DM card's interaction
+// token has expired (frozen — refresh-card couldn't edit it anyway, so don't keep firing all day),
+// or when the last edit is inside the 30s window and the player hasn't just finished (a finish
+// always refreshes so the final grid lands). One indexed point-read on live_cards — far cheaper
+// than spinning up the render function just to have it bail. The authoritative throttle is still
+// claimEditSlot, so a race here only ever costs a wasted no-op self-call, never a double render.
+export async function cardNeedsRefresh(
+  db: SupabaseClient,
+  scope: string,
+  date: string,
+  channelId: string,
+  finished: boolean,
+): Promise<boolean> {
+  const { data } = await db
+    .from('live_cards')
+    .select('message_id, edited_at, token_at')
+    .eq('scope_id', scope)
+    .eq('puzzle_date', date)
+    .eq('channel_id', channelId)
+    .maybeSingle();
+  if (!data?.message_id) return false; // no card established here -> nothing to refresh
+  // A DM/group-DM card (c:) is edited via the launcher's interaction token, which Discord only
+  // honours for ~15 min. Past that the card is frozen and refresh-card bails before it can stamp
+  // edited_at — so without this the gate would (uselessly) fire on every counted guess for the rest
+  // of the day. A guild (g:) card edits via the bot token and never expires.
+  if (scope.startsWith('c:') && !tokenStillEditable(data.token_at as string | null, Date.now())) {
+    return false;
+  }
+  if (finished) return true; // the final grid always lands
+  return !withinUpdateThrottle(data.edited_at as string | null, Date.now());
+}
+
+// Atomically claim the next edit slot for a card so a burst of near-simultaneous guesses can't each
+// render it. Stamps edited_at only when it's unset (a freshly posted DM card) or older than the
+// throttle window; a finished grid always claims (the final board must land). Returns whether THIS
+// call won the slot — only the winner should render + PATCH. The conditional UPDATE is the lock:
+// concurrent callers race on the same row and exactly one comes back with a row. Stamping before the
+// render (rather than after a successful PATCH) is deliberate — it's what dedupes the burst; the
+// rare cost is that a failed PATCH burns the 30s window, which the next guess recovers.
+export async function claimEditSlot(
+  db: SupabaseClient,
+  scope: string,
+  date: string,
+  channelId: string,
+  finished: boolean,
+): Promise<boolean> {
+  const nowIso = new Date().toISOString();
+  const base = db
+    .from('live_cards')
+    .update({ edited_at: nowIso })
+    .eq('scope_id', scope)
+    .eq('puzzle_date', date)
+    .eq('channel_id', channelId);
+  if (finished) {
+    await base;
+    return true;
+  }
+  const threshold = new Date(Date.now() - CARD_UPDATE_THROTTLE_MS).toISOString();
+  // null edited_at (a just-posted DM card) or older than the window -> claimable.
+  const { data } = await base.or(`edited_at.is.null,edited_at.lt.${threshold}`).select('scope_id');
+  return Array.isArray(data) && data.length > 0;
+}
 
 // Attach each player's current Connections grid (replayed from their committed guesses)
 // and their time: finish duration for a completed game, else elapsed-so-far. One query
@@ -101,8 +180,9 @@ export async function playerFinished(
 }
 
 // Whether a grid (rows of four group-levels) shows a finished game: four groups solved
-// (a win) or four misses (a loss). A correct guess is four of a kind; anything else is
-// a miss. Lets a just-finished player's refresh skip the edit throttle.
+// (a win) or four misses (a loss). A correct guess is four of a kind; anything else is a
+// miss. Used to tell whether every player on a guild card has finished (so the "who's
+// playing" line flips to past tense — see playingLine / api/refresh-card).
 export function gridFinished(grid: number[][] | undefined): boolean {
   if (!grid) return false;
   let solved = 0;
@@ -111,30 +191,62 @@ export function gridFinished(grid: number[][] | undefined): boolean {
   return solved >= 4 || misses >= 4;
 }
 
+// The card's message-content caption, e.g. "Alice is playing." / "Alice and Bob are playing." /
+// "Alice, Bob and 3 others are playing." Lists up to three names; beyond that it caps to two plus
+// "and N others" so a busy room stays one short line. `past` flips the verb to was/were — used once
+// a guild card's whole roster has finished, or by the finalize cron just before a DM card's edit
+// window closes (api/finalize-cards). Empty roster → no caption.
+export function playingLine(names: string[], past: boolean): string {
+  const list = names.filter((n) => n && n.trim().length > 0);
+  const n = list.length;
+  if (n === 0) return '';
+  const verb = n === 1 ? (past ? 'was' : 'is') : past ? 'were' : 'are';
+  let subject: string;
+  if (n === 1) subject = list[0];
+  else if (n === 2) subject = `${list[0]} and ${list[1]}`;
+  else if (n === 3) subject = `${list[0]}, ${list[1]} and ${list[2]}`;
+  else subject = `${list[0]}, ${list[1]} and ${n - 2} others`;
+  return `${subject} ${verb} playing.`;
+}
+
 // Message flag (1 << 12): the message posts silently — no push/desktop ping. Every
 // live "who's playing" card (and its edits) is routine churn, so it's suppressed; only
 // the daily recap (recapPayload, no flag) is allowed to notify.
 const SUPPRESS_NOTIFICATIONS = 1 << 12;
 
-// The Discord message: the rendered PNG plus the "Play" button. The image is the hero
-// (it carries the title and player count, like the Wordle card), so it's sent as a bare
-// inline attachment — no embed, so Discord draws no frame/border or coloured side bar
-// around it; the PNG sits directly in the message. Pass `replyTo` on the initial post so
-// the card replies to the launcher's "<user> used /connections" message
+// The Discord message: the rendered PNG plus the "Play" button, and an optional `content` caption
+// ("X is/are playing"). The image is the hero (it carries the title and player count, like the
+// Wordle card), so it's sent as a bare inline attachment — no embed, so Discord draws no
+// frame/border or coloured side bar around it; the PNG sits directly in the message. Pass `replyTo`
+// on the initial post so the card replies to the launcher's "<user> used /connections" message
 // (fail_if_not_exists:false → a normal message if it's gone). Posted silently.
-export function cardPayload(replyTo?: { messageId: string; channelId: string }): object {
-  const base = {
+export function cardPayload(opts?: {
+  content?: string;
+  replyTo?: { messageId: string; channelId: string };
+}): object {
+  const { content, replyTo } = opts ?? {};
+  const base: Record<string, unknown> = {
     flags: SUPPRESS_NOTIFICATIONS,
+    // The caption interpolates user-controlled display names, so deny ALL mentions — a name like
+    // "@everyone" or "<@123>" must never ping (mirrors api/_feedback.ts). The image carries no text
+    // mentions either, so this is always safe.
+    allowed_mentions: { parse: [] },
     components: [
       { type: 1, components: [{ type: 2, style: 1, label: 'Play now!', custom_id: PLAY_CUSTOM_ID }] },
     ],
     attachments: [{ id: 0, filename: 'card.png' }],
   };
-  if (!replyTo) return base;
-  return {
-    ...base,
-    message_reference: { message_id: replyTo.messageId, channel_id: replyTo.channelId, fail_if_not_exists: false },
-  };
+  // Always send content on an edit so the caption stays in sync (an edit that omits it would leave
+  // the previous text in place); '' clears it when there's no roster.
+  if (content !== undefined) base.content = content;
+  if (replyTo) {
+    base.message_reference = {
+      message_id: replyTo.messageId,
+      channel_id: replyTo.channelId,
+      fail_if_not_exists: false,
+    };
+  }
+  return base;
 }
 
 // Send a card as a multipart message (image attachment). POST creates, PATCH edits

@@ -55,6 +55,21 @@ const BAR_EMPTY_BORDER = "#2c2c30";
 const ON_AVATAR = "#0c0c0c";
 const CAT_COLOR = LEVELS.map((l) => l.color); // yellow, green, blue, purple
 
+// "Now playing" tile palette, matched to the Claude Design live card. A thin zinc-600
+// frame rings the whole card; tiles sit on a zinc-900/55 fill. The avatar ring, the
+// unsolved slots and the footer glyph now read state at a glance: emerald for a solve,
+// a dimmed zinc-700 for a loss, zinc-600 while still playing.
+const CARD_BORDER = ZINC_600; // #52525b — thin frame around the whole card
+const TILE_BG = "rgba(24,24,27,0.55)"; // zinc-900/55
+const TILE_BAR_EMPTY_BORDER = "#34343a"; // unsolved slot border (a touch lighter than the recap's)
+const TILE_BAR_LOST_BG = "#161618"; // unsolved slot for a player who's out of guesses
+const TILE_BAR_LOST_BORDER = "#242427";
+const RING_LIVE = ZINC_600; // #52525b — still playing / no guesses yet
+const RING_WON = EMERALD; // a solve earns an emerald avatar ring
+const RING_LOST = ZINC_700; // #3f3f46 — out of guesses
+const TROPHY_GOLD = CAT_COLOR[0]; // ~gold; evokes the 🏆 (a color emoji can't render server-side)
+const LOST_DIM = 0.7; // a lost player's avatar/bars fade back
+
 // Identity palette + hashing, mirrored from src/roster.tsx (deliberately NOT the
 // category colors, so an avatar's color never reads as a solved group).
 const AVCOL = [
@@ -159,13 +174,33 @@ function fmtDate(s?: string): string {
   const m = s ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(s) : null;
   return m ? `${MON[+m[2] - 1]} ${+m[3]}` : "";
 }
-// "Puzzle #1170 · May 31" (the card's subline), or whichever pieces we have.
+const MON_FULL = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+// "June 26, 2026" — the full puzzle date, the card's subline in the new design.
+function fmtDateFull(s?: string): string {
+  const m = s ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(s) : null;
+  return m ? `${MON_FULL[+m[2] - 1]} ${+m[3]}, ${m[1]}` : "";
+}
+// The card's eyebrow: "NOW PLAYING · #1195" — the puzzle number rides up beside the
+// label in the new design (the subline below carries the date).
+function nowPlayingEyebrow(opts: CardOpts): string {
+  return opts.puzzleNo ? `NOW PLAYING · #${opts.puzzleNo}` : "NOW PLAYING";
+}
+// The card's subline: the full puzzle date ("June 26, 2026"), or "" when unknown.
 function nowPlayingSubline(opts: CardOpts): string {
-  const parts: string[] = [];
-  if (opts.puzzleNo) parts.push(`Puzzle #${opts.puzzleNo}`);
-  const d = fmtDate(opts.puzzleDate);
-  if (d) parts.push(d);
-  return parts.join(" · ");
+  return fmtDateFull(opts.puzzleDate);
 }
 // The header's right-anchored stats: how many players are in the room, and how many of
 // them have solved today (Solved is accented emerald, the app's "solved" color).
@@ -216,18 +251,6 @@ function derive(grid: number[][] | undefined): Derived {
     perfect: done === "won" && mistakes === 0,
     played: g.length,
   };
-}
-
-// Among winners, the leader (fewest mistakes, then fastest) earns the Trophy.
-function leaderId(players: CardPlayer[]): string | null {
-  const won = players.filter((p) => derive(p.grid).done === "won");
-  if (!won.length) return null;
-  won.sort(
-    (a, b) =>
-      derive(a.grid).mistakes - derive(b.grid).mistakes ||
-      (a.sec ?? 1e9) - (b.sec ?? 1e9),
-  );
-  return won[0].id;
 }
 
 // ---- lucide icon paths (exact `d` strings, as used in the app) ----
@@ -316,6 +339,7 @@ function drawAvatar(
   cx: number,
   cy: number,
   size: number,
+  ringColor: string = ZINC_700,
 ): void {
   ctx.save();
   ctx.beginPath();
@@ -334,7 +358,7 @@ function drawAvatar(
     ctx.fillText(initials(p.name), cx, cy + 1);
   }
   ctx.restore();
-  ctx.strokeStyle = ZINC_700;
+  ctx.strokeStyle = ringColor;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.arc(cx, cy, size / 2 + 1.25, 0, Math.PI * 2);
@@ -348,7 +372,6 @@ export type CardLayout = {
   panelW: number;
   W: number;
   height: number;
-  leader: string | null;
 };
 
 // Pixel dimensions of the card for a given roster (the canvas the caller must size).
@@ -364,9 +387,10 @@ export function cardLayout(
 
   // The header (left block + the right-anchored stats) can be wider than a single
   // column (e.g. solo), so let it set the card's floor.
+  const eyebrow = nowPlayingEyebrow(opts);
   const subline = nowPlayingSubline(opts);
   const stats = nowPlayingStats(players);
-  const leftW = brandHeaderLeftWidth(measure, "NOW PLAYING", subline);
+  const leftW = brandHeaderLeftWidth(measure, eyebrow, subline, false);
   const headerW = leftW + HEADER_GAP + statsClusterWidth(measure, stats);
 
   const gridW = cols * TILE + (cols - 1) * GRID_GAP;
@@ -376,7 +400,7 @@ export function cardLayout(
   const height = Math.round(
     GRID_TOP + rows * PANEL_H + (rows - 1) * GRID_GAP + PAD_BOTTOM,
   );
-  return { shown, cols, rows, panelW, W, height, leader: leaderId(shown) };
+  return { shown, cols, rows, panelW, W, height };
 }
 
 // Draw the whole card onto ctx (already sized to `layout`). Caller registers the
@@ -388,10 +412,16 @@ export async function drawRoster(
   layout: CardLayout,
   env: DrawEnv,
 ): Promise<void> {
-  const { shown, cols, panelW, W, height, leader } = layout;
+  const { shown, cols, panelW, W, height } = layout;
 
-  // Rounded near-black card background (border stroked last, below).
+  // Rounded near-black card background, ringed by a thin zinc-600 frame (the new
+  // design's outer border). Inset the 1px stroke by half a pixel so it sits fully
+  // inside the canvas rather than clipping at the edge.
   fillCardBg(ctx, W, height);
+  ctx.strokeStyle = CARD_BORDER;
+  ctx.lineWidth = 1;
+  roundRect(ctx, 0.5, 0.5, W - 1, height - 1, CARD_R - 0.5);
+  ctx.stroke();
 
   // ---- header (shared with the recap): "Now playing" eyebrow + brand mark over the
   // wordmark and a "Puzzle # · date" subline, with the Playing / Solved counts anchored
@@ -399,9 +429,10 @@ export async function drawRoster(
   drawBrandHeader(
     ctx,
     {
-      eyebrow: "NOW PLAYING",
+      eyebrow: nowPlayingEyebrow(opts),
       subline: nowPlayingSubline(opts),
       stats: nowPlayingStats(players),
+      mark: false, // the new live-card design drops the four-square emblem
     },
     PAD_X,
     W - PAD_X,
@@ -420,19 +451,16 @@ export async function drawRoster(
     const px = PAD_X + col * (panelW + GRID_GAP);
     const py = GRID_TOP + row * (PANEL_H + GRID_GAP);
     const s = derive(p.grid);
+    const isWon = s.done === "won";
+    const isLost = s.done === "lost";
 
     // panel surface
     roundRect(ctx, px, py, panelW, PANEL_H, PANEL_R);
-    ctx.fillStyle = PANEL;
+    ctx.fillStyle = TILE_BG;
     ctx.fill();
     ctx.strokeStyle = PANEL_BORDER;
     ctx.lineWidth = 1;
     ctx.stroke();
-
-    // ---- avatar (colored initial, photo over) + ring ----
-    const avCx = px + TILE_PAD + AV_RING;
-    const avCy = py + TILE_PAD + AV_RING;
-    drawAvatar(ctx, p, images[i], avCx, avCy, AV);
 
     // ---- state → label + icon + time colors (end-screen wording) ----
     let label: string;
@@ -440,14 +468,14 @@ export async function drawRoster(
     let timeColor: string;
     let timeWeight: number;
     let kind: "check" | "trophy" | "x" | "live";
-    if (s.done === "won") {
+    if (isWon) {
       label = s.perfect ? "Perfect" : "Solved";
       labelColor = EMERALD;
-      kind = p.id === leader ? "trophy" : "check";
+      kind = s.perfect ? "trophy" : "check"; // a clean win earns the 🏆, a solve a ✓
       timeColor = WON_TIME;
       timeWeight = 600;
-    } else if (s.done === "lost") {
-      label = "Failed";
+    } else if (isLost) {
+      label = "Out of guesses";
       labelColor = ZINC_500;
       kind = "x";
       timeColor = ZINC_600;
@@ -459,23 +487,33 @@ export async function drawRoster(
       timeColor = ZINC_400;
       timeWeight = 500;
     } else {
-      label = `${s.solved.length}/4 groups`;
+      label = `${s.solved.length} / 4 groups`;
       labelColor = ZINC_400;
       kind = "live";
       timeColor = ZINC_400;
       timeWeight = 500;
     }
 
+    // ---- avatar (colored initial, photo over) + a state-colored ring: emerald for a
+    // solve, dim zinc-700 for a loss, zinc-600 while playing; a lost player fades back ----
+    const avCx = px + TILE_PAD + AV_RING;
+    const avCy = py + TILE_PAD + AV_RING;
+    const ringColor = isWon ? RING_WON : isLost ? RING_LOST : RING_LIVE;
+    if (isLost) ctx.save();
+    if (isLost) ctx.globalAlpha = LOST_DIM;
+    drawAvatar(ctx, p, images[i], avCx, avCy, AV, ringColor);
+    if (isLost) ctx.restore();
+
     // ---- name + status label (status icon/time live in the bottom row now) ----
     const idX = px + TILE_PAD + HEAD_H + HEAD_GAP;
     const nameMaxW = px + panelW - TILE_PAD - idX;
     ctx.textAlign = "left";
-    ctx.fillStyle = ZINC_100;
+    ctx.fillStyle = isLost ? ZINC_400 : ZINC_100;
     ctx.font = `600 ${NAME_SIZE}px "Libre Franklin"`;
     ctx.textBaseline = "alphabetic";
     ctx.fillText(fitText(ctx, p.name, nameMaxW), idX, py + TILE_PAD + 14);
     ctx.fillStyle = labelColor;
-    ctx.font = `600 ${LABEL_SIZE}px "Libre Franklin"`;
+    ctx.font = `700 ${LABEL_SIZE}px "Libre Franklin"`;
     ctx.letterSpacing = "0.8px"; // tracking on the uppercase label
     ctx.fillText(
       fitText(ctx, label.toUpperCase(), nameMaxW),
@@ -493,11 +531,18 @@ export async function drawRoster(
       roundRect(ctx, barX, by, barW, BAR_H, BAR_R);
       if (b < order.length) {
         ctx.fillStyle = CAT_COLOR[order[b]];
-        ctx.fill();
+        if (isLost) {
+          ctx.save();
+          ctx.globalAlpha = 0.85; // a lost player's cracked groups sit back a touch
+          ctx.fill();
+          ctx.restore();
+        } else {
+          ctx.fill();
+        }
       } else {
-        ctx.fillStyle = BAR_EMPTY;
+        ctx.fillStyle = isLost ? TILE_BAR_LOST_BG : BAR_EMPTY;
         ctx.fill();
-        ctx.strokeStyle = BAR_EMPTY_BORDER;
+        ctx.strokeStyle = isLost ? TILE_BAR_LOST_BORDER : TILE_BAR_EMPTY_BORDER;
         ctx.lineWidth = 1;
         ctx.stroke();
       }
@@ -521,16 +566,18 @@ export async function drawRoster(
       const dx = statusLeft + ICON / 2;
       ctx.fillStyle = "rgba(52,211,153,0.22)"; // emerald-400 @ 22% — the live dot's halo
       ctx.beginPath();
-      ctx.arc(dx, rowY, 6, 0, Math.PI * 2);
+      ctx.arc(dx, rowY, 7, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = EMERALD;
       ctx.beginPath();
-      ctx.arc(dx, rowY, 3.5, 0, Math.PI * 2);
+      ctx.arc(dx, rowY, 4, 0, Math.PI * 2);
       ctx.fill();
     } else {
       const icon =
         kind === "x" ? ICON_X : kind === "trophy" ? ICON_TROPHY : ICON_CHECK;
-      const iconColor = kind === "x" ? ZINC_500 : ZINC_100;
+      // emerald ✓ for a solve, gold 🏆 for a perfect game, dim ✕ for a loss
+      const iconColor =
+        kind === "x" ? ZINC_500 : kind === "trophy" ? TROPHY_GOLD : EMERALD;
       drawIcon(
         ctx,
         env.Path2D,
@@ -705,6 +752,9 @@ type BrandHeaderOpts = {
   stats: BrandStat[];
   room?: Room | null;
   titleSuffix?: string | null;
+  // The four-color brand mark before the eyebrow. Defaults on (the recap keeps it); the
+  // live card sets it false — the new design leans on the serif wordmark alone, no emblem.
+  mark?: boolean;
 };
 
 // brand marks span 4·(mark+gap) − the trailing gap; then a fixed gap to the eyebrow text
@@ -798,10 +848,12 @@ function brandHeaderLeftWidth(
   ctx: CanvasRenderingContext2D,
   eyebrow: string,
   subline: string,
+  mark = true,
 ): number {
   ctx.font = `700 ${RC_EYE_SIZE}px "Libre Franklin"`;
   ctx.letterSpacing = "1.8px";
-  const eyeW = RC_EYE_TEXT_X + ctx.measureText(eyebrow).width;
+  // Without the brand mark the eyebrow sits flush-left (offset 0), like the wordmark.
+  const eyeW = (mark ? RC_EYE_TEXT_X : 0) + ctx.measureText(eyebrow).width;
   ctx.letterSpacing = "0px";
   ctx.font = `700 ${RC_TITLE_SIZE}px Newsreader`;
   ctx.letterSpacing = "-0.76px";
@@ -860,12 +912,15 @@ function drawBrandHeader(
   leftX: number,
   rightX: number,
 ): void {
-  let mx = leftX;
-  for (let c = 0; c < 4; c++) {
-    roundRect(ctx, mx, RC_EYE_BASE - RC_MARK, RC_MARK, RC_MARK, 2.5);
-    ctx.fillStyle = CAT_COLOR[c];
-    ctx.fill();
-    mx += RC_MARK + RC_MARK_GAP;
+  const showMark = opts.mark !== false;
+  if (showMark) {
+    let mx = leftX;
+    for (let c = 0; c < 4; c++) {
+      roundRect(ctx, mx, RC_EYE_BASE - RC_MARK, RC_MARK, RC_MARK, 2.5);
+      ctx.fillStyle = CAT_COLOR[c];
+      ctx.fill();
+      mx += RC_MARK + RC_MARK_GAP;
+    }
   }
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
@@ -875,7 +930,8 @@ function drawBrandHeader(
     ctx.fillStyle = ZINC_500;
     ctx.font = `700 ${RC_EYE_SIZE}px "Libre Franklin"`;
     ctx.letterSpacing = "1.8px"; // 0.16em of 11px
-    ctx.fillText(opts.eyebrow, leftX + RC_EYE_TEXT_X, RC_EYE_BASE);
+    // Eyebrow sits past the mark when it's shown, else flush-left with the wordmark.
+    ctx.fillText(opts.eyebrow, leftX + (showMark ? RC_EYE_TEXT_X : 0), RC_EYE_BASE);
     ctx.letterSpacing = "0px";
   }
 

@@ -5,7 +5,7 @@ import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import { type CardPlayer, mergePlayer, renderRoster } from './_card.js';
 import { botInGuild, fetchDiscordUser, fetchUserGuildIds } from './_discord.js';
-import { botCardUrl, CARD_JOIN_THROTTLE_MS, cardPayload, playerFinished, sendCard, withGrids } from './_livecard.js';
+import { botCardUrl, CARD_JOIN_THROTTLE_MS, cardPayload, playerFinished, playingLine, sendCard, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
 import { broadcastRoom } from './_realtime.js';
 
@@ -112,8 +112,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     let edited = false;
     if (messageId && botToken && cardChannel && !throttled) {
       const renderPlayers = puzzle ? await withGrids(db, puzzle, date, players) : players;
+      // A join means someone's playing → present tense. (A guild card flips to past tense in
+      // /api/refresh-card once the whole roster finishes.)
+      const content = playingLine(players.map((p) => p.name), false);
       const png = await renderRoster(renderPlayers, { puzzleNo: puzzle?.id, puzzleDate: date });
-      const r = await sendCard(botCardUrl(cardChannel, messageId), cardPayload(), png, 'PATCH', 'card.png', {
+      const r = await sendCard(botCardUrl(cardChannel, messageId), cardPayload({ content }), png, 'PATCH', 'card.png', {
         Authorization: `Bot ${botToken}`,
       });
       edited = r.ok;

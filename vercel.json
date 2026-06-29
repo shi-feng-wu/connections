@@ -5,7 +5,10 @@
     "api/refresh-card.ts": { "includeFiles": "api/_assets/**" },
     "api/cron-recap.ts": { "includeFiles": "api/_assets/**", "maxDuration": 300 }
   },
-  "crons": [{ "path": "/api/interactions", "schedule": "* * * * *" }],
+  "crons": [
+    { "path": "/api/interactions", "schedule": "* * * * *" },
+    { "path": "/api/finalize-cards", "schedule": "*/2 * * * *" }
+  ],
   "headers": [
     {
       "source": "/",

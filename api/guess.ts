@@ -5,6 +5,8 @@ import type { RosterDelta } from '../src/player.js';
 import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import { bearerToken } from './_discord.js';
+import { triggerCardRefresh } from './_internal.js';
+import { cardNeedsRefresh } from './_livecard.js';
 import { fetchPuzzle, isValidDate, todayET } from './_nyt.js';
 import { broadcastRoom } from './_realtime.js';
 import { isLocalDev, verifyAuth } from './_session.js';
@@ -125,11 +127,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       );
     }
 
-    // Fan the new state out to everyone watching this room's roster, instantly (Realtime
-    // broadcast — Supabase delivers to all subscribers). Only a counted guess changes what
-    // they'd see. Off the reveal path via waitUntil so it never delays this response; a drop
-    // is harmless (their ~90s backstop poll catches up). The guessing player sees their own
-    // result from this response + local state, not from the broadcast.
+    // Fan the new state out to everyone watching this room's roster, instantly (the SSE relay —
+    // api/_realtime.ts fans it out to every subscribed client). Only a counted guess changes what
+    // they'd see. Off the reveal path via waitUntil so it never delays this response; a drop is
+    // harmless (their ~90s backstop poll catches up). The guessing player sees their own result
+    // from this response + local state, not from the broadcast.
     if (counted) {
       const guildId = typeof body.guildId === 'string' ? body.guildId : null;
       const channelId = typeof body.channelId === 'string' ? body.channelId : null;
@@ -151,6 +153,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
           finishedAt: done ? Date.now() : null,
         };
         waitUntil(broadcastRoom(scope, 'progress', delta));
+
+        // Re-render the room's live "who's playing" card from this same event, so its guess grids
+        // fill in during play instead of only at the solve. Gated cheaply here (skip when there's
+        // no card or the 30s window is still open) and rate-limited authoritatively in
+        // /api/refresh-card; the heavy canvas render lives there so this function stays canvas-free.
+        // Off the reveal path via waitUntil — a drop just means the card waits for the next guess.
+        if (channelId) {
+          const finished = done !== null;
+          waitUntil(
+            cardNeedsRefresh(db, scope, date, channelId, finished).then((due) =>
+              due ? triggerCardRefresh({ guildId, channelId, finished }) : undefined,
+            ),
+          );
+        }
       }
     }
 

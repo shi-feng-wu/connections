@@ -215,9 +215,6 @@ export function App({
   const sessionRef = useRef<string | null>(null);
   const didInit = useRef(false);
   const loadSeq = useRef(0);
-  // Trailing-debounce for the live card refresh (see refreshCard): collapses a burst
-  // of guesses into one webhook edit shortly after the player stops.
-  const cardRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Serial chain for background guess commits (see commitGuess): each commit runs
   // after the previous settles, so the server records them in submission order and
   // two in-flight POSTs can't double-append the same guess.
@@ -490,9 +487,8 @@ export function App({
       });
       await refreshLeaderboard();
     })();
-    // Push the finished grid to the room card now (the server lets a finished player
-    // skip the edit throttle, so the final board always lands).
-    scheduleCardRefresh(true);
+    // The room card's final grid is pushed server-side from /api/guess (the finishing guess is
+    // counted, so it triggers a refresh that bypasses the throttle) — no client call needed.
   }
 
   // Commit a guess to the server's authoritative record BEFORE its result is shown
@@ -546,8 +542,8 @@ export function App({
       });
       if (r.ok) {
         const ok = ((await r.json()) as { ok?: boolean }).ok !== false;
-        // Committed → reflect the new grid on the room card (debounced, best-effort).
-        if (ok) scheduleCardRefresh();
+        // The room card is refreshed server-side from /api/guess on the counted guess — no client
+        // call needed (the server is the authoritative trigger, like the live roster).
         return ok;
       }
     } catch {
@@ -563,40 +559,8 @@ export function App({
     return false;
   }
 
-  // Edit the room's "who's playing today" card so the player's guess grid fills in
-  // live (like the Wordle card). Best-effort and fire-and-forget — the card is a
-  // nicety and must never delay or block play. Only the daily on a guild has a card;
-  // the server throttles the edits and establishing the card stays in /api/interactions.
-  function refreshCard(): void {
-    if (!isDailyRef.current || !authTicketRef.current || !guildIdRef.current)
-      return;
-    void fetch("/api/refresh-card", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({
-        guildId: guildIdRef.current,
-        channelId: channelIdRef.current,
-      }),
-    }).catch(() => {
-      /* no refresh this time */
-    });
-  }
-
-  // Trailing-debounce so a flurry of guesses collapses into one edit after the player
-  // pauses; a finish refreshes immediately (the server lets a finished grid skip its
-  // throttle) so the final board always lands.
-  function scheduleCardRefresh(immediate = false): void {
-    if (cardRefreshTimer.current) clearTimeout(cardRefreshTimer.current);
-    if (immediate) {
-      cardRefreshTimer.current = null;
-      refreshCard();
-      return;
-    }
-    cardRefreshTimer.current = setTimeout(() => {
-      cardRefreshTimer.current = null;
-      refreshCard();
-    }, 1500);
-  }
+  // (The room's live card is refreshed server-side from /api/guess on every counted guess — the
+  // same authoritative event that drives the live roster — so there's no client-side refresh call.)
 
   // Signed auth ticket as a Bearer header for the gated reads. Empty when
   // standalone (DEV only), where those endpoints skip the check.
@@ -974,9 +938,6 @@ export function App({
     () => () => {
       void roomLiveRef.current?.disconnect();
       roomLiveRef.current = null;
-      // Mirror lbRefreshTimer's cleanup: stop the trailing card-refresh debounce so it can't fire a
-      // stray /api/refresh-card after teardown.
-      if (cardRefreshTimer.current) clearTimeout(cardRefreshTimer.current);
     },
     [],
   );

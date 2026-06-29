@@ -514,8 +514,8 @@ const loadCardImg = (url: string): Promise<CanvasImageSource | null> =>
     img.src = url;
   });
 
-// Sample roster (matches the design mock): a win with one miss, a perfect win (the
-// room leader → Trophy), a player mid-game, one who hasn't guessed, and a loss. Each
+// Sample roster (matches the design mock): a win with one miss, a perfect win (no
+// mistakes → Trophy), a player mid-game, one who hasn't guessed, and a loss. Each
 // grid is one row per guess (four group-levels 0..3); sec = elapsed/finish time.
 const CARD_ROOM: CardPlayer[] = [
   {

@@ -14,6 +14,7 @@ import {
   interactionFollowupUrl,
   interactionMessageUrl,
   playerFinished,
+  playingLine,
   sendCard,
   tokenStillEditable,
   withGrids,
@@ -195,13 +196,14 @@ async function postDmCard(
     const renderPlayers = puzzle
       ? await withGrids(db, puzzle, date, players)
       : players;
+    const content = playingLine(players.map((p) => p.name), false);
     const png = await renderRoster(renderPlayers, {
       puzzleNo: puzzle?.id,
       puzzleDate: date,
     });
     const er = await sendCard(
       interactionMessageUrl(appId, editToken, messageId),
-      cardPayload(),
+      cardPayload({ content }),
       png,
       "PATCH",
       "card.png",
@@ -237,13 +239,14 @@ async function postDmCard(
   const renderPlayers = puzzle
     ? await withGrids(db, puzzle, date, players)
     : players;
+  const content = playingLine(players.map((p) => p.name), false);
   const png = await renderRoster(renderPlayers, {
     puzzleNo: puzzle?.id,
     puzzleDate: date,
   });
   const r = await sendCard(
     interactionFollowupUrl(appId, token),
-    cardPayload(),
+    cardPayload({ content }),
     png,
     "POST",
     "card.png",
@@ -444,6 +447,9 @@ async function postCard(body: LaunchInteraction): Promise<void> {
   const renderPlayers = puzzle
     ? await withGrids(db, puzzle, date, players)
     : players;
+  // A launch/join means someone's playing → present tense. (A guild card flips to past tense in
+  // /api/refresh-card once the whole roster has finished.)
+  const content = playingLine(players.map((p) => p.name), false);
   const png = await renderRoster(renderPlayers, {
     puzzleNo: puzzle?.id,
     puzzleDate: date,
@@ -456,7 +462,7 @@ async function postCard(body: LaunchInteraction): Promise<void> {
   if (messageId && withinCooldown && botToken && canPost) {
     const er = await sendCard(
       botCardUrl(cardChannel, messageId),
-      cardPayload(),
+      cardPayload({ content }),
       png,
       "PATCH",
       "card.png",
@@ -496,7 +502,7 @@ async function postCard(body: LaunchInteraction): Promise<void> {
         : undefined;
       r = await sendCard(
         botCardUrl(channelId),
-        cardPayload(replyTo),
+        cardPayload({ content, replyTo }),
         png,
         "POST",
         "card.png",
@@ -507,7 +513,7 @@ async function postCard(body: LaunchInteraction): Promise<void> {
       if (!r.ok && r.status === 403 && replyTo) {
         r = await sendCard(
           botCardUrl(channelId),
-          cardPayload(),
+          cardPayload({ content }),
           png,
           "POST",
           "card.png",
@@ -517,7 +523,7 @@ async function postCard(body: LaunchInteraction): Promise<void> {
     } else {
       r = await sendCard(
         interactionFollowupUrl(appId, token),
-        cardPayload(),
+        cardPayload({ content }),
         png,
         "POST",
         "card.png",

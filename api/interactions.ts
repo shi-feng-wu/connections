@@ -15,6 +15,7 @@ import {
 } from "../src/discord-messages.js";
 import { Game, type Puzzle } from "../src/game.js";
 import { canonicalScope } from "../src/scope.js";
+import { internalBase } from "./_internal.js";
 import { PLAY_CUSTOM_ID } from "./_recap.js";
 
 // This is the latency-critical function: Discord enforces a ~3s deadline on the launch ACK, and the
@@ -341,15 +342,9 @@ async function unsubscribeResponse(body: LaunchInteraction): Promise<object> {
   return unsubscribeResult("done");
 }
 
-// Where /api/post-card lives so we can self-call it. On Vercel, VERCEL_PROJECT_PRODUCTION_URL is
-// the public production domain (no Deployment Protection); VERCEL_URL is the per-deploy URL.
-// POST_CARD_URL overrides both for local `vercel dev` (e.g. http://localhost:3000).
+// Where /api/post-card lives so we can self-call it (shared base resolver — see api/_internal.ts).
 function postCardBase(): string {
-  if (process.env.POST_CARD_URL) return process.env.POST_CARD_URL;
-  if (process.env.VERCEL_PROJECT_PRODUCTION_URL)
-    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "";
+  return internalBase();
 }
 
 // Fire the "who's playing" render at /api/post-card (a separate function that carries the heavy

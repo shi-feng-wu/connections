@@ -5,7 +5,7 @@ import { renderRecap, renderRoster, type CardPlayer, type RecapData } from '../a
 
 const AV = 'https://cdn.discordapp.com/embed/avatars/0.png';
 
-// Matches the design mock: a one-miss win, a perfect win (room leader → Trophy), a
+// Matches the design mock: a one-miss win, a perfect win (no mistakes → Trophy), a
 // player mid-game, one who hasn't guessed, and a loss. grid = one row per guess (four
 // group-levels 0..3); sec = elapsed/finish time.
 const ROOM: CardPlayer[] = [

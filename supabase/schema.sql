@@ -638,6 +638,12 @@ alter table public.live_cards add column if not exists edited_at timestamptz;
 alter table public.live_cards add column if not exists interaction_token text;
 alter table public.live_cards add column if not exists token_at          timestamptz;
 
+-- finalized_at marks the one-time past-tense flip of a DM/group-DM card's "who's playing" caption,
+-- done by the finalize cron (api/finalize-cards) just before the interaction-token window closes.
+-- Null = not yet finalized; set once so the cron flips each card exactly once. Guild cards don't use
+-- it (their caption flips on roster-finish, inline in api/refresh-card).
+alter table public.live_cards add column if not exists finalized_at timestamptz;
+
 -- Per-channel cards: channel_id joins the key so each channel gets its own "who's playing"
 -- card per day (matching the Wordle Activity), instead of one card per guild living in the
 -- first channel to launch. The whole reshape — dropping null-channel rows and widening the PK —

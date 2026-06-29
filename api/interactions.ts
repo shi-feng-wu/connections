@@ -13,6 +13,8 @@ import {
   shareCard,
   unsubscribeResult,
 } from "../src/discord-messages.js";
+import { COPY } from "../src/discord-copy.js";
+import { fill } from "../src/copy-util.js";
 import { Game, type Puzzle } from "../src/game.js";
 import { canonicalScope } from "../src/scope.js";
 import { internalBase } from "./_internal.js";
@@ -192,7 +194,7 @@ export function routeInteraction(body: Interaction): object {
   }
   return {
     type: CHANNEL_MESSAGE_WITH_SOURCE,
-    data: { content: "Unsupported interaction.", flags: EPHEMERAL },
+    data: { content: COPY.unsupported, flags: EPHEMERAL },
   };
 }
 
@@ -230,13 +232,13 @@ async function shareResponse(body: LaunchInteraction): Promise<object> {
   });
 
   const u = body.member?.user ?? body.user;
-  if (!u?.id) return ephemeral("Couldn’t read your Discord account — try again.");
+  if (!u?.id) return ephemeral(COPY["share.no-account"]);
 
   // Heavy deps loaded here, off the launch-ACK cold path (see the import note up top).
   const { admin } = await import("./_admin.js");
   const { fetchPuzzle, todayET } = await import("./_nyt.js");
   const db = admin();
-  if (!db) return ephemeral("Sharing is unavailable right now — try again in a bit.");
+  if (!db) return ephemeral(COPY["share.unavailable"]);
 
   const date = todayET();
   const { data: progress } = await db
@@ -247,23 +249,23 @@ async function shareResponse(body: LaunchInteraction): Promise<object> {
     .maybeSingle();
   const committed: unknown = progress?.guesses;
   if (!Array.isArray(committed) || committed.length === 0) {
-    return ephemeral(
-      "You haven’t played today’s Connections yet. Launch it with `/connections`, then `/share` your grid.",
-    );
+    return ephemeral(COPY["share.not-played"]);
   }
 
   let puzzle: Puzzle;
   try {
     puzzle = await fetchPuzzle(date);
   } catch {
-    return ephemeral("Couldn’t load today’s puzzle just now — try `/share` again in a moment.");
+    return ephemeral(COPY["share.load-failed"]);
   }
   const game = Game.fromGuesses(puzzle, committed);
   if (game.status === "playing") {
     const left = game.mistakesLeft;
     return ephemeral(
-      `You’re still mid-puzzle — ${game.groupsSolved}/4 groups, ${left} mistake${left === 1 ? "" : "s"} left. ` +
-        "Finish it, then `/share` your grid.",
+      fill(COPY["share.mid-puzzle"], {
+        solved: game.groupsSolved,
+        mistakes: `${left} mistake${left === 1 ? "" : "s"}`,
+      }),
     );
   }
 
@@ -442,10 +444,7 @@ export default async function handler(
       console.error("[share] threw", e instanceof Error ? e.message : e);
       response = {
         type: CHANNEL_MESSAGE_WITH_SOURCE,
-        data: {
-          content: "Couldn’t build your share just now — try `/share` again.",
-          flags: EPHEMERAL,
-        },
+        data: { content: COPY["share.build-failed"], flags: EPHEMERAL },
       };
     }
     res.status(200).json(response);

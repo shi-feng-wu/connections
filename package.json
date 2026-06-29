@@ -14,9 +14,10 @@
     "node": "24.x"
   },
   "scripts": {
-    "dev": "vite --open /preview.html",
+    "gen:copy": "node scripts/gen-discord-copy.mjs",
+    "dev": "node scripts/gen-discord-copy.mjs && vite --open /preview.html",
     "dev:api": "vercel dev",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/gen-discord-copy.mjs && tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

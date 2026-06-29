@@ -5,9 +5,13 @@
 // harness) build the EXACT same payloads — the preview is the real message, not a
 // replica that can drift (mirrors how src/card-draw.ts is shared for the PNG card).
 //
+// The WORDING lives in src/discord-copy.md (one file for every message we post; edit it,
+// then `npm run gen:copy`). These builders just wire that copy (COPY) into payload shape.
+//
 // Each builder returns a `MessageData` — the `data` of a CHANNEL_MESSAGE_WITH_SOURCE
 // interaction response (content + flags + components). routeInteraction wraps these in
 // `{ type: 4, data }`; the preview renders them as Discord chrome.
+import { COPY } from "./discord-copy.js";
 import { Game, MAX_MISTAKES } from "./game.js";
 
 // Discord message flags.
@@ -55,23 +59,16 @@ function linkButton(label: string, url: string, emoji?: string): unknown {
 // "/enable-posts" where the bot is already guild-installed — nothing to do, recaps are on;
 // if they're not showing, it's a channel-permission gap, so name what the bot needs.
 export function enablePostsAlreadyEnabled(): MessageData {
-  return {
-    content:
-      "The bot’s already in this server, so the recap should post here every night at reset.\n" +
-      "-# Not seeing it? Make sure the bot has View Channel, Send Messages, and Attach Files in this channel.",
-    flags: EPHEMERAL,
-  };
+  return { content: COPY["enable-posts.already"], flags: EPHEMERAL };
 }
 
 // "/enable-posts" in a server without the bot: the casual pitch + a one-click "Add to Server"
 // button. (Guild-only command, so there's no DM variant — it can't be run in a DM.)
 export function enablePostsAddBot(appId: string): MessageData {
   return {
-    content:
-      "Add the bot to this server and it’ll post a nightly recap and a live who’s playing card.\n" +
-      "-# Adding the bot needs the Manage Server permission.",
+    content: COPY["enable-posts.add-bot"],
     flags: EPHEMERAL,
-    components: [linkButton("Add to Server", installUrl(appId))],
+    components: [linkButton(COPY["button.add-server"], installUrl(appId))],
   };
 }
 
@@ -79,10 +76,9 @@ export function enablePostsAddBot(appId: string): MessageData {
 // server costs" link). Ephemeral — it's a personal nudge, not a channel post.
 export function donateMessage(): MessageData {
   return {
-    content:
-      "Connections is free and ad-free — donations just cover the server costs that keep it running. Any amount helps, thank you!",
+    content: COPY.donate,
     flags: EPHEMERAL,
-    components: [linkButton("Donate on Ko-fi", KOFI_URL, "☕")],
+    components: [linkButton(COPY["button.donate"], KOFI_URL, "☕")],
   };
 }
 
@@ -94,19 +90,14 @@ export function donateMessage(): MessageData {
 export function unsubscribeMessage(
   kind: "done" | "already" | "no-guild" | "error",
 ): MessageData {
-  if (kind === "done") {
-    return {
-      content:
-        "Recaps are off for this channel now — they’ll come back automatically if someone launches Connections here again.\n" +
-        "-# To mute them for good, take away the bot’s View Channel permission for this channel.",
-    };
-  }
+  // "done" is a PUBLIC channel post (no ephemeral flag); the rest stay ephemeral.
+  if (kind === "done") return { content: COPY["unsubscribe.done"] };
   const content =
     kind === "already"
-      ? "Recaps are already off here — they’ll come back if someone launches Connections in this channel again."
+      ? COPY["unsubscribe.already"]
       : kind === "no-guild"
-        ? "`/unsubscribe` only does something in a server channel — that’s the only place recaps post."
-        : "Couldn’t update recaps just now — try `/unsubscribe` again in a moment.";
+        ? COPY["unsubscribe.no-guild"]
+        : COPY["unsubscribe.error"];
   return { content, flags: EPHEMERAL };
 }
 
@@ -127,11 +118,9 @@ export function unsubscribeResult(
 // payoff the launcher would see right now — and the recap rides along second.
 export function installNudgePayload(appId: string): MessageData {
   return {
-    content:
-      "Add the bot to see a live who’s playing card while games are on, plus a nightly recap when the puzzle resets.\n" +
-      "-# Adding it needs the Manage Server permission. Not an admin? Ask one to run `/enable-posts`.",
+    content: COPY["install-nudge"],
     flags: EPHEMERAL,
-    components: [linkButton("Add to Server", installUrl(appId))],
+    components: [linkButton(COPY["button.add-server"], installUrl(appId))],
   };
 }
 
@@ -140,13 +129,7 @@ export function installNudgePayload(appId: string): MessageData {
 // privately, for exactly the permissions the recap/card posts need. No button: granting a
 // channel's permissions is a Discord settings action, not an OAuth link.
 export function missingPermsNudgePayload(): MessageData {
-  return {
-    content:
-      "I’m in this server but can’t post in this channel, so the recap and live card won’t show up here.\n" +
-      "Give the Connections bot (or its role) these permissions on this channel: View Channel, Send Messages, Attach Files.\n" +
-      "-# Usually it’s a private channel the bot’s role isn’t in — check the channel’s settings → Permissions.",
-    flags: EPHEMERAL,
-  };
+  return { content: COPY["missing-perms"], flags: EPHEMERAL };
 }
 
 // "1:34" for a minute-plus solve, "42s" under a minute, "" when no duration is known.

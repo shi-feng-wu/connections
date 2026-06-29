@@ -1,4 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { COPY } from '../src/discord-copy.js';
+import { fill } from '../src/copy-util.js';
 import { Game, type Puzzle } from '../src/game.js';
 import type { CardPlayer } from './_card.js';
 import { PLAY_CUSTOM_ID } from './_recap.js';
@@ -221,7 +223,8 @@ export function playingLine(names: string[], past: boolean): string {
   else if (n === 2) subject = `${list[0]} and ${list[1]}`;
   else if (n === 3) subject = `${list[0]}, ${list[1]} and ${list[2]}`;
   else subject = `${list[0]}, ${list[1]} and ${n - 2} others`;
-  return `${subject} ${verb} playing!`;
+  // Wording (incl. the trailing punctuation) lives in src/discord-copy.md → card.playing.
+  return fill(COPY['card.playing'], { subject, verb });
 }
 
 // Message flag (1 << 12): the message posts silently — no push/desktop ping. Every
@@ -247,7 +250,7 @@ export function cardPayload(opts?: {
     // mentions either, so this is always safe.
     allowed_mentions: { parse: [] },
     components: [
-      { type: 1, components: [{ type: 2, style: 1, label: 'Play now!', custom_id: PLAY_CUSTOM_ID }] },
+      { type: 1, components: [{ type: 2, style: 1, label: COPY['button.play'], custom_id: PLAY_CUSTOM_ID }] },
     ],
     attachments: [{ id: 0, filename: 'card.png' }],
   };

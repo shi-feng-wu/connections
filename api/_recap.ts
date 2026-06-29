@@ -5,6 +5,8 @@
 // api/cron-recap.ts posts it — exactly like the "who's playing" card. Leading
 // underscore keeps Vercel from treating this file as a route.
 import type { RecapData } from '../src/card-draw.js';
+import { COPY } from '../src/discord-copy.js';
+import { fill } from '../src/copy-util.js';
 
 // One finisher of yesterday's puzzle in this room (from the day_results RPC). The RPC
 // also returns user_id + avatar (used for the row's roster avatar).
@@ -112,21 +114,22 @@ export function recapText(opts: {
   brokenStreak?: number;
   puzzleNo?: number;
 }): string {
+  // Wording lives in src/discord-copy.md (recap.*); this assembles the variant + the streak fires.
   const puzzle = opts.puzzleNo ? `Connections #${opts.puzzleNo}` : 'Connections';
   if (opts.solved === false) {
     const broken = opts.brokenStreak ?? 0;
-    const prefix = broken >= 1 ? `**${broken}-day streak broken!** ` : '';
+    const prefix = broken >= 1 ? `${fill(COPY['recap.broken-prefix'], { broken })} ` : '';
     const body = opts.played
-      ? `Yesterday's ${puzzle} stumped everyone`
-      : `Nobody played yesterday's ${puzzle}`;
-    return `${prefix}${body}… but today is a new day 🌞`;
+      ? fill(COPY['recap.stumped'], { puzzle })
+      : fill(COPY['recap.no-play'], { puzzle });
+    return `${prefix}${body}${COPY['recap.new-day']}`;
   }
   // Streak maintained: one 🔥 per digit of the streak count (5 → 🔥, 12 → 🔥🔥, 100 → 🔥🔥🔥).
   const streak = opts.streak ?? 0;
-  const tail = "Here are yesterday's results:";
+  const tail = COPY['recap.tail'];
   if (streak < 1) return tail;
   const fires = '🔥'.repeat(String(streak).length);
-  return `**Your group is on a ${streak} day streak! ${fires}** ${tail}`;
+  return fill(COPY['recap.streak'], { streak, fires, tail });
 }
 
 // The Discord message: the rendered recap PNG plus the Play button, with an optional
@@ -138,7 +141,7 @@ export function recapPayload(content?: string): object {
   return {
     ...(content ? { content } : {}),
     components: [
-      { type: 1, components: [{ type: 2, style: 1, label: 'Play now!', custom_id: PLAY_CUSTOM_ID }] },
+      { type: 1, components: [{ type: 2, style: 1, label: COPY['button.play'], custom_id: PLAY_CUSTOM_ID }] },
     ],
     attachments: [{ id: 0, filename: 'recap.png' }],
   };

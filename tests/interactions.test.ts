@@ -72,7 +72,7 @@ describe("routeInteraction", () => {
     }) as { type: number; data: { flags?: number; content?: string; components?: { components: { style?: number; url?: string }[] }[] } };
     expect(r.type).toBe(4); // CHANNEL_MESSAGE_WITH_SOURCE
     expect(r.data.flags).toBe(64); // ephemeral
-    expect(r.data.content).toContain("this server");
+    expect(r.data.content).toContain("Add the bot");
     const btn = r.data.components?.[0].components[0];
     expect(btn?.style).toBe(5); // link button
     expect(btn?.url).toContain("client_id=app123");
@@ -244,7 +244,7 @@ describe("unsubscribeResult", () => {
   it("is an ephemeral apology on a DB error", () => {
     const r = data("error");
     expect(r.data.flags).toBe(64);
-    expect(r.data.content).toContain("try `/unsubscribe` again");
+    expect(r.data.content).toContain("`/unsubscribe` again");
   });
 });
 

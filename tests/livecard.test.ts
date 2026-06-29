@@ -276,6 +276,20 @@ describe("cardNeedsRefresh", () => {
       ),
     ).toBe(false);
   });
+  // A bot-less server's card is g: scope but token-backed (has token_at), so the token-expiry gate
+  // applies to it too — regardless of the g:/c: prefix.
+  it("is false for a bot-less server card (g: scope) whose token window has closed", async () => {
+    const staleToken = new Date(Date.now() - 20 * 60_000).toISOString();
+    expect(
+      await cardNeedsRefresh(
+        dbWithCard({ message_id: "m1", edited_at: null, token_at: staleToken }),
+        "g:1",
+        date,
+        "c1",
+        true,
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("playerFinished", () => {

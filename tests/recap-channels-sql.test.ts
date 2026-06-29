@@ -23,6 +23,7 @@ beforeAll(async () => {
       puzzle_date date not null,
       channel_id text not null,
       message_id text,
+      interaction_token text,
       primary key (scope_id, puzzle_date, channel_id)
     );
     create table public.recap_optouts (
@@ -38,14 +39,16 @@ beforeAll(async () => {
 
   // g:1/chA posted a card on two days (must dedupe to one row); g:1/chB posted once; g:2/chC has
   // only a roster row with no card (null message_id → never a recap target); c:9 is a non-guild
-  // scope (never a recap target).
+  // scope (never a recap target); g:3/chE is a BOT-LESS server card (token-backed: interaction_token
+  // not null → the recap is bot-only, so it's excluded even though it has a message_id).
   await db.exec(`
-    insert into public.live_cards (scope_id, puzzle_date, channel_id, message_id) values
-      ('g:1', '2026-06-23', 'chA', 'm1'),
-      ('g:1', '2026-06-24', 'chA', 'm2'),
-      ('g:1', '2026-06-24', 'chB', 'm3'),
-      ('g:2', '2026-06-24', 'chC', null),
-      ('c:9', '2026-06-24', 'chD', 'm4');
+    insert into public.live_cards (scope_id, puzzle_date, channel_id, message_id, interaction_token) values
+      ('g:1', '2026-06-23', 'chA', 'm1', null),
+      ('g:1', '2026-06-24', 'chA', 'm2', null),
+      ('g:1', '2026-06-24', 'chB', 'm3', null),
+      ('g:2', '2026-06-24', 'chC', null, null),
+      ('g:3', '2026-06-24', 'chE', 'm5', 'tok-abc'),
+      ('c:9', '2026-06-24', 'chD', 'm4', null);
   `);
 });
 
@@ -57,8 +60,9 @@ const channels = async (): Promise<string[]> =>
   ).rows.map((r) => `${r.scope_id}/${r.channel_id}`);
 
 describe("recap_channels", () => {
-  it("lists each guild channel that posted a card (deduped), skipping null message_id and c: scopes", async () => {
-    expect(await channels()).toEqual(["g:1/chA", "g:1/chB"]); // chC has no card; chD is non-guild
+  it("lists each guild channel the bot posted a card in (deduped), skipping null message_id, c: scopes, and bot-less cards", async () => {
+    // chC has no card; chD is non-guild; chE is a bot-less (token-backed) card → no recap.
+    expect(await channels()).toEqual(["g:1/chA", "g:1/chB"]);
   });
 
   it("drops a channel once it has a recap_optouts row (/unsubscribe), and re-lists it when cleared", async () => {

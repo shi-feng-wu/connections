@@ -93,11 +93,12 @@ export async function cardNeedsRefresh(
     .eq('channel_id', channelId)
     .maybeSingle();
   if (!data?.message_id) return false; // no card established here -> nothing to refresh
-  // A DM/group-DM card (c:) is edited via the launcher's interaction token, which Discord only
-  // honours for ~15 min. Past that the card is frozen and refresh-card bails before it can stamp
-  // edited_at — so without this the gate would (uselessly) fire on every counted guess for the rest
-  // of the day. A guild (g:) card edits via the bot token and never expires.
-  if (scope.startsWith('c:') && !tokenStillEditable(data.token_at as string | null, Date.now())) {
+  // A token-backed card (a DM, a group DM, or a bot-less server) is edited via the launcher's
+  // interaction token, which Discord only honours for ~15 min. Past that it's frozen and refresh-card
+  // bails before it can stamp edited_at — so without this the gate would (uselessly) fire on every
+  // counted guess for the rest of the day. token_at is set ONLY on token-backed cards (the bot path
+  // never sets it), so it identifies them regardless of scope; a bot-backed guild card never expires.
+  if (data.token_at && !tokenStillEditable(data.token_at as string | null, Date.now())) {
     return false;
   }
   if (finished) return true; // the final grid always lands

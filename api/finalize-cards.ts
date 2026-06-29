@@ -45,8 +45,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const newest = new Date(now - (TOKEN_EDIT_WINDOW_MS - FINALIZE_LEAD_MS)).toISOString();
     const { data, error } = await db
       .from('live_cards')
+      // Token-backed cards (a DM, a group DM, or a bot-less server) — identified by interaction_token,
+      // which the bot path never sets. Bot-backed guild cards never freeze, so they flip on finish in
+      // refresh-card and don't need the cron.
       .select('scope_id, puzzle_date, channel_id')
-      .like('scope_id', 'c:%') // DM/group-DM cards only (guild cards flip on finish, in refresh-card)
+      .not('interaction_token', 'is', null)
       .not('message_id', 'is', null)
       .is('finalized_at', null)
       .gt('token_at', oldest)
@@ -59,9 +62,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const cards = (data as { scope_id: string; puzzle_date: string; channel_id: string }[] | null) ?? [];
     let flipped = 0;
     for (const card of cards) {
+      // A bot-less server's card is g:<guild> (guildId in the scope); a DM/group-DM is c:<channel>
+      // (no guild). Pass the right guildId so refresh-card resolves the SAME scope the card lives under.
+      const guildId = card.scope_id.startsWith('g:') ? card.scope_id.slice(2) : null;
       // Force the past-tense caption via the existing render path; bypasses the edit throttle.
       const ok = await triggerCardRefresh({
-        guildId: null,
+        guildId,
         channelId: card.channel_id,
         finished: false,
         finalize: true,

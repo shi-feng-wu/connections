@@ -332,15 +332,18 @@ async function postCard(body: LaunchInteraction): Promise<void> {
     return;
   }
 
-  // A user-install launch in a server without the bot still has a guild_id (so the scope
-  // gate above passes), but the bot can't post/edit there — it isn't a member. Skip the card
-  // (the game, scoring, and the in-app leaderboard/roster all work without it) rather than
-  // 403'ing on every edit — and instead show the launcher the ephemeral install nudge,
-  // since this is exactly the room the recap/card pitch is for.
+  // A user-install launch in a server without the bot still has a guild_id (so the scope gate above
+  // passes), but the bot can't post/edit there — it isn't a member. The bot-edited card below would
+  // 403, so post the SAME token-backed card a DM gets: created and edited on the launcher's
+  // interaction token for its ~15-min window (no bot/perms needed), after which it freezes. Still
+  // show the ephemeral "Add to Server" pitch — the all-day card + recaps need the bot installed
+  // (nudgeOnce dedupes it to once per cooldown, so it's not spammy alongside the card).
   if (isUserInstallOnly(body)) {
-    console.log("[card] skip: user-install launch (bot not in this guild)", {
+    console.log("[card] bot-less server → token-backed card + install nudge", {
       guildId,
+      channel: channelId,
     });
+    await postDmCard(body, scope, channelId, appId, token);
     await nudgeInstall(body, scope, appId, token);
     return;
   }
@@ -560,6 +563,13 @@ async function postCard(body: LaunchInteraction): Promise<void> {
       // Only a fresh post resets the 2h cooldown; in-window edits keep the original time.
       ...(freshPost ? { posted_at: nowIso } : {}),
       edited_at: nowIso, // anchors the live-edit throttle in /api/refresh-card
+      // This is the BOT path, so the card is bot-backed: clear any token-backing fields a prior
+      // bot-less launch left on this (scope, date, channel) row. Otherwise refresh-card/join/finalize
+      // would keep routing to the now-expired interaction token and the card would freeze, even
+      // though the bot can edit it all day. (No-op for a normal bot card — these are already null.)
+      interaction_token: null,
+      token_at: null,
+      finalized_at: null,
       updated_at: nowIso,
     },
     { onConflict: "scope_id,puzzle_date,channel_id" },

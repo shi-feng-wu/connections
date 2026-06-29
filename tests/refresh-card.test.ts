@@ -59,6 +59,6 @@ describe("refresh-card handler — internal auth", () => {
   it("accepts the internal bearer (a no-scope body short-circuits before any render)", async () => {
     const r = await call("POST", { authorization: "Bearer s3cret" }, {});
     expect(r.statusCode).toBe(200);
-    expect(r.body).toMatchObject({ ok: false, reason: "no-guild" });
+    expect(r.body).toMatchObject({ ok: false, reason: "no-scope" });
   });
 });

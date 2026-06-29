@@ -435,14 +435,16 @@ $$;
 
 grant execute on function public.day_results(text, date, text) to anon, authenticated;
 
--- Every (guild, channel) where the bot is installed and has posted a card — the set the daily
--- recap fires to, every day. Sourced from live_cards, which only exists where the bot is a
--- guild install (message_id not null = it has actually posted there) — NOT from scores, which
--- also include user-install servers with no bot: those 403 at post time (the vast majority)
--- and spam the run. So a channel with an established habit still gets a card ("nobody got it…
--- new day") on a quiet day, but only where the bot can actually post. g: scopes only.
--- Channels a moderator silenced with /unsubscribe (a recap_optouts row) are subtracted, so the
--- nightly run skips them until the Activity is launched there again (which clears the opt-out).
+-- Every (guild, channel) where the BOT has posted a card — the set the daily recap fires to, every
+-- day. Sourced from live_cards (message_id not null = a card was posted there) — NOT from scores,
+-- which also include bot-less servers: those 403 at post time (the vast majority) and spam the run.
+-- A bot-less server now also gets a live_cards row with a message_id (a token-backed card posted on
+-- the launcher's interaction token — api/post-card postDmCard), but the recap is bot-only, so those
+-- rows are excluded here via `interaction_token is null` (bot-backed cards never set it). So a
+-- channel with an established habit still gets a recap ("nobody got it… new day") on a quiet day,
+-- but only where the bot can actually post. g: scopes only. Channels a moderator silenced with
+-- /unsubscribe (a recap_optouts row) are subtracted, so the nightly run skips them until the
+-- Activity is launched there again (which clears the opt-out).
 drop function if exists public.recap_channels();
 create or replace function public.recap_channels()
 returns table (scope_id text, channel_id text)
@@ -452,6 +454,7 @@ as $$
   select distinct l.scope_id, l.channel_id
   from public.live_cards l
   where l.scope_id like 'g:%' and l.channel_id is not null and l.message_id is not null
+    and l.interaction_token is null -- bot-backed cards only; token-backed (bot-less) get no recap
     and not exists (
       select 1 from public.recap_optouts o
       where o.scope_id = l.scope_id and o.channel_id = l.channel_id

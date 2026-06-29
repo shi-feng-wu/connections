@@ -79,7 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     const { data: card } = await db
       .from('live_cards')
-      .select('players, message_id, channel_id, edited_at')
+      .select('players, message_id, channel_id, edited_at, interaction_token')
       .eq('scope_id', scope)
       .eq('puzzle_date', date)
       .eq('channel_id', channelId)
@@ -109,8 +109,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const cardChannel = (card?.channel_id as string | null | undefined) || channelId;
     const lastEdit = card?.edited_at ? Date.parse(card.edited_at as string) : null;
     const throttled = lastEdit != null && Date.now() - lastEdit < CARD_JOIN_THROTTLE_MS;
+    // A token-backed card (a bot-less server) can't be bot-edited — /api/join has no interaction
+    // token, so it only records the roster here and lets the relay's trailing flush render it via the
+    // stored token (refresh-card). A bot-edit attempt would just 403.
+    const tokenBacked = (card?.interaction_token as string | null | undefined) != null;
     let edited = false;
-    if (messageId && botToken && cardChannel && !throttled) {
+    if (messageId && botToken && cardChannel && !throttled && !tokenBacked) {
       const renderPlayers = puzzle ? await withGrids(db, puzzle, date, players) : players;
       // A join means someone's playing → present tense. (A guild card flips to past tense in
       // /api/refresh-card once the whole roster finishes.)

@@ -52,80 +52,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     // and always mean today's daily.
     const date = typeof body.date === 'string' ? body.date : todayET();
 
-    // DM/group-DM card (no bot): keep its grids live by editing via the launcher's stored
-    // interaction token, but only while it's inside Discord's ~15-min window — past that the card is
-    // frozen. We only re-render the EXISTING roster (membership is built by Play-clicks in
-    // postDmCard), so there's nothing to spoof.
-    if (scope && scope.startsWith('c:') && channelId) {
-      const db = admin();
-      if (!db) {
-        res.status(200).json({ ok: false, reason: 'unavailable' });
-        return;
-      }
-      const { data: card } = await db
-        .from('live_cards')
-        .select('players, message_id, interaction_token, token_at, finalized_at')
-        .eq('scope_id', scope)
-        .eq('puzzle_date', date)
-        .eq('channel_id', channelId)
-        .maybeSingle();
-      const players: CardPlayer[] = Array.isArray(card?.players) ? (card.players as CardPlayer[]) : [];
-      const messageId = (card?.message_id as string | null | undefined) ?? null;
-      const editToken = (card?.interaction_token as string | null | undefined) ?? null;
-      const appId = process.env.VITE_DISCORD_CLIENT_ID ?? '';
-      // No card, no token, the window has closed, or no roster → nothing to refresh.
-      if (
-        !messageId ||
-        !editToken ||
-        !appId ||
-        !players.length ||
-        !tokenStillEditable(card?.token_at as string | null | undefined, Date.now())
-      ) {
-        res.status(200).json({ ok: false, reason: 'no-card' });
-        return;
-      }
-      // Claim the throttle slot before the heavy render; a just-finished player, the finalize cron,
-      // or the relay's trailing flush bypasses the window.
-      if (!(await claimEditSlot(db, scope, date, channelId, finished || finalize || flush))) {
-        res.status(200).json({ ok: true, throttled: true });
-        return;
-      }
-      let puzzle;
-      try {
-        puzzle = await fetchPuzzle(date);
-      } catch {
-        res.status(200).json({ ok: false, reason: 'no-puzzle' });
-        return;
-      }
-      const renderPlayers = await withGrids(db, puzzle, date, players);
-      // DM cards stay present tense until the card's edit window is closing (per the chosen "timer
-      // before window" behaviour — a DM doesn't flip on finish). Past tense is read from ANY of:
-      // this is the finalize cron call; the card was already finalized (sticky — a later guess must
-      // not revert it); or the token is inside its closing window (so a relay flush that races the
-      // finalize cron agrees on past tense rather than freezing the card in present).
-      const alreadyFinalized = (card?.finalized_at as string | null | undefined) != null;
-      const closing = dmWindowClosing(card?.token_at as string | null | undefined, Date.now());
-      const content = playingLine(renderPlayers.map((p) => p.name), finalize || alreadyFinalized || closing);
-      const png = await renderRoster(renderPlayers, { puzzleNo: puzzle.id, puzzleDate: date });
-      const r = await sendCard(
-        interactionMessageUrl(appId, editToken, messageId),
-        cardPayload({ content }),
-        png,
-        'PATCH',
-        'card.png',
-      );
-      if (!r.ok) {
-        res.status(200).json({ ok: false, reason: 'edit-failed', status: r.status });
-        return;
-      }
-      res.status(200).json({ ok: true });
-      return;
-    }
-
-    // The card only lives on a guild channel (same gate as /api/join); per-channel, so a channel id
-    // is required to locate the right card.
-    if (!scope || !scope.startsWith('g:') || !channelId) {
-      res.status(200).json({ ok: false, reason: 'no-guild' });
+    // Need a scope + channel to locate the per-channel card row.
+    if (!scope || !channelId) {
+      res.status(200).json({ ok: false, reason: 'no-scope' });
       return;
     }
 
@@ -135,26 +64,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
+    // Load the card once; HOW we edit it depends on its backing, not its scope. A card created on an
+    // interaction token — a DM, a group DM, or a bot-less server (see postDmCard in /api/post-card) —
+    // is "token-backed": edited via the launcher's stored token for its ~15-min window, then frozen.
+    // A guild card with the bot is "bot-backed": edited via the bot token all day. The bot path never
+    // stores an interaction_token, so its presence is the dispatch.
     const { data: card } = await db
       .from('live_cards')
-      .select('players, message_id, channel_id')
+      .select('players, message_id, channel_id, interaction_token, token_at, finalized_at')
       .eq('scope_id', scope)
       .eq('puzzle_date', date)
       .eq('channel_id', channelId)
       .maybeSingle();
     const players: CardPlayer[] = Array.isArray(card?.players) ? (card.players as CardPlayer[]) : [];
-    const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
     const messageId = (card?.message_id as string | null | undefined) ?? null;
-    const cardChannel = (card?.channel_id as string | null | undefined) || channelId;
-    // No card to edit yet (no launch established one) → nothing to refresh.
-    if (!messageId || !botToken || !cardChannel || !players.length) {
+    // No card established yet (no launch posted one) or empty roster → nothing to refresh.
+    if (!messageId || !players.length) {
       res.status(200).json({ ok: false, reason: 'no-card' });
       return;
     }
 
-    // Claim the throttle slot before the heavy render; a just-finished player or the relay's trailing
-    // flush bypasses the window so the final state always lands.
-    if (!(await claimEditSlot(db, scope, date, channelId, finished || flush))) {
+    const editToken = (card?.interaction_token as string | null | undefined) ?? null;
+    const tokenAt = (card?.token_at as string | null | undefined) ?? null;
+    const tokenBacked = editToken != null;
+
+    // Resolve the edit target + auth for this backing. Bail (frozen) if a token-backed card's ~15-min
+    // window has closed, or a bot-backed card has no bot token.
+    let url: string;
+    let headers: Record<string, string> | undefined;
+    if (tokenBacked) {
+      const appId = process.env.VITE_DISCORD_CLIENT_ID ?? '';
+      if (!appId || !tokenStillEditable(tokenAt, Date.now())) {
+        res.status(200).json({ ok: false, reason: 'no-card' });
+        return;
+      }
+      url = interactionMessageUrl(appId, editToken, messageId);
+      headers = undefined; // the token is in the URL
+    } else {
+      const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
+      const cardChannel = (card?.channel_id as string | null | undefined) || channelId;
+      if (!botToken || !cardChannel) {
+        res.status(200).json({ ok: false, reason: 'no-card' });
+        return;
+      }
+      url = botCardUrl(cardChannel, messageId);
+      headers = { Authorization: `Bot ${botToken}` };
+    }
+
+    // Claim the throttle slot before the heavy render; a just-finished player, the finalize cron, or
+    // the relay's trailing flush bypasses the window so the final state always lands.
+    if (!(await claimEditSlot(db, scope, date, channelId, finished || finalize || flush))) {
       res.status(200).json({ ok: true, throttled: true });
       return;
     }
@@ -168,18 +127,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     const renderPlayers = await withGrids(db, puzzle, date, players);
-    // Guild cards have no edit-window to expire, so their caption flips to past tense once everyone
-    // who actually played has finished today's puzzle (replayed from the grids). Players who only
-    // clicked Play but never guessed (empty grid) don't count — otherwise one lurker would keep the
-    // card in present tense all day.
-    const started = renderPlayers.filter((p) => p.grid && p.grid.length > 0);
-    const allFinished = started.length > 0 && started.every((p) => gridFinished(p.grid));
-    const content = playingLine(renderPlayers.map((p) => p.name), allFinished);
+    // Tense follows the backing. A token-backed card freezes when its window closes, so it reads past
+    // once finalized (sticky), via the finalize cron, or once the token is in its closing window. A
+    // bot-backed guild card never freezes, so it flips to past only when everyone who actually played
+    // has finished (a join-only lurker with an empty grid doesn't block it).
+    let past: boolean;
+    if (tokenBacked) {
+      const alreadyFinalized = (card?.finalized_at as string | null | undefined) != null;
+      past = finalize || alreadyFinalized || dmWindowClosing(tokenAt, Date.now());
+    } else {
+      const started = renderPlayers.filter((p) => p.grid && p.grid.length > 0);
+      past = started.length > 0 && started.every((p) => gridFinished(p.grid));
+    }
+    const content = playingLine(renderPlayers.map((p) => p.name), past);
     const png = await renderRoster(renderPlayers, { puzzleNo: puzzle.id, puzzleDate: date });
-    const r = await sendCard(botCardUrl(cardChannel, messageId), cardPayload({ content }), png, 'PATCH', 'card.png', {
-      Authorization: `Bot ${botToken}`,
-    });
-    // Not ok (e.g. 404 the card was deleted) → leave establishing to /api/interactions.
+    const r = await sendCard(url, cardPayload({ content }), png, 'PATCH', 'card.png', headers);
+    // Not ok (e.g. 404 the card was deleted) → leave establishing to /api/interactions / post-card.
     if (!r.ok) {
       res.status(200).json({ ok: false, reason: 'edit-failed', status: r.status });
       return;

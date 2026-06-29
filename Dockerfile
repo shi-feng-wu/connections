@@ -12,4 +12,5 @@ COPY scripts/status.mjs ./scripts/status.mjs
 COPY scripts/relay.mjs ./scripts/relay.mjs
 # Injected at runtime from Railway's Variables tab — never baked in:
 #   DISCORD_BOT_TOKEN  (status worker)   SESSION_SECRET  (verify x-ct tickets)   RELAY_SECRET (server pushes)
+#   APP_ORIGIN + INTERNAL_SECRET  (optional: the live-card trailing flush → Vercel /api/refresh-card)
 CMD ["node", "scripts/relay.mjs"]

@@ -42,7 +42,10 @@ The work is split across three platforms, each doing what it's best at:
   RPCs). No realtime traffic, so it stays comfortably on the free tier.
 
 Live updates flow guess → Vercel writes Postgres → Vercel pushes a delta to the relay → relay
-fans it out over SSE to everyone in the room. Supabase is never in the realtime path.
+fans it out over SSE to everyone in the room. Supabase is never in the realtime path. The relay
+also owns the "who's playing" card's trailing edit: ~30s after a room settles it calls back to
+Vercel's `/api/refresh-card` so the last guess of a burst always lands (needs `APP_ORIGIN` +
+`INTERNAL_SECRET` on Railway; without them only the per-guess leading edits fire).
 
 ## Requirements
 

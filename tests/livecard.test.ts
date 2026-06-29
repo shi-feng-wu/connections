@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { botCardUrl, cardNeedsRefresh, cardPayload, gridFinished, interactionMessageUrl, playerFinished, playingLine, tokenStillEditable, withinPostCooldown, withinUpdateThrottle } from "../api/_livecard";
+import { botCardUrl, cardNeedsRefresh, cardPayload, dmWindowClosing, gridFinished, interactionMessageUrl, playerFinished, playingLine, tokenStillEditable, withinPostCooldown, withinUpdateThrottle } from "../api/_livecard";
 import type { Puzzle } from "../src/game";
 
 // api/_livecard.ts: the room card is a bot message. On create it replies to the
@@ -29,8 +29,8 @@ describe("cardPayload", () => {
   // The "who's playing" caption rides in message content; absent when not provided so a post
   // without a roster line stays image-only.
   it("carries the content caption when given, and omits it otherwise", () => {
-    expect((cardPayload({ content: "Alice is playing." }) as { content?: string }).content).toBe(
-      "Alice is playing.",
+    expect((cardPayload({ content: "Alice is playing!" }) as { content?: string }).content).toBe(
+      "Alice is playing!",
     );
     expect((cardPayload() as { content?: string }).content).toBeUndefined();
   });
@@ -88,6 +88,23 @@ describe("tokenStillEditable", () => {
   });
 });
 
+// dmWindowClosing: true once a DM card's token is in its final ~3 min (≥ 11 min old, given the
+// 14-min window). Used so a relay flush and the finalize cron agree on past tense in that window.
+describe("dmWindowClosing", () => {
+  const now = 1_700_000_000_000;
+  it("is false with no token", () => {
+    expect(dmWindowClosing(null, now)).toBe(false);
+    expect(dmWindowClosing(undefined, now)).toBe(false);
+  });
+  it("is false early in the window and true in the final stretch", () => {
+    expect(dmWindowClosing(new Date(now - 5 * 60_000).toISOString(), now)).toBe(false); // 5 min
+    expect(dmWindowClosing(new Date(now - 12 * 60_000).toISOString(), now)).toBe(true); // 12 min
+  });
+  it("is false on an unparseable timestamp", () => {
+    expect(dmWindowClosing("nope", now)).toBe(false);
+  });
+});
+
 // playerFinished gates the Join/Play card paths (api/interactions.ts, api/join.ts): a
 // player who already won or lost today isn't playing, so clicking Join shouldn't add them
 // to the room card or post a new one. Same fixed 16-word puzzle shape as game.test.ts.
@@ -142,19 +159,19 @@ describe("playingLine", () => {
     expect(playingLine(["", "  "], false)).toBe(""); // blanks filtered out
   });
   it("uses singular is/was for one player", () => {
-    expect(playingLine(["Alice"], false)).toBe("Alice is playing.");
-    expect(playingLine(["Alice"], true)).toBe("Alice was playing.");
+    expect(playingLine(["Alice"], false)).toBe("Alice is playing!");
+    expect(playingLine(["Alice"], true)).toBe("Alice was playing!");
   });
   it("joins two with 'and' and plural are/were", () => {
-    expect(playingLine(["Alice", "Bob"], false)).toBe("Alice and Bob are playing.");
-    expect(playingLine(["Alice", "Bob"], true)).toBe("Alice and Bob were playing.");
+    expect(playingLine(["Alice", "Bob"], false)).toBe("Alice and Bob are playing!");
+    expect(playingLine(["Alice", "Bob"], true)).toBe("Alice and Bob were playing!");
   });
   it("lists exactly three with an oxford-style 'and'", () => {
-    expect(playingLine(["Alice", "Bob", "Carol"], false)).toBe("Alice, Bob and Carol are playing.");
+    expect(playingLine(["Alice", "Bob", "Carol"], false)).toBe("Alice, Bob and Carol are playing!");
   });
   it("caps beyond three to two names plus 'and N others'", () => {
-    expect(playingLine(["Alice", "Bob", "Carol", "Dave"], false)).toBe("Alice, Bob and 2 others are playing.");
-    expect(playingLine(["Alice", "Bob", "Carol", "Dave", "Eve"], true)).toBe("Alice, Bob and 3 others were playing.");
+    expect(playingLine(["Alice", "Bob", "Carol", "Dave"], false)).toBe("Alice, Bob and 2 others are playing!");
+    expect(playingLine(["Alice", "Bob", "Carol", "Dave", "Eve"], true)).toBe("Alice, Bob and 3 others were playing!");
   });
 });
 

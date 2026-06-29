@@ -17,6 +17,12 @@
   at the very top. Group everything that ships together into one release.
 -->
 
+## v1.11.1 — Jun 29, 2026
+
+### Fixed
+
+- The green flash that runs along a player’s row in the live list when they solve a group now shows in full. Its top edge was getting clipped by the list’s scroll area.
+
 ## v1.11.0 — Jun 26, 2026
 
 ### Added

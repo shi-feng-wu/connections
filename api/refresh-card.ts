@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import { type CardPlayer, renderRoster } from './_card.js';
-import { botCardUrl, cardPayload, claimEditSlot, gridFinished, interactionMessageUrl, playingLine, sendCard, tokenStillEditable, withGrids } from './_livecard.js';
+import { botCardUrl, cardPayload, claimEditSlot, dmWindowClosing, gridFinished, interactionMessageUrl, playingLine, sendCard, tokenStillEditable, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
 
 // Re-renders the room's "who's playing today" card with each player's current guess grid and edits
@@ -40,6 +40,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     // it forces the "who's playing" caption to past tense and bypasses the throttle so the final
     // edit always lands. Only reachable internally (INTERNAL_SECRET), so it can't be spoofed.
     const finalize = body.finalize === true;
+    // The relay's trailing flush (scripts/relay.mjs) sets this once room activity settles (~30s after
+    // the last guess/join). It bypasses the 30s throttle so the LAST update of a burst always lands —
+    // the leading-edge edits from /api/guess only fire once per window and would otherwise drop it.
+    // Tense is unchanged (it's a normal present-tense render unless the card is already finalized/all-
+    // finished); only the throttle is bypassed.
+    const flush = body.flush === true;
     const scope = canonicalScope(guildId, channelId);
     // The finalize cron passes the card's own puzzle_date so a DM card launched just before ET
     // midnight still resolves after midnight (when todayET() has rolled). Guess-driven calls omit it
@@ -78,9 +84,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         res.status(200).json({ ok: false, reason: 'no-card' });
         return;
       }
-      // Claim the throttle slot before the heavy render; a just-finished player or the finalize
-      // cron bypasses the window.
-      if (!(await claimEditSlot(db, scope, date, channelId, finished || finalize))) {
+      // Claim the throttle slot before the heavy render; a just-finished player, the finalize cron,
+      // or the relay's trailing flush bypasses the window.
+      if (!(await claimEditSlot(db, scope, date, channelId, finished || finalize || flush))) {
         res.status(200).json({ ok: true, throttled: true });
         return;
       }
@@ -92,12 +98,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         return;
       }
       const renderPlayers = await withGrids(db, puzzle, date, players);
-      // DM cards stay present tense until the finalize cron flips them just before the token window
-      // closes (per the chosen "timer before window" behaviour — a DM doesn't flip on finish). Once
-      // finalized, the past tense is STICKY: a later guess inside the remaining token window must not
-      // re-render it back to present (the cron won't fire again to re-fix it).
+      // DM cards stay present tense until the card's edit window is closing (per the chosen "timer
+      // before window" behaviour — a DM doesn't flip on finish). Past tense is read from ANY of:
+      // this is the finalize cron call; the card was already finalized (sticky — a later guess must
+      // not revert it); or the token is inside its closing window (so a relay flush that races the
+      // finalize cron agrees on past tense rather than freezing the card in present).
       const alreadyFinalized = (card?.finalized_at as string | null | undefined) != null;
-      const content = playingLine(renderPlayers.map((p) => p.name), finalize || alreadyFinalized);
+      const closing = dmWindowClosing(card?.token_at as string | null | undefined, Date.now());
+      const content = playingLine(renderPlayers.map((p) => p.name), finalize || alreadyFinalized || closing);
       const png = await renderRoster(renderPlayers, { puzzleNo: puzzle.id, puzzleDate: date });
       const r = await sendCard(
         interactionMessageUrl(appId, editToken, messageId),
@@ -144,9 +152,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
-    // Claim the throttle slot before the heavy render; a just-finished player bypasses the window so
-    // the final grid always lands.
-    if (!(await claimEditSlot(db, scope, date, channelId, finished))) {
+    // Claim the throttle slot before the heavy render; a just-finished player or the relay's trailing
+    // flush bypasses the window so the final state always lands.
+    if (!(await claimEditSlot(db, scope, date, channelId, finished || flush))) {
       res.status(200).json({ ok: true, throttled: true });
       return;
     }

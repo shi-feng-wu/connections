@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { admin } from './_admin.js';
 import { triggerCardRefresh } from './_internal.js';
-import { TOKEN_EDIT_WINDOW_MS } from './_livecard.js';
+import { FINALIZE_LEAD_MS, TOKEN_EDIT_WINDOW_MS } from './_livecard.js';
 
 // Finalize cron: flips a DM/group-DM card's "who's playing" caption to past tense just before its
 // interaction-token edit window closes, so the frozen card reads "X was/were playing" instead of
@@ -16,10 +16,10 @@ import { TOKEN_EDIT_WINDOW_MS } from './_livecard.js';
 // which carries the canvas addon, so this function stays tiny. The relay can't help here: it's a
 // server→client SSE fan-out and can't make a Discord REST edit.
 
-// Flip while the token is in this age band: old enough to be "about to expire", but with margin
-// before TOKEN_EDIT_WINDOW_MS so the self-call's PATCH still lands inside the window. The band is
-// wider than the cron cadence so a card is never skipped; finalized_at makes the flip fire once.
-const FINALIZE_LEAD_MS = 3 * 60 * 1000; // start trying ~3 min before the window closes
+// Flip while the token is in its final FINALIZE_LEAD_MS (shared with _livecard so refresh-card agrees
+// on the closing-window past tense): old enough to be "about to expire", but with margin before
+// TOKEN_EDIT_WINDOW_MS so the self-call's PATCH still lands inside the window. The band is wider than
+// the cron cadence so a card is never skipped; finalized_at makes the flip fire once.
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');

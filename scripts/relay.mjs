@@ -29,6 +29,16 @@ const RELAY_SECRET = process.env.RELAY_SECRET ?? ''; // server→relay shared se
 const PORT = Number(process.env.PORT ?? 8080);
 const AUTH_MAX_AGE = 24 * 60 * 60 * 1000; // mirrors api/_session.ts
 
+// Trailing flush for the "who's playing" card. /api/guess edits the card on the leading edge (once
+// per 30s window), which DROPS the last guess of a burst. Since this relay already receives every
+// progress/join event, it owns the TRAILING edge: ~30s after a room goes quiet it calls Vercel's
+// /api/refresh-card (flush:true bypasses the 30s throttle) so the final state always lands. The
+// render itself stays on Vercel (bot token + canvas); we only hold the cheap timer here. Skipped
+// unless both env vars are set (graceful: the leading-edge edits still work without it).
+const APP_ORIGIN = process.env.APP_ORIGIN ?? ''; // public Vercel origin, e.g. https://<prod-domain>
+const INTERNAL_SECRET = process.env.INTERNAL_SECRET ?? ''; // shared secret /api/refresh-card checks
+const CARD_SETTLE_MS = 30_000; // fire the trailing flush this long after the last room event
+
 // --- ticket verification: a byte-for-byte port of verifyAuth() in api/_session.ts ---
 function macOf(body) {
   return createHmac('sha256', SECRET).update(body).digest('base64url');
@@ -82,6 +92,49 @@ function fanout(scope, event, payload) {
 function json(res, code, obj) {
   res.writeHead(code, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
   res.end(obj ? JSON.stringify(obj) : '');
+}
+
+// --- trailing card flush: one debounced timer per card, re-armed on each room event ---
+const cardTimers = new Map(); // `${guildId}|${channelId}` -> Timeout
+
+// Debounce a card refresh for the room this event belongs to: re-arm a CARD_SETTLE_MS timer so the
+// flush fires once, ~30s after the room's LAST progress/join. The card is per-channel: a guild room
+// (g:<guild>) carries the channel in the delta payload; a DM room (c:<channel>) IS that channel.
+function scheduleCardFlush(room, payload) {
+  if (!APP_ORIGIN || !INTERNAL_SECRET) return; // not configured → leading-edge edits only
+  let guildId = null;
+  let channelId = null;
+  if (room.startsWith('g:')) {
+    guildId = room.slice(2);
+    channelId = payload && typeof payload.channelId === 'string' ? payload.channelId : null;
+  } else if (room.startsWith('c:')) {
+    channelId = room.slice(2);
+  }
+  if (!channelId) return; // can't locate the card without a channel
+  const key = `${guildId ?? ''}|${channelId}`;
+  const existing = cardTimers.get(key);
+  if (existing) clearTimeout(existing);
+  const t = setTimeout(() => {
+    cardTimers.delete(key);
+    flushCard(guildId, channelId);
+  }, CARD_SETTLE_MS);
+  if (typeof t.unref === 'function') t.unref(); // never keep the process alive just for a flush
+  cardTimers.set(key, t);
+}
+
+// Tell Vercel to re-render the card with the latest state. flush:true bypasses the 30s throttle so
+// the trailing edit can't be dropped; tense is decided server-side (unchanged here). Best-effort —
+// a failed call just means the next room event re-arms the timer.
+async function flushCard(guildId, channelId) {
+  try {
+    await fetch(`${APP_ORIGIN}/api/refresh-card`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${INTERNAL_SECRET}` },
+      body: JSON.stringify({ guildId, channelId, finished: false, flush: true }),
+    });
+  } catch {
+    /* best-effort trailing flush */
+  }
 }
 
 const server = createServer((req, res) => {
@@ -165,6 +218,8 @@ const server = createServer((req, res) => {
       const provided = req.headers['x-relay-secret'];
       if (RELAY_SECRET && provided === RELAY_SECRET) {
         const n = fanout(room, event, payload);
+        // A committed-guess or join changed the card's state → (re)arm its trailing flush.
+        if (event === 'progress' || event === 'join') scheduleCardFlush(room, payload);
         json(res, 200, { ok: true, delivered: n });
         return;
       }

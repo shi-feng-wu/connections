@@ -35,6 +35,20 @@ export function tokenStillEditable(tokenAt: string | null | undefined, now: numb
   return !Number.isNaN(t) && now - t < TOKEN_EDIT_WINDOW_MS;
 }
 
+// The finalize cron (api/finalize-cards) flips a DM card to past tense in the final stretch before
+// its interaction-token window closes. Exported so /api/refresh-card AGREES: any DM render inside
+// this closing window (a guess-driven relay flush, a leading edit, or the cron itself) reads past
+// tense — so a flush that races the cron can't leave the card stuck in present tense.
+export const FINALIZE_LEAD_MS = 3 * 60 * 1000; // 3 min
+
+// Whether a DM card's interaction token is inside the final FINALIZE_LEAD_MS before it expires — the
+// window in which the caption should read past tense ("the round's wrapping up"). False if no token.
+export function dmWindowClosing(tokenAt: string | null | undefined, now: number): boolean {
+  if (!tokenAt) return false;
+  const t = Date.parse(tokenAt);
+  return !Number.isNaN(t) && now - t >= TOKEN_EDIT_WINDOW_MS - FINALIZE_LEAD_MS;
+}
+
 // Throttle live card edits so a flurry of events can't spam the webhook: an edit within
 // the window is dropped (the next event carries the latest DB state). A new player tile
 // (join) refreshes a bit faster than mid-game progress (update); a player who just
@@ -191,8 +205,8 @@ export function gridFinished(grid: number[][] | undefined): boolean {
   return solved >= 4 || misses >= 4;
 }
 
-// The card's message-content caption, e.g. "Alice is playing." / "Alice and Bob are playing." /
-// "Alice, Bob and 3 others are playing." Lists up to three names; beyond that it caps to two plus
+// The card's message-content caption, e.g. "Alice is playing!" / "Alice and Bob are playing!" /
+// "Alice, Bob and 3 others are playing!" Lists up to three names; beyond that it caps to two plus
 // "and N others" so a busy room stays one short line. `past` flips the verb to was/were — used once
 // a guild card's whole roster has finished, or by the finalize cron just before a DM card's edit
 // window closes (api/finalize-cards). Empty roster → no caption.
@@ -206,7 +220,7 @@ export function playingLine(names: string[], past: boolean): string {
   else if (n === 2) subject = `${list[0]} and ${list[1]}`;
   else if (n === 3) subject = `${list[0]}, ${list[1]} and ${list[2]}`;
   else subject = `${list[0]}, ${list[1]} and ${n - 2} others`;
-  return `${subject} ${verb} playing.`;
+  return `${subject} ${verb} playing!`;
 }
 
 // Message flag (1 << 12): the message posts silently — no push/desktop ping. Every

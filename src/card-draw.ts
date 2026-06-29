@@ -59,7 +59,8 @@ const CAT_COLOR = LEVELS.map((l) => l.color); // yellow, green, blue, purple
 // frame rings the whole card; tiles sit on a zinc-900/55 fill. The avatar ring, the
 // unsolved slots and the footer glyph now read state at a glance: emerald for a solve,
 // a dimmed zinc-700 for a loss, zinc-600 while still playing.
-const CARD_BORDER = ZINC_600; // #52525b — thin frame around the whole card
+const CARD_BORDER = ZINC_600; // #52525b — frame around the whole card
+const CARD_BORDER_W = 2.5; // stroke weight (1px reads too faint at the rounded corners)
 const TILE_BG = "rgba(24,24,27,0.55)"; // zinc-900/55
 const TILE_BAR_EMPTY_BORDER = "#34343a"; // unsolved slot border (a touch lighter than the recap's)
 const TILE_BAR_LOST_BG = "#161618"; // unsolved slot for a player who's out of guesses
@@ -104,7 +105,7 @@ function initials(name: string): string {
 
 // ---- layout (px) ----
 const PAD_X = 30;
-const PAD_BOTTOM = 32;
+const PAD_BOTTOM = 30; // matches PAD_X (sides) and NP_PAD_TOP — uniform inset all around
 
 // The "who's playing" card shares the recap's brand header (a four-color mark + "Now
 // playing" eyebrow over the "Connections" wordmark and a "Puzzle # · date" subline,
@@ -414,18 +415,21 @@ export async function drawRoster(
 ): Promise<void> {
   const { shown, cols, panelW, W, height } = layout;
 
-  // Rounded near-black card background, ringed by a thin zinc-600 frame (the new
-  // design's outer border). Inset the 1px stroke by half a pixel so it sits fully
-  // inside the canvas rather than clipping at the edge.
+  // Rounded near-black card background, ringed by a zinc-600 frame (the new design's
+  // outer border). Inset the stroke by half its width so it sits fully inside the
+  // canvas rather than clipping at the edge.
   fillCardBg(ctx, W, height);
   ctx.strokeStyle = CARD_BORDER;
-  ctx.lineWidth = 1;
-  roundRect(ctx, 0.5, 0.5, W - 1, height - 1, CARD_R - 0.5);
+  ctx.lineWidth = CARD_BORDER_W;
+  const inset = CARD_BORDER_W / 2;
+  roundRect(ctx, inset, inset, W - CARD_BORDER_W, height - CARD_BORDER_W, CARD_R - inset);
   ctx.stroke();
 
   // ---- header (shared with the recap): "Now playing" eyebrow + brand mark over the
   // wordmark and a "Puzzle # · date" subline, with the Playing / Solved counts anchored
   // to the card's right edge, then a full-width rule above the tiles ----
+  ctx.save();
+  ctx.translate(0, HEAD_DY); // lift the shared header to the live card's tighter top inset
   drawBrandHeader(
     ctx,
     {
@@ -437,6 +441,7 @@ export async function drawRoster(
     PAD_X,
     W - PAD_X,
   );
+  ctx.restore();
 
   // ---- avatars resolved in parallel; a missing one is the colored-initial fallback ----
   const images = await Promise.all(
@@ -679,9 +684,15 @@ const RC_STAT_DIV_TOP = 70;
 const RC_STAT_DIV_H = 36;
 
 const RC_RULE_Y = RC_SUB_BASE + 18; // 144 — the full-width divider under the header
-// The "who's playing" tiles start 20px below that rule. Derived from RC_RULE_Y (not a
-// literal) so the breathing room tracks the header automatically — see the note by HEADER_GAP.
-const GRID_TOP = RC_RULE_Y + 20; // 164
+// The shared header's baselines are tuned for the recap's roomy 46px top inset (RC_PAD_TOP);
+// on the compact live card that reads top-heavy beside the 30px sides. Lift the whole header
+// (drawRoster translates by HEAD_DY) so the top inset matches the sides, and move the tiles
+// up with it.
+const NP_PAD_TOP = 30; // live-card top inset, ~equal to PAD_X (sides)
+const HEAD_DY = NP_PAD_TOP - RC_PAD_TOP; // -16 — how far the live-card header is lifted
+// The "who's playing" tiles start 20px below the (lifted) rule. Derived from RC_RULE_Y + the
+// lift (not a literal) so the breathing room tracks the header automatically.
+const GRID_TOP = RC_RULE_Y + HEAD_DY + 20; // 148
 const RC_CAP_SIZE = 11;
 const RC_CAP_BASE = RC_RULE_Y + 31; // section caption baseline
 const RC_LIST_TOP = RC_CAP_BASE + 12; // first row's top edge

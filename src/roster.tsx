@@ -832,10 +832,11 @@ export function Roster({
           // Own scroller (matches the standings list): flex-1 + min-h-0 lets it fill the
           // rail and overflow-y-auto scrolls internally instead of spilling past the board
           // on desktop when the live room is long (the rail is a fixed-height panel there).
-          // overflow-y-auto forces overflow-x to clip too (CSS rule), which would shave a
-          // solving row's emerald glow ring and a mistake's shake at the left/right edges —
-          // so px-1.5 + -mx-1.5 gives the rings room to bleed while the rows stay aligned.
-          className="-mx-1.5 flex min-h-0 flex-1 animate-tab-in flex-col gap-1.5 overflow-y-auto scrollbar-thin px-1.5 pb-6"
+          // overflow-y-auto clips on all four edges (CSS rule), which would shave a solving
+          // row's emerald glow ring and a mistake's shake at every edge — so px-1.5 + -mx-1.5
+          // (sides) and pt-1.5 + -mt-1.5 (top) give the rings room to bleed while the rows stay
+          // aligned; the bottom row already clears the clip via pb-6.
+          className="-mx-1.5 -mt-1.5 flex min-h-0 flex-1 animate-tab-in flex-col gap-1.5 overflow-y-auto scrollbar-thin px-1.5 pt-1.5 pb-6"
         >
           {sorted.length ? (
             sorted.map((p, i) => {

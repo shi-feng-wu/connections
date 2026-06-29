@@ -586,14 +586,13 @@ alter table public.puzzles enable row level security;
 
 alter table public.progress enable row level security;
 
--- Live "who's in the Activity right now" heartbeat, one row per player per day. The
--- Live-tab roster is poll-based (NOT Supabase Realtime presence — that froze when the
--- Activity backgrounded and the socket silently died): each client polls /api/roster every
--- few seconds, and that same call upserts the caller's last_seen here. assembleRoster then
--- marks a player "online" (the green ring) when their last_seen is within the heartbeat TTL.
--- A backgrounded client just stops polling, so it ages out of "online" on its own — there's
--- no long-lived socket to wedge. Written only by the service role (/api/roster); RLS with no
--- policy denies the anon key entirely (same posture as progress/live_cards).
+-- Legacy "who's in the Activity right now" heartbeat, one row per player per day. NOTE: the
+-- per-poll last_seen write is NO LONGER PERFORMED — /api/roster calls roster_bundle with
+-- p_uid=null (the read is write-free), and the green "online" ring is now driven live by
+-- Discord's ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE (the participant tray), not by this table.
+-- The table is kept for the membership/last-seen columns the roster read still selects; if the
+-- heartbeat is ever re-enabled, a backgrounded client just stops writing and ages out of the TTL
+-- on its own. Written only by the service role; RLS with no policy denies the anon key entirely.
 create table if not exists public.presence (
   user_id     text        not null,
   puzzle_date date        not null,

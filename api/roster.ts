@@ -170,10 +170,9 @@ type RosterBundle = {
 // One bundle per (scope view, day), shared across a warm instance for a short TTL. Fluid
 // compute serves many concurrent requests from one instance with shared module state (the
 // same trick as the puzzle cache in _nyt.ts), so room-mates whose polls land inside the
-// window share one DB trip; only the caller's heartbeat write still lands per poll. 10s
-// keeps worst-case roster staleness under one 15s poll interval, and the absolute
-// last_seen timestamps age correctly inside the 40s online TTL — a cache hit can only
-// miss beats written in the last 10s, which the TTL's missed-beat slack already covers.
+// window share one DB trip. The read is now write-free (p_uid is null below — no per-poll
+// last_seen heartbeat; the online ring is driven by Discord's ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE,
+// not by a presence row). 10s keeps worst-case roster staleness under one 15s poll interval.
 const BUNDLE_TTL_MS = 10_000;
 const bundleCache = new Map<string, { at: number; bundle: RosterBundle }>();
 

@@ -968,11 +968,15 @@ export function App({
     });
   }, [phase, isEmbedded]);
 
-  // Tear the channel down on unmount.
+  // Tear the channel down on unmount. (On a real Activity close the iframe is destroyed and this
+  // never runs — the EventSource/SDK RPC die with it; this is for the dev/HMR remount path.)
   useEffect(
     () => () => {
       void roomLiveRef.current?.disconnect();
       roomLiveRef.current = null;
+      // Mirror lbRefreshTimer's cleanup: stop the trailing card-refresh debounce so it can't fire a
+      // stray /api/refresh-card after teardown.
+      if (cardRefreshTimer.current) clearTimeout(cardRefreshTimer.current);
     },
     [],
   );

@@ -1,4 +1,4 @@
-import { Common, DiscordSDK } from "@discord/embedded-app-sdk";
+import { Common, DiscordSDK, RPCCloseCodes } from "@discord/embedded-app-sdk";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BoardSnapshot } from "./board";
 import {
@@ -85,6 +85,14 @@ function writeScopeMode(mode: RosterScope): void {
 }
 
 const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
+
+// Kill-switch for the clean-exit experiment (see the `pagehide` effect that calls sdk.close()).
+// When the LAST participant truly closes the Activity, we send Discord a CLOSE_NORMAL so the
+// per-channel instance "finishes its lifecycle" (the only documented way an instance ends) and the
+// NEXT launch in that channel spins a fresh, openable instance — instead of leaving a phantom
+// instance that later launches try, and fail, to rejoin ("Discord still thinks it's open, can't
+// relaunch here"). Flip to false to disable instantly if the live roster ever regresses.
+const CLOSE_ON_EXIT = true;
 
 // Guild-install ("Add to Server") link for the end-screen recap prompt — same scopes +
 // permissions as the /enable-posts button. KEEP IN SYNC with api/interactions.ts
@@ -246,6 +254,9 @@ export function App({
   // else (finishers/abandoners who've left) doesn't. You're in it yourself, so your own ring
   // falls out naturally.
   const [participantIds, setParticipantIds] = useState<Set<string>>(new Set());
+  // Mirror of participantIds.size so the pagehide clean-exit handler can read the live count
+  // without re-registering its listener on every participant change.
+  const participantCountRef = useRef(0);
   // Live tile selection per player (Wordle-style "picking"), from the WS broadcast. Merged into
   // the roster memo; cleared to [] when a player deselects or submits.
   const [pickingByUser, setPickingByUser] = useState<Record<string, string[]>>(
@@ -931,6 +942,10 @@ export function App({
     serverRosterRef.current = serverRoster;
   }, [serverRoster]);
 
+  useEffect(() => {
+    participantCountRef.current = participantIds.size;
+  }, [participantIds]);
+
   // Join the room's Realtime channel once the daily is ready and we have identity. Fast path:
   // progress/join broadcasts merge instantly and Presence drives the online ring, with the poll
   // above demoted to a 5-minute backstop (plus a reconcile on every reconnect). connect() is
@@ -968,6 +983,35 @@ export function App({
     },
     [],
   );
+
+  // Clean exit so Discord stops thinking the Activity is still "open" in this channel.
+  // Per Discord's docs the per-channel instance only finishes its lifecycle when all users
+  // leave/close; if the iframe is just destroyed, Discord can leave a host-less/phantom instance
+  // behind, and the NEXT launch here tries (and fails) to rejoin it — the "can't relaunch in the
+  // same channel until you try another one" symptom. On a genuine close we send Discord an explicit
+  // CLOSE_NORMAL to end the instance so the next launch spins a fresh, openable one.
+  //
+  // Gated hard to avoid ending a live session: `pagehide` (not visibilitychange — that fires on
+  // PIP/background, App.tsx ~993/1057) with persisted=false and visibilityState hidden is a true
+  // unload, NOT a pop-out/PIP (those keep the doc visible); and we only close when we're the last
+  // participant, so we never kick co-players. Best-effort — the iframe is going away regardless, so
+  // the CLOSE postMessage may not always flush (iOS/hard-kill won't fire pagehide at all); that
+  // residual is the part only Discord can fix. CLOSE_ON_EXIT is the kill-switch.
+  useEffect(() => {
+    if (!isEmbedded || !CLOSE_ON_EXIT) return;
+    const onPageHide = (e: PageTransitionEvent): void => {
+      if (e.persisted) return; // bfcache candidate, not a real close
+      if (document.visibilityState !== "hidden") return; // pop-out/PIP stays visible — don't close
+      if (participantCountRef.current > 1) return; // others still in — closing would end their game
+      try {
+        sdkRef.current?.close(RPCCloseCodes.CLOSE_NORMAL, "");
+      } catch {
+        /* best-effort; nothing to do if the transport is already gone */
+      }
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [isEmbedded]);
 
   // A hidden tab can drop the socket silently; re-establish it (and catch up) when the tab is
   // visible again — the hidden-tab analog of the PIP-expand recovery above.

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { BoardRow } from "./leaderboard";
-import { type RankSnapshot, rankMap, rankDelta } from "./rank-delta";
+import { type Delta, type RankSnapshot, rankMap, rankDelta } from "./rank-delta";
 
 // "Position change since today's puzzle dropped" for the standings tabs. The board itself
 // carries no rank — it arrives ordered richest-first and rank is just the row index
@@ -16,6 +16,7 @@ const PREFIX = "connections:standingsRank:";
 
 // Re-exported so existing consumers (season.tsx, the test) keep importing from here.
 export { rankMap, rankDelta };
+export type { Delta };
 
 // A day's baseline ranking: the standings as of the start of ET day `date`.
 export type Baseline = { date: string; ranks: RankSnapshot };

@@ -219,9 +219,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       // Season-standings rank movement caused by yesterday's puzzle: diff the current board's
       // order (rank = row index) against the same board "as of the day before". Reuses the
       // leaderboard's pure delta math so the arrows mean the same thing on both. A player not
-      // on the board the day before (brand-new) gets null → no arrow (see rankDelta).
-      // A failed prev-board read leaves prevRanks empty → every rankDelta is null → the card posts
-      // with zero arrows on every row, silently. Log it so the cause is visible if it recurs.
+      // on the board the day before (brand-new) gets "new" → an amber dash (see rankDelta).
+      // A failed prev-board read leaves prevRanks empty → rankDelta's empty-baseline guard makes
+      // every row null → the card posts with no movement indicators on any row (no dash sea),
+      // silently. Log it so the cause is visible if it recurs.
       if (prevSeasonErr) console.warn(`[recap] prev-board RPC failed for ${scope}/${channel}; rank arrows suppressed: ${prevSeasonErr.message}`);
       const prevRanks = rankMap((prevSeason ?? []) as SeasonRow[]);
       const seasonRows = ((season ?? []) as SeasonRow[]).map((r, i) => ({

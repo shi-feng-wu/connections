@@ -62,12 +62,13 @@ describe("toRecapData standings delta", () => {
   const season: SeasonRow[] = [
     { user_id: "a", name: "A", avatar: null, total: 100, wins: 5, plays: 6, delta: 2 },
     { user_id: "b", name: "B", avatar: null, total: 90, wins: 4, plays: 6, delta: -1 },
+    { user_id: "d", name: "D", avatar: null, total: 85, wins: 3, plays: 6, delta: "new" },
     { user_id: "c", name: "C", avatar: null, total: 80, wins: 3, plays: 6 }, // no delta
   ];
 
-  it("passes each row's delta through, null when absent", () => {
+  it("passes each row's delta through (incl. \"new\"), null when absent", () => {
     const data = toRecapData({ puzzleDate: "2026-05-30", results: [], season });
-    expect(data.standings.map((s) => s.delta)).toEqual([2, -1, null]);
+    expect(data.standings.map((s) => s.delta)).toEqual([2, -1, "new", null]);
   });
 });
 

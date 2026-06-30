@@ -3,7 +3,7 @@ import { useState, type Ref } from "react";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import { FlipList } from "./fliplist";
 import { colorFor, initials } from "./roster";
-import { rankDelta } from "./standings-snapshot";
+import { type Delta, rankDelta } from "./standings-snapshot";
 
 // End-screen room leaderboard: two tabs ("This season" = the month, "All-time")
 // over the same scores rows, differing only by window. Dense table per tab
@@ -71,9 +71,19 @@ function Streak({ n }: { n: number }) {
 
 // Position change since you last opened this board: a green up-arrow when the player
 // climbed (fewer = better rank), red down-arrow when they slipped, with the number of
-// places moved. Nothing for an unchanged player, a brand-new one (no prior rank), or the
-// first-ever visit — delta is null/0 in all those cases.
-function RankDelta({ delta }: { delta: number | null }) {
+// places moved. An amber dash marks a brand-new entrant (on the board now, absent from the
+// day-start baseline). Nothing for an unchanged player or the first-ever visit — delta is
+// null/0 in those cases.
+function RankDelta({ delta }: { delta: Delta }) {
+  if (delta === "new")
+    return (
+      <span
+        className="text-[11px] font-bold leading-none text-amber-400"
+        aria-label="new"
+      >
+        –
+      </span>
+    );
   if (!delta) return null;
   const up = delta > 0;
   const Icon = up ? ChevronUp : ChevronDown;
@@ -117,8 +127,9 @@ type LedgerEntry = {
   name: string;
   avatar: string | null;
   rank: number;
-  // places moved since this board was last opened: + climbed, − slipped, null = no prior
-  delta: number | null;
+  // places moved since this board was last opened: + climbed, − slipped, "new" = brand-new
+  // entrant (amber dash), null = no prior baseline
+  delta: Delta;
   total: number;
   streak: number;
   plays: number;
@@ -193,7 +204,7 @@ function LedgerRow({
   );
 }
 
-const toEntry = (r: BoardRow, rank: number, delta: number | null): LedgerEntry => ({
+const toEntry = (r: BoardRow, rank: number, delta: Delta): LedgerEntry => ({
   id: r.user_id,
   name: r.name,
   avatar: r.avatar,

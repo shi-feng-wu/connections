@@ -10,6 +10,7 @@
 // emerald "live" dot for anyone still playing). Spoiler-safe: color only ever means
 // "solved" — a wrong guess only spends a mistake dot, never revealing a group.
 import { LEVELS } from "./game.js";
+import type { Delta } from "./rank-delta.js";
 
 // grid: one row per committed guess, four group-levels (0-3). Four of a kind ⟺ a solved
 // group (a group is exactly its four words); anything else is a miss. sec: elapsed/finish
@@ -49,6 +50,7 @@ const ZINC_800 = "#27272a";
 const ZINC_700 = "#3f3f46";
 const EMERALD = "#34d399"; // emerald-400 — solve accent / "climbed" rank arrow
 const ROSE = "#fb7185"; // rose-400 — "slipped" rank arrow (matches the leaderboard)
+const AMBER = "#fbbf24"; // amber-400 — "new entrant" rank dash (matches the leaderboard)
 const WON_TIME = "#e4e4e7";
 const BAR_EMPTY = ZINC_800;
 const BAR_EMPTY_BORDER = "#2c2c30";
@@ -637,8 +639,9 @@ export type RecapStanding = {
   wins: number;
   plays: number;
   // Rank movement caused by yesterday's puzzle: positive = climbed (green up chevron),
-  // negative = slipped (red down chevron), null/0 = no arrow. Mirrors the leaderboard.
-  delta?: number | null;
+  // negative = slipped (red down chevron), "new" = brand-new entrant (amber dash), null/0 =
+  // no indicator. Mirrors the leaderboard.
+  delta?: Delta;
 };
 export type RecapData = {
   puzzleNo?: number;
@@ -1179,9 +1182,10 @@ export async function drawRecap(
     nameInset = 0,
     // Season standings only: reserve a gutter right of the rank for the movement chevron and
     // draw it when `delta` is truthy (null/0 → blank, like the leaderboard's RankDelta).
-    // Results rows pass deltaColW 0 → no shift, identical layout.
+    // "new" draws an amber dash instead of a chevron. Results rows pass deltaColW 0 → no
+    // shift, identical layout.
     deltaColW = 0,
-    delta: number | null = null,
+    delta: Delta = null,
   ): { cy: number } => {
     const cy = rowTop + RC_ROW_H / 2;
     roundRect(ctx, blockX, rowTop, blockW, RC_ROW_H, RC_ROW_R);
@@ -1197,15 +1201,24 @@ export async function drawRecap(
     ctx.fillText(String(rank + 1), contentLeft + 11, cy + 1);
     // rank-change chevron + places moved, in the reserved gutter after the 22px rank col
     if (deltaColW > 0 && delta) {
-      const up = delta > 0;
-      const color = up ? EMERALD : ROSE;
       const cx = contentLeft + 22 + 1; // gutter left edge
-      drawIcon(ctx, env.Path2D, up ? ICON_CHEVRON_UP : ICON_CHEVRON_DOWN, cx, cy - 5.5, 11, color);
-      ctx.fillStyle = color;
-      ctx.font = `700 11px "Libre Franklin"`;
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      ctx.fillText(String(Math.abs(delta)), cx + 11, cy + 1);
+      if (delta === "new") {
+        // brand-new entrant: a lone amber dash, no chevron/number
+        ctx.fillStyle = AMBER;
+        ctx.font = `700 11px "Libre Franklin"`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText("–", cx, cy + 1);
+      } else {
+        const up = delta > 0;
+        const color = up ? EMERALD : ROSE;
+        drawIcon(ctx, env.Path2D, up ? ICON_CHEVRON_UP : ICON_CHEVRON_DOWN, cx, cy - 5.5, 11, color);
+        ctx.fillStyle = color;
+        ctx.font = `700 11px "Libre Franklin"`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(Math.abs(delta)), cx + 11, cy + 1);
+      }
     }
     // avatar (22px rank col + delta gutter + 11 gap, then 34px ring col)
     drawAvatar(ctx, person, img, contentLeft + 22 + deltaColW + 11 + 17, cy, RC_AV);

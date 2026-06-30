@@ -39,13 +39,17 @@ describe("rankDelta", () => {
     expect(rankDelta(prev, "b", 3)).toBe(0);
   });
 
-  it("is null for a player absent from the prior snapshot (new)", () => {
-    expect(rankDelta(prev, "z", 4)).toBeNull();
+  it("is \"new\" for a player absent from a real prior snapshot (brand-new entrant)", () => {
+    expect(rankDelta(prev, "z", 4)).toBe("new");
   });
 
   it("is null when there is no prior snapshot at all", () => {
     expect(rankDelta(null, "a", 1)).toBeNull();
     expect(rankDelta(undefined, "a", 1)).toBeNull();
+  });
+
+  it("is null (not \"new\") against an empty baseline — no dash sea on first view / failed read", () => {
+    expect(rankDelta({}, "a", 1)).toBeNull();
   });
 });
 

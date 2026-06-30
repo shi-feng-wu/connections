@@ -5,6 +5,7 @@
 // api/cron-recap.ts posts it — exactly like the "who's playing" card. Leading
 // underscore keeps Vercel from treating this file as a route.
 import type { RecapData } from '../src/card-draw.js';
+import type { Delta } from '../src/rank-delta.js';
 import { COPY } from '../src/discord-copy.js';
 import { fill } from '../src/copy-util.js';
 
@@ -26,7 +27,8 @@ export type DayRow = {
 
 // One season-standings row (from the room_board RPC; a subset of its columns). `delta` is
 // the room's rank movement caused by yesterday's puzzle, computed by the recap cron (not an
-// RPC column): positive = climbed, negative = slipped, null/0 = no arrow.
+// RPC column): positive = climbed, negative = slipped, "new" = brand-new entrant (amber dash),
+// null/0 = no indicator.
 export type SeasonRow = {
   user_id: string;
   name: string;
@@ -34,7 +36,7 @@ export type SeasonRow = {
   total: number;
   wins: number;
   plays: number;
-  delta?: number | null;
+  delta?: Delta;
 };
 
 const PLAY_CUSTOM_ID = 'connections_play';

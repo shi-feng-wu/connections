@@ -10,6 +10,26 @@
          preload to cut the score/wordmark serif's flash-of-fallback. -->
     <link rel="preload" href="/fonts/newsreader.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/libre-franklin.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- Pre-React boot spinner. Inline and fully self-contained — its own @keyframes + an explicit
+         black background, so it does NOT depend on the async /assets CSS or on React having mounted.
+         On a slow mobile Discord webview the content-hashed module graph can take seconds to evaluate;
+         until React's createRoot().render() runs there is nothing in #app and body is bg-black, which
+         is the "black screen with no loading animation" users reported. This paints a branded spinner
+         during that window instead. main.tsx removes #cx-boot on mount (and React's first render
+         replaces #app's children anyway); the boot watchdog/fallback overwrites #app too. -->
+    <style>
+      @keyframes cx-spin { to { transform: rotate(360deg); } }
+      #cx-boot {
+        position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+        background: #000;
+      }
+      #cx-boot > i {
+        width: 30px; height: 30px; border-radius: 50%;
+        border: 3px solid rgba(255, 255, 255, 0.16);
+        border-top-color: rgba(255, 255, 255, 0.85);
+        animation: cx-spin 0.9s linear infinite;
+      }
+    </style>
     <!-- Self-healing boot watchdog. The Activity loads as one eager content-hashed ES-module graph
          (the module tag below + its modulepreload chunks) over Discord's *.discordsays.com proxy,
          with no dynamic-import fallback: if ANY one of those requests drops — a transient proxy
@@ -24,6 +44,13 @@
       (function () {
         var KEY = "cx:boot-retry";
         var embedded = /[?&]frame_id=/.test(location.search) ? 1 : 0;
+        var ua = navigator.userAgent || "";
+        // plat tags the funnel so mobile black-screens are filterable (the Discord SDK platform
+        // isn't available this early). isMobile gates the watchdog recovery: a reload inside a mobile
+        // Discord webview lands in a dead/backgrounded document (the funnel caught one reload that
+        // never re-booted and never mounted), so on mobile the dead-mount watchdog must NOT reload.
+        var plat = /Android/i.test(ua) ? "android" : /iPhone|iPad|iPod/i.test(ua) ? "ios" : "web";
+        var isMobile = plat !== "web";
         // Discord stamps the activity iframe URL with the launch ids. channel_id is the key that
         // correlates this boot beacon back to the server's "[launch] ack" for the SAME launch — so a
         // "[launch] ack" whose channel never produces a "boot" beacon is a launch Discord acked but
@@ -36,7 +63,8 @@
         var ctx =
           "&channel=" + encodeURIComponent(ctxParam("channel_id")) +
           "&guild=" + encodeURIComponent(ctxParam("guild_id")) +
-          "&instance=" + encodeURIComponent(ctxParam("instance_id"));
+          "&instance=" + encodeURIComponent(ctxParam("instance_id")) +
+          "&plat=" + plat;
         function beacon(stage, extra) {
           try {
             var p = "stage=" + stage + "&embedded=" + embedded + "&t=" + Math.round(performance.now());
@@ -65,6 +93,15 @@
         }
         function recover(reason, resUrl) {
           beacon("boot-error", { reason: reason, res: resUrl || "" });
+          // On MOBILE, do NOT reload on the watchdog (inferred-dead-mount) path: the funnel showed a
+          // mobile watchdog reload land in a dead webview (no fresh boot, never mounts), turning a
+          // recoverable stall into a permanent black screen. Show the actionable fallback instead — a
+          // fresh iframe (the user reopening) is the only mobile-safe recovery. The ASSET path (a
+          // definite failed /assets/ resource) still reloads on every platform: a no-store reload
+          // re-fetches fresh chunk hashes (the stale-cached-chunk-after-deploy recovery). Desktop
+          // keeps the watchdog reload — there it reliably re-runs and is its only recovery for a hung
+          // chunk that fires no 'error' event.
+          if (isMobile && reason === "watchdog") { fallback(); return; }
           if (retried()) { fallback(); return; }
           markRetried();
           location.reload();
@@ -91,11 +128,12 @@
         );
         // White-screen watchdog. main.tsx sets __appMounted right after render() — BEFORE the 8s
         // Discord handshake — so this can only fire on a genuinely dead module graph, never on a
-        // slow-but-working handshake. 12s is generous so a slow mobile-webview download isn't killed
-        // mid-flight.
+        // slow-but-working handshake. 20s (raised from 12s) so a slow mobile-webview module-graph
+        // download is NOT interrupted mid-mount — the inline #cx-boot spinner covers the wait, so a
+        // longer budget costs nothing visually and avoids killing an almost-finished mobile mount.
         var t = setTimeout(function () {
           if (!window.__appMounted) recover("watchdog", "");
-        }, 12000);
+        }, 20000);
         window.__cxBootMounted = function () {
           clearTimeout(t);
           try { sessionStorage.removeItem(KEY); } catch (e) {}
@@ -124,7 +162,7 @@
          the wide layout's one breakpoint. Bottom padding grows to the home-indicator safe
          area when the webview extends under it (viewport-fit=cover above); GameView's
          mobile min-h calc mirrors both paddings — keep them in sync. -->
-    <div id="app" class="mx-auto flex min-h-dvh w-full max-w-[940px] flex-col px-4 pb-[max(1.5rem,var(--saib))] pt-[max(0.75rem,var(--sait))] min-[800px]:pt-0 min-[800px]:pb-0 [&>*]:my-auto"></div>
+    <div id="app" class="mx-auto flex min-h-dvh w-full max-w-[940px] flex-col px-4 pb-[max(1.5rem,var(--saib))] pt-[max(0.75rem,var(--sait))] min-[800px]:pt-0 min-[800px]:pb-0 [&>*]:my-auto"><div id="cx-boot"><i></i></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

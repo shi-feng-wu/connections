@@ -29,6 +29,7 @@ export default function handler(req: VercelRequest, res: VercelResponse): void {
     channel: q.get("channel") || undefined,
     guild: q.get("guild") || undefined,
     instance: q.get("instance") || undefined,
+    plat: q.get("plat") || undefined, // "web" | "ios" | "android" — lets us filter mobile launches
     t: q.get("t") ?? undefined, // client ms since navigation start (performance.now), best-effort
   };
   const reason = q.get("reason");

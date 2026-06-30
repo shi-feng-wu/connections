@@ -21,7 +21,7 @@
 
 ### Added
 
-- Launch Connections in a server that doesn’t have the bot and a who’s-playing card now drops in there too, the same live one you get in a DM. It fills in as people play and settles once the round wraps up.
+- Implemented now-playing card in servers without the bot.
 
 ## v1.11.0 — Jun 26, 2026
 

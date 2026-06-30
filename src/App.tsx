@@ -254,6 +254,12 @@ export function App({
   // Pickers we've already pulled a fresh roster read for (their join broadcast was missed), so a
   // burst of their tile messages triggers exactly one refetch, not one per message.
   const tileFetchRequested = useRef<Set<string>>(new Set());
+  // Serialize roster reads. Many triggers (cold start, reconnect, foreground, scope toggle, an
+  // unknown-player delta) can fire fetchServerRoster at once; each ends in a full setServerRoster
+  // replace, so overlapping reads can resolve out of order and clobber freshly-merged live rows.
+  // One read at a time, with a single trailing re-read if more were requested mid-flight.
+  const rosterFetching = useRef(false);
+  const rosterRefetchQueued = useRef(false);
   // End-screen room leaderboard, two windows; fetched after a finish posts and on load.
   const [season, setSeason] = useState<Standings>(EMPTY_STANDINGS);
   const [allTime, setAllTime] = useState<Standings>(EMPTY_STANDINGS);
@@ -403,6 +409,13 @@ export function App({
   async function fetchServerRoster(): Promise<void> {
     const ticket = authTicketRef.current;
     if (!isDailyRef.current || !ticket || !scopeRef.current) return;
+    // Coalesce: if a read is already running, request a single trailing re-read (so a scope change
+    // mid-flight still lands) instead of racing a second concurrent replace.
+    if (rosterFetching.current) {
+      rosterRefetchQueued.current = true;
+      return;
+    }
+    rosterFetching.current = true;
     try {
       const qs = new URLSearchParams();
       if (guildIdRef.current) qs.set("g", guildIdRef.current);
@@ -411,11 +424,18 @@ export function App({
       const r = await fetch("/api/roster?" + qs.toString(), {
         headers: { "x-ct": ticket },
       });
-      if (!r.ok) return;
-      const d = (await r.json()) as { players?: PlayerState[] };
-      if (Array.isArray(d.players)) setServerRoster(d.players);
+      if (r.ok) {
+        const d = (await r.json()) as { players?: PlayerState[] };
+        if (Array.isArray(d.players)) setServerRoster(d.players);
+      }
     } catch {
       /* keep the last roster */
+    } finally {
+      rosterFetching.current = false;
+      if (rosterRefetchQueued.current) {
+        rosterRefetchQueued.current = false;
+        void fetchServerRoster();
+      }
     }
   }
 
@@ -913,8 +933,9 @@ export function App({
 
   // Join the room's Realtime channel once the daily is ready and we have identity. Fast path:
   // progress/join broadcasts merge instantly and Presence drives the online ring, with the poll
-  // above demoted to a 90s backstop. connect() is idempotent; if Realtime is unavailable (no
-  // socket / no token) onLive(false) keeps us on the poll — purely additive.
+  // above demoted to a 5-minute backstop (plus a reconcile on every reconnect). connect() is
+  // idempotent; if Realtime is unavailable (no socket / no token) onLive(false) keeps us on the
+  // poll — purely additive.
   useEffect(() => {
     if (phase !== "ready" || !isEmbedded || !isDailyRef.current) return;
     const scope = scopeRef.current;
@@ -928,7 +949,13 @@ export function App({
     void rl.connect({
       scope,
       ticket,
-      handlers: { onDelta: applyDelta, onTiles: handleTiles },
+      // On every reconnect, re-read the roster: the relay keeps no backlog, so deltas pushed while
+      // the stream was down (a blip, or a relay redeploy) are only recoverable this way.
+      handlers: {
+        onDelta: applyDelta,
+        onTiles: handleTiles,
+        onReconnect: () => void fetchServerRoster(),
+      },
     });
   }, [phase, isEmbedded]);
 

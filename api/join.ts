@@ -40,6 +40,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const guildId = typeof body.guildId === 'string' ? body.guildId : null;
     const channelId = typeof body.channelId === 'string' ? body.channelId : null;
     const scope = canonicalScope(guildId, channelId);
+    // DM/group (c:) rooms have no "who's playing" card, but progress deltas already fan out for them
+    // (/api/guess), so announce the join too — otherwise a newcomer's tile only appears on their
+    // first guess or the next backstop. Identity only; progress arrives on their first guess. The
+    // authoritative /api/roster read already lists finishers, so recipients treat this as a known
+    // player (identity refresh), not a fresh insert.
+    if (scope && scope.startsWith('c:') && channelId) {
+      waitUntil(
+        broadcastRoom(scope, 'join', {
+          userId: user.id,
+          channelId,
+          name: user.name,
+          avatar: user.avatar ?? undefined,
+        }),
+      );
+    }
     // Per-channel card: no channel, no card (the card lives in the channel you're in).
     if (!scope || !scope.startsWith('g:') || !guildId || !channelId) {
       res.status(200).json({ ok: false, reason: 'no-guild' });

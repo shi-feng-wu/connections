@@ -5,10 +5,10 @@ import { type RankSnapshot, rankMap, rankDelta } from "./rank-delta";
 // "Position change since today's puzzle dropped" for the standings tabs. The board itself
 // carries no rank — it arrives ordered richest-first and rank is just the row index
 // (see season.tsx). So to show movement we keep a per-device baseline of {user_id -> rank}
-// captured at the start of the current ET puzzle-day, and diff the current ranks against
-// it. The baseline is frozen for the whole day and recaptured at the next midnight-ET
-// rollover (when the new Connections is released), so arrows accumulate across the day and
-// reset daily. Per-device by design (localStorage): the agreed zero-backend implementation,
+// captured the first time a standings board is shown on a given ET day (once it has loaded),
+// and diff the current ranks against it. The baseline is frozen for the rest of that day and
+// recaptured at the next midnight-ET rollover (when the new Connections is released), so arrows
+// accumulate from that first view and reset daily. Per-device by design (localStorage): the agreed zero-backend implementation,
 // so arrows can differ across devices and reset if storage is cleared. The pure diff math
 // (rankMap/rankDelta) lives in ./rank-delta so the server recap can reuse it.
 
@@ -72,9 +72,14 @@ export function useRankSnapshot(
   // Latest board without making it an effect dep — we snapshot at the day boundary, not on churn.
   const boardRef = useRef(board);
   boardRef.current = board;
+  // Capture only once the board has actually loaded. The board arrives async, so the effect can
+  // fire (on tab-open / day rollover) while it's still empty; capturing then would freeze an empty
+  // baseline ({}) for the whole day — every rankDelta returns null, so NO arrows show even after
+  // the real board loads. Gating on this re-runs the capture the moment the board becomes non-empty.
+  const hasBoard = board.length > 0;
 
   useEffect(() => {
-    if (!key || !today) {
+    if (!key || !today || !hasBoard) {
       setPrev(null);
       return;
     }
@@ -85,7 +90,7 @@ export function useRankSnapshot(
     );
     setPrev(baseline);
     if (persist) writeBaseline(key, persist);
-  }, [key, today]);
+  }, [key, today, hasBoard]);
 
   return prev;
 }

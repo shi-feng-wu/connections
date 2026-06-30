@@ -130,7 +130,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     // Fan the new state out to everyone watching this room's roster, instantly (the SSE relay —
     // api/_realtime.ts fans it out to every subscribed client). Only a counted guess changes what
     // they'd see. Off the reveal path via waitUntil so it never delays this response; a drop is
-    // harmless (their ~90s backstop poll catches up). The guessing player sees their own result
+    // harmless (their reconnect reconcile / 5-min backstop poll catches up). The guessing player sees their own result
     // from this response + local state, not from the broadcast.
     if (counted) {
       const guildId = typeof body.guildId === 'string' ? body.guildId : null;

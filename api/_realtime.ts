@@ -24,11 +24,16 @@ export async function broadcastRoom(
 ): Promise<void> {
   if (!RELAY_URL || !RELAY_SECRET || !scope) return;
   try {
-    await fetch(`${RELAY_URL}/pub`, {
+    const r = await fetch(`${RELAY_URL}/pub`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-relay-secret': RELAY_SECRET },
       body: JSON.stringify({ room: scope, event, payload }),
     });
+    // A non-2xx means the relay rejected the push (most commonly a RELAY_SECRET mismatch → 401),
+    // which silently kills ALL live deltas for that environment. Clients still self-heal via the
+    // backstop read, but log it — otherwise this misconfig is invisible. delivered:0 is normal
+    // (nobody watching), so we don't warn on it.
+    if (!r.ok) console.warn(`[realtime] relay rejected ${event} push: ${r.status}`);
   } catch {
     /* clients self-heal via the backstop read */
   }

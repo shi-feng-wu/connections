@@ -250,7 +250,10 @@ as $$
               else public.current_streak(p_scope, a.user_id, p_channel)
          end as streak
   from agg a
-  order by a.total desc, a.plays asc
+  -- a.user_id is the final, deterministic tiebreak: without it, players tied on
+  -- (total, plays) come back in arbitrary order, so rank-by-row-index flips between reads
+  -- and the leaderboard/recap show phantom ±1 movement arrows for players who never moved.
+  order by a.total desc, a.plays asc, a.user_id
   limit p_limit;
 $$;
 

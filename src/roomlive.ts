@@ -19,6 +19,9 @@ export type TilesMsg = { userId: string; channelId?: string | null; selected: st
 export type RoomLiveHandlers = {
   onDelta: (d: RosterDelta) => void; // a player's progress/identity changed (server push)
   onTiles: (t: TilesMsg) => void; // a player's live tile selection (client push)
+  // The stream (re)connected. The relay buffers nothing, so anything pushed while we were
+  // disconnected is gone — reconcile against the authoritative roster read on each (re)open.
+  onReconnect?: () => void;
 };
 
 type ConnectOpts = {
@@ -38,15 +41,27 @@ export class RoomLive {
   }
 
   private open(): void {
-    if (!this.opts || this.es) return;
+    // Reopen only when there's no live stream. A transient drop is left to EventSource's own
+    // auto-reconnect (readyState CONNECTING), but a TERMINAL close — a fatal /sub status (e.g. an
+    // expired ticket → 401) puts it in CLOSED and it never retries — must be replaced here, else
+    // live deltas stay dead for the session. Guarding on readyState (not just non-null) is the fix.
+    if (!this.opts) return;
+    if (this.es && this.es.readyState !== EventSource.CLOSED) return;
+    if (this.es) this.es.close(); // drop a dead stream before replacing it
     const { scope, ticket, handlers } = this.opts;
     // Relative URL — the `/relay` URL mapping proxies it out to the Railway relay. EventSource is
     // NOT rewritten by patchUrlMappings, so we use the proxied path directly; and it can't set
     // headers, so the ticket rides in the query string.
     const url = `/relay/sub?room=${encodeURIComponent(scope)}&ct=${encodeURIComponent(ticket)}`;
-    // On a dropped stream EventSource auto-reconnects (the relay sends a retry:), so there's no
-    // error handler to add — a failed open just retries until the stream comes back.
     const es = new EventSource(url);
+    // `open` fires on the first connect AND on every EventSource auto-reconnect. Skip the first
+    // (the cold-start read already covered it) and reconcile on reconnects — the relay has no
+    // replay, so deltas pushed during the gap are only recoverable via a fresh roster read.
+    let opened = false;
+    es.addEventListener('open', () => {
+      if (opened) handlers.onReconnect?.();
+      opened = true;
+    });
     es.addEventListener('progress', (e) => {
       handlers.onDelta(JSON.parse((e as MessageEvent).data) as RosterDelta);
     });
@@ -73,10 +88,11 @@ export class RoomLive {
     });
   }
 
-  // EventSource handles its own reconnection, so this only re-opens a stream we explicitly closed
-  // (e.g. a backgrounding teardown). A live or auto-retrying stream is left alone — no churn.
+  // Re-establish the stream if it isn't healthy. open() no-ops on a live or auto-retrying stream
+  // (no churn) but replaces one that has terminally CLOSED — the case EventSource won't recover on
+  // its own (e.g. a fatal /sub status while we were backgrounded).
   async resync(): Promise<void> {
-    if (!this.opts || this.es) return;
+    if (!this.opts) return;
     this.open();
   }
 

@@ -12,6 +12,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -285,11 +286,15 @@ function useScrollLock(): void {
 // the desktop breakpoint the game already fills the viewport, so we return null and the overlay
 // stays full-screen. Re-measures on resize and when the board rescales (the card observes its own
 // size); the card stays mounted behind the (portaled) overlay, so its rect is always live.
+// useLayoutEffect (not useEffect) so the first measure lands BEFORE the first paint: with a
+// post-paint effect the panel painted one full-screen frame and then snapped to the card box
+// mid-entrance — invisible when that frame stayed at opacity≈0, but a visible full-screen
+// flash + snap whenever the webview was slow enough for the fade to have advanced first.
 const DESKTOP_BP = 800;
 type Box = { top: number; left: number; width: number; height: number };
 function useCardBounds(cardRef?: RefObject<HTMLElement | null>): Box | null {
   const [box, setBox] = useState<Box | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = cardRef?.current;
     if (!el) return;
     const measure = (): void => {
@@ -346,15 +351,23 @@ function DetailView({
   const m = META[id];
   const content = (
     <div
-      // Desktop: a fixed panel sized/positioned to the game card (bounds), with matching rounded
-      // corners so it reads as the game "flipping over" to this page. Mobile / pre-measure: the
-      // original full-screen screen (fixed inset-0). Positioned via top/left so `animate-detail-in`
-      // is free to use transform for its entrance slide. bg-black matches the app background
-      // (body is bg-black) so the panel blends in rather than reading as an off-tone layer.
+      // Three tiers, mirroring the gameplay area's visual tiers (its 800 desktop cut + the
+      // max-w-480 "roomy phone" column cap that makes 500–799 read as a tablet band):
+      //  • ≥800 (bounds): a fixed panel sized/positioned to the game card, with matching rounded
+      //    corners so it reads as the game "flipping over" to this page.
+      //  • 500–799 (no bounds, min-[500px]): a centered dialog capped like the reading column —
+      //    the game shows a centered capped column here, so the page shouldn't take over the
+      //    whole window (Discord desktop often lands in this band when the window shrinks).
+      //  • <500: the full-screen takeover (the game column is edge-to-edge there too).
+      // The no-bounds variants are plain CSS (min-[500px]:) inside a fixed wrapper below, so a
+      // live resize re-tiers without any JS re-measure. Positioned via top/left (desktop) or the
+      // wrapper's flex centering so `animate-detail-in` is free to use transform for its entrance
+      // slide. bg-black matches the app background (body is bg-black) so the panel blends in
+      // rather than reading as an off-tone layer.
       className={
         bounds
           ? "fixed z-50 animate-detail-in overflow-hidden rounded-[14px] bg-black shadow-[0_28px_90px_rgba(0,0,0,0.6)]"
-          : "fixed inset-0 z-50 animate-detail-in bg-black"
+          : "relative h-full w-full animate-detail-in overflow-hidden bg-black min-[500px]:h-[min(760px,calc(100dvh-2.5rem))] min-[500px]:w-[min(680px,calc(100vw-2.5rem))] min-[500px]:rounded-[14px] min-[500px]:shadow-[0_28px_90px_rgba(0,0,0,0.6)]"
       }
       style={
         bounds
@@ -370,13 +383,15 @@ function DetailView({
       {/* Close, pinned top-right. We portal to <body>, OUTSIDE #app, so we don't inherit its
         pt-[max(0.75rem,--sait)] mobile-header clearance — pin the button below the safe area
         (floored at the original 1rem for desktop/dev where --sait is 0) so Discord's mobile
-        top bar can't cover it. CSS :hover is safe here — closing unmounts the screen on tap,
-        so a stranded touch :hover has nothing to sit on. Esc closes it too (above). */}
+        top bar can't cover it. The safe-area clearance only matters on the <500 full-screen
+        tier — the ≥500 dialog floats clear of any top bar, so it drops back to the plain
+        offset. CSS :hover is safe here — closing unmounts the screen on tap, so a stranded
+        touch :hover has nothing to sit on. Esc closes it too (above). */}
       <button
         type="button"
         onClick={onBack}
         aria-label="Close"
-        className="absolute right-4 top-[max(1rem,var(--sait))] z-10 grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] bg-white/[0.05] text-zinc-400 transition-colors hover:bg-white/[0.09] hover:text-zinc-200 min-[800px]:right-5 min-[800px]:top-5"
+        className="absolute right-4 top-[max(1rem,var(--sait))] z-10 grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] bg-white/[0.05] text-zinc-400 transition-colors hover:bg-white/[0.09] hover:text-zinc-200 min-[500px]:top-4 min-[800px]:right-5 min-[800px]:top-5"
       >
         <X size={18} strokeWidth={2.25} aria-hidden />
       </button>
@@ -388,14 +403,15 @@ function DetailView({
           type="button"
           onClick={() => threadBack()}
           aria-label="Back"
-          className="absolute left-4 top-[max(1rem,var(--sait))] z-10 grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] bg-white/[0.05] text-zinc-400 transition-colors hover:bg-white/[0.09] hover:text-zinc-200 min-[800px]:left-5 min-[800px]:top-5"
+          className="absolute left-4 top-[max(1rem,var(--sait))] z-10 grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] bg-white/[0.05] text-zinc-400 transition-colors hover:bg-white/[0.09] hover:text-zinc-200 min-[500px]:top-4 min-[800px]:left-5 min-[800px]:top-5"
         >
           <ChevronLeft size={18} strokeWidth={2.25} aria-hidden />
         </button>
       )}
       {/* Content top padding clears the close button AND the same safe area (pt-14 + --sait),
-        so the title never tucks under Discord's mobile header either. */}
-      <div className="scrollbar-thin h-full overflow-y-auto px-5 pt-[calc(3.5rem_+_var(--sait))] pb-[max(2rem,var(--saib))] min-[800px]:pt-16">
+        so the title never tucks under Discord's mobile header either. Like the close button,
+        the safe-area terms only apply on the <500 full-screen tier. */}
+      <div className="scrollbar-thin h-full overflow-y-auto px-5 pt-[calc(3.5rem_+_var(--sait))] pb-[max(2rem,var(--saib))] min-[500px]:pt-14 min-[500px]:pb-8 min-[800px]:pt-16">
         {/* Feedback/Inbox run wider so the composer and message list can sit side by side; the
           other pages stay in a comfortable reading column. */}
         <div
@@ -424,8 +440,10 @@ function DetailView({
     </div>
   );
   // Desktop (card-sized): dim + blur the rest of the window behind the panel, and let a click on
-  // that backdrop close the page (as a modal would). Mobile keeps the full-screen screen with no
-  // scrim (there's nothing beside it to reveal).
+  // that backdrop close the page (as a modal would). No-bounds: a fixed wrapper centers the
+  // dialog and plays scrim (dim + blur + click-to-close) on the ≥500 tier; below 500 the panel
+  // fills it edge-to-edge, so the wrapper is just an invisible positioning box there (nothing
+  // beside the page to reveal, and its click never fires since the panel covers it).
   return createPortal(
     bounds ? (
       <>
@@ -437,7 +455,14 @@ function DetailView({
         {content}
       </>
     ) : (
-      content
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center min-[500px]:animate-overlay-fade min-[500px]:bg-black/50 min-[500px]:backdrop-blur-[2px]"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onBack();
+        }}
+      >
+        {content}
+      </div>
     ),
     document.body,
   );

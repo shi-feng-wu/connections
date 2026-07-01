@@ -86,6 +86,47 @@ function writeScopeMode(mode: RosterScope): void {
 
 const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
 
+// Cap an await that can otherwise hang forever. Every step of the Discord handshake
+// (ready/authorize/authenticate) rides an RPC postMessage channel that CAN silently stall —
+// a hung await here means an eternal "Loading…" with the activity instance held open, which
+// is exactly the stuck-per-channel-instance state that blocks the next launch. A rejection
+// lands on the blocked screen (with the Retry button) instead.
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(label)), ms),
+    ),
+  ]);
+}
+
+// Explicit funnel beacon for a failed/hung handshake. Before this, a handshake failure was
+// only INFERABLE server-side (a "mounted" beacon never followed by /api/token); now it's a
+// counted stage with a reason, so hung authorize()/token/authenticate cases are directly
+// visible in the Vercel logs next to the ack/boot/mounted stages (api/launch-beacon.ts).
+function beaconHandshakeError(e: unknown): void {
+  try {
+    const qp = new URLSearchParams(location.search);
+    const plat = /Android/i.test(navigator.userAgent)
+      ? "android"
+      : /iPhone|iPad|iPod/i.test(navigator.userAgent)
+        ? "ios"
+        : "web";
+    const reason = e instanceof Error ? e.message : String(e);
+    navigator.sendBeacon?.(
+      `/api/launch-beacon?stage=handshake-error&embedded=1` +
+        `&t=${Math.round(performance.now())}` +
+        `&reason=${encodeURIComponent(reason.slice(0, 40))}` +
+        `&channel=${encodeURIComponent(qp.get("channel_id") ?? "")}` +
+        `&guild=${encodeURIComponent(qp.get("guild_id") ?? "")}` +
+        `&instance=${encodeURIComponent(qp.get("instance_id") ?? "")}` +
+        `&plat=${plat}`,
+    );
+  } catch {
+    /* telemetry only — never let it affect the handshake result */
+  }
+}
+
 // Kill-switch for the clean-exit experiment (see the `pagehide` effect that calls sdk.close()).
 // When the LAST participant truly closes the Activity, we send Discord a CLOSE_NORMAL so the
 // per-channel instance "finishes its lifecycle" (the only documented way an instance ends) and the
@@ -754,16 +795,16 @@ export function App({
   // handshake, hence the timeout) gates the app behind the "Open in Discord" screen.
   async function setupDiscord(): Promise<boolean> {
     try {
-      const sdk = new DiscordSDK(CLIENT_ID);
+      // Reuse one SDK across handshake retries. Each DiscordSDK constructor starts its own
+      // postMessage handshake with the Discord client and there is no dispose() short of
+      // close() (which would close the whole activity) — so a retry that constructed a fresh
+      // SDK left the previous instance's listeners/handshake dangling. ready() resolves
+      // immediately once the underlying handshake has completed, so re-entering here is cheap.
+      const sdk = sdkRef.current ?? new DiscordSDK(CLIENT_ID);
       sdkRef.current = sdk; // so pushPresence() can drive Rich Presence post-handshake
       // ready() never resolves outside Discord; cap the wait so a forged ?frame_id
       // lands on the blocked screen instead of hanging on "Loading…".
-      await Promise.race([
-        sdk.ready(),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("discord-ready-timeout")), 8000),
-        ),
-      ]);
+      await withTimeout(sdk.ready(), 8000, "discord-ready-timeout");
       // Same channel launch = same instance.
       roomRef.current = sdk.instanceId;
       // Season scope persists across launches (instanceId resets). Prefer the guild
@@ -802,35 +843,54 @@ export function App({
         )
         .catch(() => {});
 
-      const { code } = await sdk.commands.authorize({
-        client_id: CLIENT_ID,
-        response_type: "code",
-        state: "",
-        // Keep `prompt: "none"`. The embedded SDK uses Discord's RPC OAuth2 flow, which
-        // forbids a redirect_uri ("Redirect URI cannot be used in the RPC ... flow"),
-        // while the full consent flow requires one ("Missing redirect_uri"). prompt:none
-        // takes the short-circuit path that needs no redirect and returns a code when the
-        // user has already granted these scopes (consent is collected by Discord at
-        // activity-launch time).
-        prompt: "none",
-        // `guilds` lets /api/score confirm membership before writing a guild board;
-        // `rpc.activities.write` lets the Activity set Rich Presence (the "Playing
-        // Connections" profile card, see presence.ts). Discord collects consent for
-        // these at launch, so prompt:none still returns a code; adding a scope just
-        // re-prompts once at the next launch.
-        scope: ["identify", "guilds", "rpc.activities.write"],
-      });
+      // 45s cap: with prompt:"none" this normally short-circuits in well under a second, but a
+      // newly added scope re-prompts once — the user may legitimately sit on Discord's consent
+      // sheet for a while, so the cap is generous. What it must never do is hang FOREVER on a
+      // stalled RPC: that held the activity instance open with an eternal spinner (the funnel's
+      // mounted-but-no-token fingerprint) and stuck the channel for the next launch.
+      const { code } = await withTimeout(
+        sdk.commands.authorize({
+          client_id: CLIENT_ID,
+          response_type: "code",
+          state: "",
+          // Keep `prompt: "none"`. The embedded SDK uses Discord's RPC OAuth2 flow, which
+          // forbids a redirect_uri ("Redirect URI cannot be used in the RPC ... flow"),
+          // while the full consent flow requires one ("Missing redirect_uri"). prompt:none
+          // takes the short-circuit path that needs no redirect and returns a code when the
+          // user has already granted these scopes (consent is collected by Discord at
+          // activity-launch time).
+          prompt: "none",
+          // `guilds` lets /api/score confirm membership before writing a guild board;
+          // `rpc.activities.write` lets the Activity set Rich Presence (the "Playing
+          // Connections" profile card, see presence.ts). Discord collects consent for
+          // these at launch, so prompt:none still returns a code; adding a scope just
+          // re-prompts once at the next launch.
+          scope: ["identify", "guilds", "rpc.activities.write"],
+        }),
+        45_000,
+        "discord-authorize-timeout",
+      );
+      // 10s cap on the code exchange: the function is a sub-second Discord OAuth round-trip, so
+      // anything past 10s is a dead lambda/proxy path — fail to the blocked screen (retryable),
+      // don't hold the handshake open.
       const res = await fetch("/api/token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code }),
+        signal: AbortSignal.timeout(10_000),
       });
-      if (!res.ok) return false;
+      if (!res.ok) {
+        beaconHandshakeError(new Error(`token-http-${res.status}`));
+        return false;
+      }
       const { access_token, auth } = (await res.json()) as {
         access_token?: string;
         auth?: string;
       };
-      if (!access_token || !auth) return false;
+      if (!access_token || !auth) {
+        beaconHandshakeError(new Error("token-malformed"));
+        return false;
+      }
       // access_token: live identity for /api/score & /api/join. auth: the
       // signed ticket gating the cheap reads. The server resolves the real user
       // from the token, so the client can't claim to be someone else.
@@ -840,7 +900,13 @@ export function App({
       // Display identity (the server still trusts only the token). Non-fatal: a
       // failure here shouldn't lock out an otherwise-authenticated player.
       try {
-        const auth = await sdk.commands.authenticate({ access_token });
+        // 10s cap: authenticate is non-fatal (display identity only), so a stalled RPC here
+        // must degrade to the placeholder identity, not stall the whole bootstrap.
+        const auth = await withTimeout(
+          sdk.commands.authenticate({ access_token }),
+          10_000,
+          "discord-authenticate-timeout",
+        );
         if (auth?.user) {
           const u = auth.user;
           meRef.current = {
@@ -887,6 +953,7 @@ export function App({
       return true;
     } catch (e) {
       console.warn("Discord auth failed:", e);
+      beaconHandshakeError(e);
       return false;
     }
   }

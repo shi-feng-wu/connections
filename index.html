@@ -60,11 +60,29 @@
         function ctxParam(name) {
           try { return qp ? (qp.get(name) || "") : ""; } catch (e) { return ""; }
         }
+        // Age (seconds) of the Discord activity instance this boot landed on, decoded from the
+        // instance_id snowflake (ms since the Discord epoch in the top 42 bits). Discord creates
+        // the instance the moment the launch is ACKed, so a boot whose instance is already
+        // minutes old JOINED a previously stuck instance — earlier acked launches in this channel
+        // that never opened an iframe. That's the failed-launch class the funnel showed (ack, no
+        // boot, mostly iOS DMs); iage makes the eventual recoveries measurable server-side.
+        // Number() loses the snowflake's low bits (>53-bit int) — harmless, the error is <1ms
+        // after the 2^22 shift. Empty string when the id doesn't parse.
+        var iage = "";
+        try {
+          var im = /^i-(\d{10,20})/.exec(ctxParam("instance_id"));
+          if (im) {
+            var its = Math.floor(Number(im[1]) / 4194304) + 1420070400000;
+            if (its > 1420070400000 && its <= Date.now())
+              iage = String(Math.round((Date.now() - its) / 1000));
+          }
+        } catch (e) {}
         var ctx =
           "&channel=" + encodeURIComponent(ctxParam("channel_id")) +
           "&guild=" + encodeURIComponent(ctxParam("guild_id")) +
           "&instance=" + encodeURIComponent(ctxParam("instance_id")) +
-          "&plat=" + plat;
+          "&plat=" + plat +
+          (iage ? "&iage=" + iage : "");
         function beacon(stage, extra) {
           try {
             var p = "stage=" + stage + "&embedded=" + embedded + "&t=" + Math.round(performance.now());
@@ -104,7 +122,19 @@
           if (isMobile && reason === "watchdog") { fallback(); return; }
           if (retried()) { fallback(); return; }
           markRetried();
-          location.reload();
+          // Reload via a cache-busted URL, not location.reload(): if the entry document came out
+          // of a stale proxy/webview cache (its chunk hashes point at a purged prior deploy),
+          // re-requesting the SAME url can re-serve the same stale HTML and burn the one-shot
+          // retry on an identical failure. A unique param forces a cache-miss re-fetch of '/'
+          // (no-store at the origin, so never stale there); Discord's launch params are
+          // preserved and the app reads only known ones, so the extra param is inert.
+          try {
+            var u = new URL(location.href);
+            u.searchParams.set("cxb", String(Date.now()));
+            location.replace(u.href);
+          } catch (e) {
+            location.reload();
+          }
         }
         // A failed boot chunk/stylesheet fires a non-bubbling 'error' on its element — caught in the
         // capture phase. Fatal ONLY for the Vite build output under /assets/ (the entry module + its

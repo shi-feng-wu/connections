@@ -21,7 +21,9 @@ export default function handler(req: VercelRequest, res: VercelResponse): void {
   const q = query(req);
 
   const data: Record<string, unknown> = {
-    stage: q.get("stage") ?? "boot", // "boot" | "mounted" | "boot-error"
+    // "boot" | "mounted" | "boot-error" | "handshake-error" (App.tsx setupDiscord failure —
+    // the mounted-but-no-token class, now explicit with a reason instead of infer-only)
+    stage: q.get("stage") ?? "boot",
     embedded: q.get("embedded") === "1",
     // channel_id is the correlation key back to /api/interactions' "[launch] ack" — a launch whose
     // ack channel never produces a "boot" beacon is one Discord acked but never opened. guild is
@@ -33,9 +35,14 @@ export default function handler(req: VercelRequest, res: VercelResponse): void {
     t: q.get("t") ?? undefined, // client ms since navigation start (performance.now), best-effort
   };
   const reason = q.get("reason");
-  if (reason) data.reason = reason.slice(0, 40); // "asset" | "watchdog"
+  if (reason) data.reason = reason.slice(0, 40); // boot-error: "asset"|"watchdog"; handshake-error: the failed step
   const failed = q.get("res");
   if (failed) data.res = failed.slice(0, 300); // the failed resource URL (boot-error only)
+  // Age (s) of the activity instance at boot, decoded client-side from the instance_id
+  // snowflake. Anything > a few seconds means this boot RECOVERED a previously stuck instance
+  // (acked launches that never opened an iframe) — the direct counter for the stuck-channel bug.
+  const iage = q.get("iage");
+  if (iage) data.iage = iage.slice(0, 12);
 
   // One greppable line per launch stage. "[launch] beacon" + the existing "[launch] ack" together
   // make the client/server launch funnel visible in Vercel's runtime logs.

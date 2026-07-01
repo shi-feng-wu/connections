@@ -1214,6 +1214,7 @@ export function App({
           unread: chatUnread,
           isDev: chatIsDev,
           onUnread: setChatUnread,
+          me: { name: meRef.current.name, avatar: meRef.current.avatar ?? null },
         }
       : undefined;
   // Open an external URL (the footer's Ko-fi link). Embedded, it must go through the Discord

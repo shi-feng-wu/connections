@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { admin } from './_admin.js';
 import { bearerToken, fetchDiscordUser, type DiscordUser } from './_discord.js';
+import { sendReplyDM } from './_dm.js';
 import { isCategory, postFeedbackWebhook } from './_feedback.js';
 import { todayET } from './_nyt.js';
 import { isLocalDev, verifyAuth } from './_session.js';
@@ -61,6 +62,8 @@ type MessageRow = {
   sender: 'user' | 'dev';
   text: string;
   created_at: string;
+  author_id: string;
+  author_name: string | null;
 };
 type Db = NonNullable<ReturnType<typeof admin>>;
 
@@ -72,16 +75,56 @@ async function readThread(db: Db, threadId: number): Promise<ThreadRow | null> {
 async function readMessages(db: Db, threadId: number): Promise<object[]> {
   const { data } = await db
     .from('chat_messages')
-    .select('id, sender, text, created_at')
+    .select('id, sender, text, created_at, author_id, author_name')
     .eq('thread_id', threadId)
     .order('created_at', { ascending: true })
     .limit(MAX_MESSAGES);
-  return ((data as MessageRow[] | null) ?? []).map((m) => ({
+  const rows = (data as MessageRow[] | null) ?? [];
+  const avatars = await avatarsByUser(db, [...new Set(rows.map((m) => m.author_id))]);
+  return rows.map((m) => ({
     id: m.id,
     sender: m.sender,
     text: m.text,
     created_at: m.created_at,
+    // The sender's identity, so the client shows the real dev's avatar beside each reply. name
+    // backs the monogram; avatar is resolved from their play history (below), not stored per message.
+    author: { name: m.author_name, avatar: avatars.get(m.author_id) ?? null },
   }));
+}
+
+// The latest avatar each of these users last played with, from scores (indexed by user_id). Every
+// dev is a player, so their reply shows their real Discord pic with no Discord call and no
+// per-message copy — and it stays current as they keep playing. "Latest" matches the season boards:
+// newest puzzle_date, then newest row. Users with no avatar on file are absent (→ monogram/fallback).
+async function avatarsByUser(db: Db, ids: string[]): Promise<Map<string, string>> {
+  const byUser = new Map<string, string>();
+  if (ids.length === 0) return byUser;
+  const { data } = await db
+    .from('scores')
+    .select('user_id, avatar')
+    .in('user_id', ids)
+    .not('avatar', 'is', null)
+    .order('puzzle_date', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false });
+  for (const r of (data as { user_id: string; avatar: string }[] | null) ?? []) {
+    if (!byUser.has(r.user_id)) byUser.set(r.user_id, r.avatar); // first row per user = the latest
+  }
+  return byUser;
+}
+
+// The player's most recent message in a ticket — the note a dev reply is answering. Quoted into
+// the DM as context. null when the player has somehow never written (shouldn't happen for a real
+// ticket, which always opens with a player note).
+async function lastUserText(db: Db, threadId: number): Promise<string | null> {
+  const { data } = await db
+    .from('chat_messages')
+    .select('text')
+    .eq('thread_id', threadId)
+    .eq('sender', 'user')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as { text: string } | null)?.text ?? null;
 }
 
 // The player has an unread reply when the latest message is ours and lands after they last looked.
@@ -368,6 +411,15 @@ async function adminAction(req: VercelRequest, res: VercelResponse): Promise<voi
       })
       .eq('id', threadId);
     await mirror(thread, dev, text, 'out');
+    // DM the player the full reply plus the message it answers, so they get it in Discord and not
+    // only as the in-app badge. Best-effort: silently no-ops if the bot can't DM them (no mutual
+    // guild / DMs closed), and the unread badge still covers those.
+    await sendReplyDM({
+      recipientId: thread.user_id,
+      subject: thread.subject,
+      replyText: text,
+      contextText: await lastUserText(db, threadId),
+    });
     res.status(200).json({ ok: true, messages: await readMessages(db, threadId) });
     return;
   }

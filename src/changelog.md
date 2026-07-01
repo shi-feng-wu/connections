@@ -17,6 +17,18 @@
   at the very top. Group everything that ships together into one release.
 -->
 
+## v1.13.0 — Jul 1, 2026
+
+### Added
+
+- When we reply to feedback, the bot also DMs you the response in Discord.
+
+## v1.12.1 — Jun 30, 2026
+
+### Changed
+
+- You no longer have to wait for a guess to finish animating before submitting the next guess.
+
 ## v1.12.0 — Jun 29, 2026
 
 ### Added

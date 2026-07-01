@@ -5,11 +5,20 @@
 // counts as a dev (the list response says). Every call degrades to a null/empty result — a hiccup
 // just means "no chat", it never throws into the UI.
 
+// A chat participant's display identity — the avatar (and a name for the monogram fallback)
+// shown beside their messages in a thread.
+export type ChatIdentity = { name: string | null; avatar: string | null };
+
 export type ChatMessage = {
   id: number;
   sender: 'user' | 'dev';
   text: string;
   created_at: string;
+  // Who actually sent this message, resolved server-side: name from the message, avatar looked up
+  // from the sender's play history (devs are players), so each reply shows the real dev's pic and
+  // not a generic brand mark. avatar is null when they have none on file → the view falls back to
+  // the thread's participant identity.
+  author?: ChatIdentity;
 };
 
 // One of the player's own tickets, for their inbox list.
@@ -72,6 +81,7 @@ export type ChatBundle = {
   unread: boolean; // any unread reply → dot on the Feedback entry
   isDev: boolean; // surface the admin Inbox entry
   onUnread: (unread: boolean) => void; // the player read/added tickets → resync App's badge
+  me: ChatIdentity; // the current Discord user, for their own avatar in chat threads
 };
 
 async function postJson<T>(body: object, headers: Record<string, string> = {}): Promise<T | null> {

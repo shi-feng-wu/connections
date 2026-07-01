@@ -1,6 +1,6 @@
 import { Bug, Check, ChevronLeft, Lightbulb, MessageSquare, Send } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import type { ChatApi, ChatMessage, ChatTicket, InboxTicket, TicketView } from "./chat";
+import type { ChatApi, ChatIdentity, ChatMessage, ChatTicket, InboxTicket, TicketView } from "./chat";
 import { HoverButton } from "./hoverbutton";
 
 // Session-scoped cache for the player's Feedback page. Opening Feedback mounts a fresh subtree and
@@ -31,6 +31,25 @@ export function primeTicketCache(tickets: ChatTicket[]): void {
 // unread dot, reused from the changelog badge.
 
 const CHIPS = ["Bug", "Idea", "Other"];
+
+// The two parties in a thread, keyed by a message's `sender`. This is the *fallback* identity for
+// each side; a message carries its own author (the real sender's pic) and wins when present. The
+// player is always "me" on their own side; dev messages fall back to the app's brand mark only for
+// legacy rows that predate stored avatars.
+type Participants = { user: ChatIdentity; dev: ChatIdentity };
+const SUPPORT: ChatIdentity = { name: "Connections", avatar: "/connections-icon.png" };
+// Fall back to a friendly name so the monogram never blanks before identity resolves.
+function meIdent(me?: ChatIdentity): ChatIdentity {
+  return { name: me?.name ?? "You", avatar: me?.avatar ?? null };
+}
+
+// The identity shown beside one message: the message's own author (so each dev's real avatar rides
+// their own reply, and a multi-dev thread shows who actually answered), falling back per-field to
+// the thread participant — the live viewer for their own side, or the brand mark for a legacy dev
+// reply with no stored avatar.
+function identFor(m: ChatMessage, base: ChatIdentity): ChatIdentity {
+  return { name: m.author?.name ?? base.name, avatar: m.author?.avatar ?? base.avatar };
+}
 
 // Category → line icon (no emoji): bug / lightbulb / message for Bug · Idea · Other.
 const CAT_ICON: Record<string, typeof Bug> = { Bug, Idea: Lightbulb, Other: MessageSquare };
@@ -74,18 +93,44 @@ function Eyebrow({ children }: { children: ReactNode }): ReactNode {
   );
 }
 
-// One message bubble: the player's notes sit right (filled, like the Send button); ours sit left
-// (a dark card).
-function Bubble({ m }: { m: ChatMessage }): ReactNode {
-  const mine = m.sender === "user";
+// The avatar beside a message run: the sender's Discord pic, or a monogram of their name. Sized
+// and circular-cropped like a Discord message avatar.
+function MsgAvatar({ ident }: { ident: ChatIdentity }): ReactNode {
+  if (ident.avatar)
+    return <img src={ident.avatar} alt="" className="h-9.5 w-9.5 flex-none rounded-full object-cover" />;
   return (
-    <div className={"flex " + (mine ? "justify-end" : "justify-start")}>
+    <span className="grid h-9.5 w-9.5 flex-none place-items-center rounded-full bg-zinc-700 font-sans text-[15px] font-extrabold text-zinc-100">
+      {(ident.name ?? "?").slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
+// One message bubble. The viewer's own notes sit right (filled, like the Send button); the other
+// party's sit left (a dark card) — `self` is the viewer's sender, so the same layout reads right
+// for the player (self="user") and for the dev (self="dev"). Each run of same-sender messages
+// carries the sender's Discord avatar at its head; the rest of the run reserves the avatar's width
+// so the bubbles stay aligned (Discord-style).
+function Bubble({
+  m,
+  ident,
+  self,
+  showAvatar,
+}: {
+  m: ChatMessage;
+  ident: ChatIdentity;
+  self: ChatMessage["sender"];
+  showAvatar: boolean;
+}): ReactNode {
+  const mine = m.sender === self;
+  return (
+    <div className={"flex items-start gap-2.5 " + (mine ? "flex-row-reverse" : "flex-row")}>
+      {showAvatar ? <MsgAvatar ident={ident} /> : <span className="w-9.5 flex-none" aria-hidden />}
       <div
         className={
           "max-w-[85%] whitespace-pre-wrap break-words px-3.5 py-2.5 font-sans text-[14px] leading-[1.5] " +
           (mine
-            ? "rounded-2xl rounded-br-md bg-zinc-100 text-zinc-900"
-            : "rounded-2xl rounded-bl-md bg-white/[0.06] text-zinc-100")
+            ? "rounded-2xl rounded-tr-md bg-zinc-100 text-zinc-900"
+            : "rounded-2xl rounded-tl-md bg-white/[0.06] text-zinc-100")
         }
       >
         {m.text}
@@ -256,16 +301,17 @@ function ComposeBlock({
   );
 }
 
-// A back link ("‹ Your messages" / "‹ player name") above a conversation.
-function BackLink({ label, onClick }: { label: string; onClick: () => void }): ReactNode {
+// An icon-only back button shown at the head of a thread when the page chrome can't host one
+// (the dev preview playground — the real app lifts this up to sit across from the close X).
+function InlineBack({ onClick }: { onClick: () => void }): ReactNode {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex w-fit cursor-pointer items-center gap-1 bg-transparent font-sans text-[13px] font-semibold text-zinc-400 transition-colors hover:text-zinc-100"
+      aria-label="Back"
+      className="grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] bg-white/[0.05] text-zinc-400 transition-colors hover:bg-white/[0.09] hover:text-zinc-200"
     >
-      <ChevronLeft size={16} strokeWidth={2.25} aria-hidden />
-      {label}
+      <ChevronLeft size={18} strokeWidth={2.25} aria-hidden />
     </button>
   );
 }
@@ -375,27 +421,34 @@ function Row({
   );
 }
 
-// The shared conversation layout (player + dev): back link, the category as an eyebrow, the subject
-// as a serif heading, the bubbles, then a composer.
+// The shared conversation layout (player + dev): the category as an eyebrow, the subject as a serif
+// heading, the avatared bubbles, then a composer. The back action sits in the page chrome (across
+// from the close X); only the chrome-less preview shows an inline back here (showInlineBack).
 function ThreadShell({
-  back,
+  onBack,
+  showInlineBack,
   category,
   subject,
   messages,
   endRef,
   composer,
+  participants,
+  self,
 }: {
-  back: ReactNode;
+  onBack: () => void;
+  showInlineBack: boolean;
   category: string | null;
   subject: string | null;
   messages: ChatMessage[] | null;
   endRef: RefObject<HTMLDivElement | null>;
   composer: ReactNode;
+  participants: Participants;
+  self: ChatMessage["sender"];
 }): ReactNode {
   return (
     <div className="mx-auto flex w-full max-w-[640px] flex-col gap-5">
       <div className="flex flex-col gap-2.5">
-        {back}
+        {showInlineBack && <InlineBack onClick={onBack} />}
         <div className="flex items-center gap-1.75 text-zinc-500">
           <CategoryIcon category={category} size={13} />
           <Eyebrow>{category ?? "Message"}</Eyebrow>
@@ -410,8 +463,14 @@ function ThreadShell({
         <Loading />
       ) : (
         <div className="flex flex-col gap-3">
-          {messages.map((m) => (
-            <Bubble key={m.id} m={m} />
+          {messages.map((m, i) => (
+            <Bubble
+              key={m.id}
+              m={m}
+              ident={identFor(m, participants[m.sender])}
+              self={self}
+              showAvatar={i === 0 || messages[i - 1].sender !== m.sender}
+            />
           ))}
           <div ref={endRef} />
         </div>
@@ -428,15 +487,31 @@ function ThreadShell({
 export function ChatPanel({
   api,
   onUnread,
+  me,
+  liftBack,
 }: {
   api?: ChatApi;
   onUnread?: (unread: boolean) => void;
+  me?: ChatIdentity;
+  // Hand the open thread's back action to the page chrome (the button across from the close X);
+  // omitted in the chrome-less preview, where the thread shows its own inline back instead.
+  liftBack?: (back: (() => void) | null) => void;
 }): ReactNode {
   if (!api) return <LocalForm />;
-  return <LiveChat api={api} onUnread={onUnread} />;
+  return <LiveChat api={api} onUnread={onUnread} me={me} liftBack={liftBack} />;
 }
 
-function LiveChat({ api, onUnread }: { api: ChatApi; onUnread?: (unread: boolean) => void }): ReactNode {
+function LiveChat({
+  api,
+  onUnread,
+  me,
+  liftBack,
+}: {
+  api: ChatApi;
+  onUnread?: (unread: boolean) => void;
+  me?: ChatIdentity;
+  liftBack?: (back: (() => void) | null) => void;
+}): ReactNode {
   const [tickets, setTickets] = useState<ChatTicket[] | null>(ticketCache);
   const [openId, setOpenId] = useState<number | null>(null);
 
@@ -448,6 +523,20 @@ function LiveChat({ api, onUnread }: { api: ChatApi; onUnread?: (unread: boolean
     setTickets(l.tickets);
     onUnread?.(l.unread);
   }, [api, onUnread]);
+
+  // Leave the open thread back to the inbox list (the open already marked it read; resync).
+  const back = useCallback((): void => {
+    void refresh();
+    setOpenId(null);
+  }, [refresh]);
+
+  // Surface that back action to the page chrome while a thread is open; null on the list, so the
+  // chrome shows just the close X.
+  useEffect(() => {
+    if (!liftBack) return;
+    liftBack(openId !== null ? back : null);
+    return () => liftBack(null);
+  }, [liftBack, openId, back]);
 
   useEffect(() => {
     let live = true;
@@ -470,11 +559,10 @@ function LiveChat({ api, onUnread }: { api: ChatApi; onUnread?: (unread: boolean
       <TicketThread
         api={api}
         threadId={openId}
-        onBack={() => {
-          void refresh();
-          setOpenId(null);
-        }}
+        onBack={back}
         onOpened={refresh}
+        showInlineBack={!liftBack}
+        participants={{ user: meIdent(me), dev: SUPPORT }}
       />
     );
   }
@@ -528,11 +616,15 @@ function TicketThread({
   threadId,
   onBack,
   onOpened,
+  showInlineBack,
+  participants,
 }: {
   api: ChatApi;
   threadId: number;
   onBack: () => void;
   onOpened: () => void;
+  showInlineBack: boolean;
+  participants: Participants;
 }): ReactNode {
   const cached = threadCache.get(threadId);
   const [messages, setMessages] = useState<ChatMessage[] | null>(cached?.messages ?? null);
@@ -563,7 +655,10 @@ function TicketThread({
 
   return (
     <ThreadShell
-      back={<BackLink label="Your messages" onClick={onBack} />}
+      onBack={onBack}
+      showInlineBack={showInlineBack}
+      participants={participants}
+      self="user"
       category={category}
       subject={subject}
       messages={messages}
@@ -639,7 +734,15 @@ function LocalForm(): ReactNode {
 
 // Dev-only inbox: every player's ticket, newest-active first, each openable to read + reply. Same
 // rows as the player's inbox, only with the player's identity as the avatar + a name on the preview.
-export function AdminInbox({ api }: { api: ChatApi }): ReactNode {
+export function AdminInbox({
+  api,
+  me,
+  liftBack,
+}: {
+  api: ChatApi;
+  me?: ChatIdentity;
+  liftBack?: (back: (() => void) | null) => void;
+}): ReactNode {
   const [tickets, setTickets] = useState<InboxTicket[] | null>(adminCache);
   const [open, setOpen] = useState<InboxTicket | null>(null);
 
@@ -652,15 +755,27 @@ export function AdminInbox({ api }: { api: ChatApi }): ReactNode {
   }, [api]);
   useEffect(refresh, [refresh]);
 
+  // Leave the open ticket back to the inbox (reading it cleared the unread flag; reflect that).
+  const back = useCallback((): void => {
+    setOpen(null);
+    refresh();
+  }, [refresh]);
+
+  // Hand the back action to the page chrome while a ticket is open (across from the close X).
+  useEffect(() => {
+    if (!liftBack) return;
+    liftBack(open ? back : null);
+    return () => liftBack(null);
+  }, [liftBack, open, back]);
+
   if (open) {
     return (
       <AdminThread
         api={api}
         ticket={open}
-        onBack={() => {
-          setOpen(null);
-          refresh(); // reading it cleared the unread flag; reflect that in the list
-        }}
+        onBack={back}
+        showInlineBack={!liftBack}
+        me={me}
       />
     );
   }
@@ -696,10 +811,14 @@ function AdminThread({
   api,
   ticket,
   onBack,
+  showInlineBack,
+  me,
 }: {
   api: ChatApi;
   ticket: InboxTicket;
   onBack: () => void;
+  showInlineBack: boolean;
+  me?: ChatIdentity;
 }): ReactNode {
   const cached = adminThreadCache.get(ticket.threadId);
   const [messages, setMessages] = useState<ChatMessage[] | null>(cached?.messages ?? null);
@@ -723,7 +842,10 @@ function AdminThread({
 
   return (
     <ThreadShell
-      back={<BackLink label={name ?? ticket.userId} onClick={onBack} />}
+      onBack={onBack}
+      showInlineBack={showInlineBack}
+      participants={{ user: { name: name ?? ticket.userId, avatar: ticket.avatar }, dev: meIdent(me) }}
+      self="dev"
       category={ticket.category}
       subject={ticket.subject}
       messages={messages}

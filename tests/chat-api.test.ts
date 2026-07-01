@@ -18,6 +18,8 @@ const seq: Record<string, number> = { chat_threads: 0, chat_messages: 0 };
 class Q {
   private op: "select" | "insert" | "update" | "delete" = "select";
   private filters: [string, unknown][] = [];
+  private inList: [string, unknown[]][] = [];
+  private notNullCols: string[] = [];
   private ord: { col: string; asc: boolean } | null = null;
   private lim: number | null = null;
   private values: Row | null = null;
@@ -44,6 +46,15 @@ class Q {
   }
   eq(col: string, val: unknown): this {
     this.filters.push([col, val]);
+    return this;
+  }
+  in(col: string, arr: unknown[]): this {
+    this.inList.push([col, arr]);
+    return this;
+  }
+  // Only the "column is not null" shape the avatar lookup uses (.not('avatar','is',null)).
+  not(col: string, op: string, val: unknown): this {
+    if (op === "is" && val === null) this.notNullCols.push(col);
     return this;
   }
   order(col: string, opts?: { ascending?: boolean }): this {
@@ -81,11 +92,15 @@ class Q {
       rows.push(row);
       return this.returning ? [{ ...row }] : [];
     }
+    const keep = (r: Row): boolean =>
+      this.filters.every(([c, v]) => r[c] === v) &&
+      this.inList.every(([c, arr]) => arr.includes(r[c])) &&
+      this.notNullCols.every((c) => r[c] != null);
     if (this.op === "delete") {
-      store[this.table] = rows.filter((r) => !this.filters.every(([c, v]) => r[c] === v));
+      store[this.table] = rows.filter((r) => !keep(r));
       return [];
     }
-    const hit = rows.filter((r) => this.filters.every(([c, v]) => r[c] === v));
+    const hit = rows.filter(keep);
     if (this.op === "update") {
       for (const r of hit) Object.assign(r, this.values);
       return [];
@@ -122,6 +137,15 @@ vi.mock("../api/_session.js", () => ({
 vi.mock("../api/_feedback.js", () => ({
   isCategory: (c: unknown) => c === "Bug" || c === "Idea" || c === "Other",
   postFeedbackWebhook: async () => true,
+}));
+// Record the player DMs the handler fires (only a dev reply should), so we can assert the target +
+// full reply + quoted context without a real Discord call.
+const dmCalls: any[] = [];
+vi.mock("../api/_dm.js", () => ({
+  sendReplyDM: async (dm: any) => {
+    dmCalls.push(dm);
+    return true;
+  },
 }));
 vi.mock("../api/_nyt.js", () => ({ todayET: () => "2026-06-26" }));
 
@@ -171,6 +195,7 @@ beforeEach(() => {
   store.scores = [];
   seq.chat_threads = 0;
   seq.chat_messages = 0;
+  dmCalls.length = 0;
 });
 
 describe("api/chat — dev reset-progress (redo today)", () => {
@@ -212,6 +237,14 @@ describe("api/chat — dev reset-progress (redo today)", () => {
 
 describe("api/chat handler — full ticket lifecycle", () => {
   it("runs a player↔dev conversation end to end with correct unread + subject + preview", async () => {
+    // Both parties have game history; the thread read resolves each author's avatar from it (the
+    // dev's newest play wins over an older one, proving "latest avatar").
+    store.scores = [
+      { user_id: "p1", avatar: "avatar-p1", puzzle_date: "2026-06-20", created_at: "2026-06-20T00:00:00Z" },
+      { user_id: "dev1", avatar: "stale-dev1", puzzle_date: "2026-06-19", created_at: "2026-06-19T00:00:00Z" },
+      { user_id: "dev1", avatar: "avatar-dev1", puzzle_date: "2026-06-26", created_at: "2026-06-26T00:00:00Z" },
+    ];
+
     // 1) Player p1 opens a ticket with a subject distinct from the note.
     const created = await call("POST", {
       body: { op: "new", accessToken: "p1", text: "the clock rewound", category: "Bug", subject: "Timer rewind", puzzle: 314 },
@@ -273,7 +306,27 @@ describe("api/chat handler — full ticket lifecycle", () => {
     });
     expect(devReply.statusCode).toBe(200);
     expect(devReply.body.messages).toHaveLength(2);
-    expect(devReply.body.messages[1]).toMatchObject({ sender: "dev", text: "fixed in v2.3" });
+    // The reply carries the responding dev's own identity, so the player sees that dev's avatar
+    // beside it (not a generic brand mark).
+    expect(devReply.body.messages[1]).toMatchObject({
+      sender: "dev",
+      text: "fixed in v2.3",
+      author: { name: "Name-dev1", avatar: "avatar-dev1" },
+    });
+    // And the player's own note carries their identity for their side of the thread.
+    expect(devReply.body.messages[0]).toMatchObject({
+      sender: "user",
+      author: { name: "Name-p1", avatar: "avatar-p1" },
+    });
+
+    // The reply DMs the ticket owner with the full reply + the player's note as quoted context.
+    expect(dmCalls).toHaveLength(1);
+    expect(dmCalls[0]).toMatchObject({
+      recipientId: "p1",
+      subject: "Timer rewind",
+      replyText: "fixed in v2.3",
+      contextText: "the clock rewound",
+    });
 
     // 6) Player now has an unread reply.
     list = await call("GET", { headers: { authorization: "Bearer p1" } });
@@ -299,6 +352,9 @@ describe("api/chat handler — full ticket lifecycle", () => {
     expect(reply.body.messages[2]).toMatchObject({ sender: "user", text: "thanks!" });
     inbox = await call("POST", { body: { admin: "inbox", accessToken: "dev1" } });
     expect(inbox.body.tickets[0].unread).toBe(true);
+
+    // A player reply doesn't DM anyone — only the dev's reply did (still just the one DM).
+    expect(dmCalls).toHaveLength(1);
   });
 
   it("derives a subject from the note when the player leaves it blank", async () => {

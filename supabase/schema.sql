@@ -803,7 +803,10 @@ create index if not exists chat_threads_recent_idx on public.chat_threads (last_
 alter table public.chat_threads enable row level security;
 
 -- One message in a ticket, oldest-first. author_id/author_name record who actually sent it (the
--- player, or the replying dev). Cascades with its ticket.
+-- player, or the replying dev). The sender's avatar isn't copied here — the read path resolves it
+-- from the author's play history (scores.avatar) by author_id, so a reply shows the real dev's
+-- current pic (devs are players too) without a Discord call or a stale per-message snapshot.
+-- Cascades with its ticket.
 create table if not exists public.chat_messages (
   id          bigint      generated always as identity primary key,
   thread_id   bigint      not null references public.chat_threads(id) on delete cascade,

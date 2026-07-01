@@ -819,6 +819,7 @@ export function Roster({
               selfId={selfId}
               selfRowRef={selfRowRef}
               prevRanks={prevRanks}
+              flashScope={snapshotKey}
               fill
             />
           </div>

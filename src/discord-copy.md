@@ -78,6 +78,22 @@ Still mid-puzzle: {solved}/4 groups, {mistakes} left. Finish it, then `/share`.
 
 Couldn’t build your share. Try `/share` again.
 
+## reply-dm.heading
+
+💬 New reply to your Connections feedback
+
+## reply-dm.subject
+
+Re: {subject}
+
+## reply-dm.subject-blank
+
+Re: your feedback
+
+## reply-dm.footer
+
+Open Connections to reply
+
 ## unsupported
 
 Sorry, I can’t handle that one.

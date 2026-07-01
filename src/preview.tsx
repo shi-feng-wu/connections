@@ -923,6 +923,21 @@ function Simulate() {
     setRunning(false);
   }
 
+  // Fire all four correct guesses ~240ms apart WITHOUT waiting for each to finish,
+  // so the solves gather concurrently — the visible payoff of the overlap refactor
+  // (each group lifts into its own slot at the same time, the board folding up fast).
+  async function simulateOverlap(): Promise<void> {
+    if (running) return;
+    setRunning(true);
+    for (const g of puzzle.groups) {
+      btn("Deselect all")?.click();
+      select(g.members);
+      await submitGuess();
+      await delay(240);
+    }
+    setRunning(false);
+  }
+
   function reset(): void {
     setKey((k) => k + 1);
     window.scrollTo({ top: 0 });
@@ -945,6 +960,31 @@ function Simulate() {
     })();
   }, []);
 
+  // #overlap fires three correct guesses ~360ms apart WITHOUT waiting for each to
+  // finish, so the solves gather concurrently — the harness for verifying the
+  // overlap refactor (each group lands in its own forming slot at the same time).
+  // Shuffles first so the groups are scattered and the gather's convergence is
+  // actually visible (the default layout has each group already in its own row).
+  useEffect(() => {
+    const h = location.hash.toLowerCase();
+    if (h !== "#overlap" && h !== "#overlapwin") return;
+    void (async () => {
+      await until(() => tilesLeft() >= 16);
+      for (let i = 0; i < 4; i++) {
+        btn("Shuffle")?.click();
+        await delay(60);
+      }
+      await delay(200);
+      // #overlap solves the first three; #overlapwin races all four into the win.
+      const groups = h === "#overlapwin" ? puzzle.groups : puzzle.groups.slice(0, 3);
+      for (const g of groups) {
+        select(g.members);
+        await submitGuess();
+        await delay(360);
+      }
+    })();
+  }, []);
+
   return (
     <section className="w-full max-w-[940px] px-4">
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -957,6 +997,13 @@ function Simulate() {
           onClick={() => void simulateSolve()}
         >
           Simulate solve
+        </button>
+        <button
+          className={SIMBTN}
+          disabled={running}
+          onClick={() => void simulateOverlap()}
+        >
+          Solve all (overlap)
         </button>
         <button
           className={SIMBTN}
@@ -1180,6 +1227,8 @@ const known = [
   "blocked",
   "simulate",
   "feedback",
+  "overlap",
+  "overlapwin",
   "chat",
   "card",
   "pip",
@@ -1200,7 +1249,11 @@ const known = [
 // #simulate and #feedback both isolate the Simulate playground (#feedback also
 // auto-fires a one-away guess to surface the header feedback pill); #card isolates the
 // Discord "who's playing" card; #pip isolates the collapsed PIP thumbnail.
-const onlySim = pick === "simulate" || pick === "feedback";
+const onlySim =
+  pick === "simulate" ||
+  pick === "feedback" ||
+  pick === "overlap" ||
+  pick === "overlapwin";
 const onlyCard = pick === "card";
 const onlyPip = pick === "pip";
 // #scope isolates the roster panel that carries the Channel/Server toggle; #recap
@@ -1360,6 +1413,36 @@ const PREV_RANKS: Record<string, number> = {
   "p-mei": 6,
 };
 
+// Same idea against ALLTIME's order (aria 1, jun 2, theo 3, mei 4, diego 5): aria climbed
+// (▲2), jun slipped (▼1), theo up (▲1), mei up (▲1), diego dropped (▼3).
+const ALLTIME_PREV_RANKS: Record<string, number> = {
+  "p-jun": 1,
+  "p-diego": 2,
+  "p-aria": 3,
+  "p-theo": 4,
+  "p-mei": 5,
+};
+
+// Preview-only: the Roster's Season / All-time tabs read their position-change baseline from
+// localStorage (resolveBaseline in standings-snapshot.ts), which on a first visit just captures
+// the current ranks → every delta is 0 → no arrows. To exercise the real snapshot + flash path
+// visually, seed today's baseline with the prior-visit ranks above so the tabs render live deltas
+// (and flash them on open / scroll, just like in a room). Keyed exactly as the Roster keys it:
+// `<roomKey>:<scope ?? "x">:<view>`, with PREVIEW_ROOM / no scope.
+const PREVIEW_ROOM = "preview";
+const PREVIEW_TODAY = "2026-06-30";
+try {
+  const seed = (view: string, ranks: Record<string, number>) =>
+    localStorage.setItem(
+      `connections:standingsRank:${PREVIEW_ROOM}:x:${view}`,
+      JSON.stringify({ date: PREVIEW_TODAY, ranks }),
+    );
+  seed("season", PREV_RANKS);
+  seed("all", ALLTIME_PREV_RANKS);
+} catch {
+  /* storage blocked — the tabs just show no arrows, same as a real first visit */
+}
+
 const STANDINGS = (
   // top-aligned (not centered) so switching tabs — which changes the list height —
   // never shifts the tab row, keeping the recorder's capture clip stable.
@@ -1370,16 +1453,23 @@ const STANDINGS = (
         selfId={SELF_ID}
         season={SEASON}
         allTime={ALLTIME}
+        roomKey={PREVIEW_ROOM}
+        today={PREVIEW_TODAY}
       />
     </div>
     {/* Direct LedgerBody with a fixed prevRanks so the position-change arrows render
-        deterministically (the Roster above keys off localStorage, so it shows none on a
-        first visit). */}
+        deterministically even if localStorage is unavailable (belt-and-braces alongside the
+        seeded Roster above). */}
     <div className="flex w-full max-w-[460px] flex-col">
       <div className="mb-3 px-1 text-xs font-semibold uppercase tracking-wide text-amber-400">
         Position changes (prevRanks fixture)
       </div>
-      <LedgerBody data={SEASON} selfId={SELF_ID} prevRanks={PREV_RANKS} />
+      <LedgerBody
+        data={SEASON}
+        selfId={SELF_ID}
+        prevRanks={PREV_RANKS}
+        flashScope="preview-season"
+      />
     </div>
   </div>
 );
@@ -1751,6 +1841,11 @@ const CANNED = [
   "Appreciate the detail, that really helps. On it.",
 ];
 
+// The dev the player sees answering in the playground — a real avatar rides each reply (the live
+// app resolves this from the responding dev's Discord identity), so the demo shows their pic, not
+// the Connections brand mark.
+const DEMO_DEV = { name: "Sam · dev", avatar: "https://cdn.discordapp.com/embed/avatars/3.png" };
+
 function ChatDemo() {
   const iso = (minAgo: number): string => new Date(Date.now() - minAgo * 60000).toISOString();
   let idSeq = 1000;
@@ -1764,13 +1859,19 @@ function ChatDemo() {
     const msgs: Record<number, ChatMessage[]> = {
       1: [
         { id: 101, sender: "user", text: "The timer resets when I reopen the activity on mobile — I lose my mistakes count.", created_at: iso(120) },
-        { id: 102, sender: "dev", text: "Thanks for flagging! That was a resume bug on relaunch — pushed a fix today. Should hold now.", created_at: iso(40) },
+        { id: 102, sender: "dev", author: DEMO_DEV, text: "Thanks for flagging! That was a resume bug on relaunch — pushed a fix today. Should hold now.", created_at: iso(40) },
       ],
       2: [{ id: 201, sender: "user", text: "Could we get a dark-mode toggle for the board?", created_at: iso(1440) }],
     };
     let r = 0;
     const reply = (id: number, sender: "user" | "dev", text: string): void => {
-      (msgs[id] ??= []).push({ id: nextId(), sender, text, created_at: new Date().toISOString() });
+      (msgs[id] ??= []).push({
+        id: nextId(),
+        sender,
+        ...(sender === "dev" ? { author: DEMO_DEV } : {}),
+        text,
+        created_at: new Date().toISOString(),
+      });
     };
     return {
       list: () => Promise.resolve({ tickets: [...tickets], unread: tickets.some((t) => t.unread), isDev: false }),
@@ -1849,14 +1950,14 @@ function ChatDemo() {
   return (
     <div className="flex w-full max-w-[1240px] flex-col items-center gap-8 px-4">
       <Panel label="Player inbox · desktop (compose + messages side by side)" width="w-[760px]">
-        <ChatPanel api={playerApi} />
+        <ChatPanel api={playerApi} me={{ name: "You", avatar: null }} />
       </Panel>
       <div className="flex w-full flex-wrap items-start justify-center gap-8">
         <Panel label="Player inbox · mobile (stacked)">
-          <ChatPanel api={playerApi} />
+          <ChatPanel api={playerApi} me={{ name: "You", avatar: null }} />
         </Panel>
         <Panel label="Dev inbox · open a ticket and reply">
-          <AdminInbox api={adminApi} />
+          <AdminInbox api={adminApi} me={{ name: "Dev", avatar: null }} />
         </Panel>
       </div>
     </div>

@@ -753,7 +753,24 @@ export function Board({
   // false for a rehydrated finished game (ended seeded true at construction), so reopening
   // a finished puzzle doesn't pop the breakdown every time.
   const freshFinish = useRef(false);
-  const busy = useRef<boolean>(false);
+  // How many solve animations are running right now. Solves no longer serialize —
+  // each runs concurrently (see submit) so a fast player can fire the next guess
+  // without waiting — but a couple of things still need to know one is in flight:
+  // shuffle stands down (it would fight the gather FLIP), and the end-screen
+  // transition waits for the count to hit zero so it doesn't fade the controls out
+  // over a still-gathering group.
+  const inFlight = useRef<number>(0);
+  // Levels currently "forming": solved and reserved a slot in the bar stack, but
+  // still gathering their winning tiles / cross-fading into the category bar. Maps
+  // level → its four words, which the slot renders as a tidy row until the bar
+  // takes over. Each solve reserves its OWN slot, so concurrent solves never
+  // contend for one (the whole reason overlap stays clean — see animateCorrect).
+  const forming = useRef<Map<number, string[]>>(new Map());
+  // Words animating out of the grid (a freshly-solved group, still popping in place
+  // before it's lifted into its slot). They hold the selected styling but go
+  // untappable, and they leave the live selection the moment they're locked so its
+  // 4-slot capacity reopens for the next pick.
+  const locked = useRef<Set<string>>(new Set());
   // word under the mouse, for the hover dim (mouse-only — see TILE_HOVER).
   const [hover, setHover] = useState<string | null>(null);
   // Transient guess feedback ("One away…", "Guessed…"): a chip that pops
@@ -830,15 +847,26 @@ export function Board({
     });
   }
 
-  function recordRects(): Map<string, DOMRect> {
-    const m = new Map<string, DOMRect>();
+  // FLIP measured in LAYOUT coordinates (offsetLeft/offsetTop), not screen rects.
+  // Two reasons, both load-bearing now that solves overlap:
+  //   • offsets ignore CSS transforms, so a tile that's mid-animation (or mid
+  //     press-pop) reports its settled layout slot, not its in-flight position —
+  //     a second solve measuring the board while the first is still sliding gets
+  //     clean numbers instead of garbage. This is what makes concurrent FLIPs safe.
+  //   • offsets are relative to boardRef (the positioned offsetParent), so the
+  //     desktop scale-to-fit transform on an ancestor cancels out: the delta and
+  //     the translate that inverts it live in the same pre-scale space.
+  // boardRef must stay `position: relative` for the offsetParent to be shared
+  // across the grid AND the solved stack (cross-container gather depends on it).
+  function recordRects(): Map<string, { left: number; top: number }> {
+    const m = new Map<string, { left: number; top: number }>();
     boardRef.current
       ?.querySelectorAll<HTMLElement>("[data-flip]")
-      .forEach((e) => m.set(e.dataset.flip!, e.getBoundingClientRect()));
+      .forEach((e) => m.set(e.dataset.flip!, { left: e.offsetLeft, top: e.offsetTop }));
     return m;
   }
   function playFlip(
-    prev: Map<string, DOMRect>,
+    prev: Map<string, { left: number; top: number }>,
     dur = 520,
     ease = GLIDE,
   ): Promise<unknown> {
@@ -848,9 +876,15 @@ export function Board({
       .forEach((e) => {
         const b = prev.get(e.dataset.flip!);
         if (!b) return;
-        const a = e.getBoundingClientRect();
-        const dx = b.left - a.left;
-        const dy = b.top - a.top;
+        // Fold in any translate the tile already carries from an overlapping FLIP
+        // still in flight, so the new tween picks up from where it visually IS
+        // rather than snapping to its layout box. Without this, a survivor caught
+        // in two solves' reflows (e.g. two correct guesses ~400ms apart) would jump
+        // a row. translate-only here; the press-pop is scale-only (no m41/m42).
+        const tr = getComputedStyle(e).transform;
+        const m = tr && tr !== "none" ? new DOMMatrixReadOnly(tr) : null;
+        const dx = b.left - e.offsetLeft + (m ? m.m41 : 0);
+        const dy = b.top - e.offsetTop + (m ? m.m42 : 0);
         if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
           proms.push(
             e.animate(
@@ -869,17 +903,31 @@ export function Board({
     gridRef.current?.querySelector<HTMLElement>(
       `[data-flip="${CSS.escape(w)}"]`,
     ) ?? null;
+  // Like tileByWord but board-scoped, so it still finds a winning tile once it's
+  // moved out of the grid into its forming slot in the solved stack.
+  const tileEl = (w: string): HTMLElement | null =>
+    boardRef.current?.querySelector<HTMLElement>(
+      `[data-flip="${CSS.escape(w)}"]`,
+    ) ?? null;
 
   function onTileClick(e: ReactMouseEvent<HTMLButtonElement>, w: string): void {
-    if (busy.current || game.status !== "playing") return;
-    // press pop via WAAPI; the re-render after toggle would clobber a CSS one.
+    // No busy gate: the board stays live during an animation so the next guess can
+    // be built in flight. Only a word currently leaving the board (a solved group
+    // mid-gather) is off-limits — tapping it would fold a vanishing tile into the
+    // next selection (it'd be dropped at submit anyway, since it's off the board).
+    if (game.status !== "playing" || locked.current.has(w)) return;
+    // Press pop via WAAPI (the re-render after toggle would clobber a CSS one).
+    // `composite: "add"` is load-bearing now that the board stays live mid-animation:
+    // if you tap a tile that's gliding through a gather/reflow, a plain (replace)
+    // scale would wipe its in-flight translate and snap it to its destination. Adding
+    // the scale on top of the running translate lets it keep sliding while it pops.
     e.currentTarget.animate(
       [
         { transform: "scale(1)" },
         { transform: "scale(0.9)" },
         { transform: "scale(1)" },
       ],
-      { duration: 150, easing: "ease-out" },
+      { duration: 150, easing: "ease-out", composite: "add" },
     );
     if (selected.current.has(w)) selected.current.delete(w);
     else {
@@ -890,14 +938,16 @@ export function Board({
     broadcast();
   }
   function clearSelection(): void {
-    if (busy.current) return;
+    // Safe at any time: it only empties the live selection (the leaving words live in
+    // `locked`, not here), so it works on the in-flight next pick too.
     selected.current.clear();
     rerender();
     broadcast();
   }
 
   function doShuffle(): void {
-    if (busy.current || game.status !== "playing") return;
+    // Stands down while a solve is gathering — its own FLIP would fight the gather's.
+    if (inFlight.current > 0 || game.status !== "playing") return;
     const prev = recordRects();
     remaining.current = shuffle(remaining.current);
     rerenderSync();
@@ -944,38 +994,57 @@ export function Board({
     );
   }
 
+  // A correct solve, self-contained so any number can run at once. The group
+  // reserves its OWN slot in the bar stack up front and gathers into it, so two
+  // solves in flight target different slots and never fight over shared space (the
+  // old version staged every gather in the grid's one top row, which is what made
+  // overlap impossible). All motion is one FLIP measured in layout coordinates, so
+  // a solve started while another is still sliding reads clean positions.
   async function animateCorrect(level: number, words: string[]): Promise<void> {
-    // 1) sequential pop
+    // Free the board for the next pick right away: drop the winning words from the
+    // live selection (reopening its 4-slot capacity) and mark them `locked` — they
+    // keep the selected styling and stay untappable for the beat they pop in place.
+    for (const w of words) {
+      locked.current.add(w);
+      selected.current.delete(w);
+    }
+    rerender();
+
+    // 1) sequential pop, in place in the grid
     await popTiles(words);
-    // 2) gather to top row
+
+    // 2) Reserve this group's slot and gather into it. One FLIP carries the whole
+    //    move: the winners lift from their scattered grid cells into a tidy row in
+    //    the reserved slot, the survivors settle into the now-smaller grid, and any
+    //    bars already above shift to make room. `forming` makes the slot render the
+    //    four words as a row until the bar takes over.
     const prev = recordRects();
-    reorderGather(words);
+    remaining.current = remaining.current.filter((w) => !words.includes(w));
+    forming.current.set(level, words);
+    solvedLevels.current.push(level);
+    for (const w of words) locked.current.delete(w); // off the grid now
     rerenderSync();
     await playFlip(prev, 520);
-    // hold the gathered correct row so the win registers before it morphs away
+
+    // hold the gathered row so the solve registers before it morphs to the bar
     await wait(300);
-    // 3) fade the top row, then morph the category bar in its place
-    const tiles = words.map(tileByWord).filter(Boolean) as HTMLElement[];
+
+    // 3) Fade the gathered tiles out, then reveal the category bar in the very same
+    //    slot — no move, the slot is already in place — popping it in.
+    const ftiles = words.map(tileEl).filter(Boolean) as HTMLElement[];
     await Promise.all(
-      tiles.map(
+      ftiles.map(
         (t) =>
           t.animate(
             [
               { opacity: 1, transform: "scale(1)" },
               { opacity: 0, transform: "scale(.9)" },
             ],
-            {
-              duration: 280,
-              easing: "ease-out",
-              fill: "forwards",
-            },
+            { duration: 280, easing: "ease-out", fill: "forwards" },
           ).finished,
       ),
     );
-    const prev2 = recordRects();
-    remaining.current = remaining.current.filter((w) => !words.includes(w));
-    solvedLevels.current.push(level);
-    selected.current.clear();
+    forming.current.delete(level);
     rerenderSync();
     const bar = solvedRef.current?.querySelector<HTMLElement>(
       `[data-flip="bar-${level}"]`,
@@ -985,12 +1054,8 @@ export function Board({
         { transform: "scale(.97)", opacity: 0.25 },
         { transform: "scale(1)", opacity: 1 },
       ],
-      {
-        duration: 300,
-        easing: GLIDE,
-      },
+      { duration: 300, easing: GLIDE },
     );
-    await playFlip(prev2, 360);
   }
 
   async function animateWrong(
@@ -1119,16 +1184,14 @@ export function Board({
     ).finished;
   }
 
-  async function submit(): Promise<void> {
-    if (
-      selected.current.size !== 4 ||
-      busy.current ||
-      game.status !== "playing"
-    )
-      return;
-    busy.current = true;
-    const words = [...selected.current];
-
+  // Evaluate one guess and play its animation. Fire-and-forget: the model is
+  // committed synchronously (so rapid-fire guesses stay correctly ordered and the
+  // win/loss is detected on the right one), then the animation runs concurrently
+  // with any others already in flight — no serialization, that's what lets a fast
+  // player keep firing. `inFlight` counts the gathering solves so the end screen
+  // can wait for them; a wrong-guess shake doesn't restructure the board, so it
+  // isn't counted.
+  async function runGuess(words: string[]): Promise<void> {
     game.selected = new Set(words);
     const result = game.submit();
 
@@ -1149,16 +1212,14 @@ export function Board({
 
     if (result.type === "duplicate") {
       flashHint("Guessed…");
-      busy.current = false;
       return;
     }
-    if (result.type === "noop") {
-      busy.current = false;
-      return;
-    }
+    if (result.type === "noop") return;
 
     if (result.type === "correct" || result.type === "win") {
+      inFlight.current++;
       await animateCorrect(game.levelOf(words[0])!, words);
+      inFlight.current--;
     } else {
       // oneaway | incorrect | lose: all wrong guesses shake
       const levels = words.map((w) => game.levelOf(w)!);
@@ -1167,13 +1228,24 @@ export function Board({
       const oneAway = Math.max(...Object.values(counts)) === 3;
       await animateWrong(words, oneAway);
     }
+    broadcast(); // this guess's outcome lands on the live roster
 
-    if (result.type === "win") await endGame(true);
-    else if (result.type === "lose") await endGame(false);
+    if (result.type === "win" || result.type === "lose") {
+      // Hold the end screen until every other in-flight solve has finished
+      // gathering, so the controls never fade out over a still-forming group.
+      while (inFlight.current > 0) await wait(16);
+      await endGame(result.type === "win");
+      broadcast();
+      onFinish();
+    }
+  }
 
-    busy.current = false;
-    broadcast();
-    if (game.status !== "playing") onFinish();
+  async function submit(): Promise<void> {
+    if (selected.current.size !== 4 || game.status !== "playing") return;
+    // No gating on an in-flight animation: fire this guess now and let it animate
+    // alongside any others. The selection is consumed per result inside the
+    // animation (a correct guess frees it; a wrong guess keeps it for tweaking).
+    await runGuess([...selected.current]);
   }
 
   const group = (lvl: number): Group =>
@@ -1189,13 +1261,37 @@ export function Board({
           so it holds even where :has isn't supported. */}
       <div
         className={
-          "flex flex-col" + (solvedLevels.current.length ? " gap-2" : "")
+          // `relative` makes this the shared offsetParent for every [data-flip]
+          // element in both the solved stack and the grid, so the layout-coordinate
+          // FLIP (recordRects/playFlip) reads one consistent space across them.
+          "relative flex flex-col" +
+          (solvedLevels.current.length ? " gap-2" : "")
         }
         ref={boardRef}
       >
         <div className="flex flex-col gap-2" ref={solvedRef}>
           {solvedLevels.current.map((lvl) => {
             const g = group(lvl);
+            // While this level is still gathering, its slot renders the four winning
+            // words as a tidy row (the tiles that just lifted out of the grid). It
+            // sits exactly where the category bar will, so the bar takes over in
+            // place with no further move. Takes precedence over the bar/spoiler
+            // branches below — it's the same box, just mid-animation.
+            if (forming.current.has(lvl)) {
+              return (
+                <div key={lvl} className="grid grid-cols-4 gap-2">
+                  {forming.current.get(lvl)!.map((w) => (
+                    <div key={w} data-flip={w} className={TILE + TILE_SELECTED}>
+                      <TileFace
+                        word={w}
+                        src={game.puzzle.images?.[w]}
+                        selected
+                      />
+                    </div>
+                  ))}
+                </div>
+              );
+            }
             // Spoiler-cover the category for: (a) the final group solved on a
             // win — hidden until tapped so you can still guess it (gated on
             // length 4 so the in-flight 3-solved window during the winning
@@ -1244,7 +1340,9 @@ export function Board({
         {showGrid && (
           <div className="grid grid-cols-4 gap-2" ref={gridRef}>
             {remaining.current.map((w) => {
-              const sel = selected.current.has(w);
+              // `locked` words have left the live selection but are still gathering/
+              // fading out, so they keep the selected look until they're gone.
+              const sel = selected.current.has(w) || locked.current.has(w);
               const lifted = hover === w;
               const palette = sel ? TILE_SELECTED : TILE_DEFAULT;
               return (

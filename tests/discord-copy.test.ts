@@ -34,6 +34,10 @@ describe("discord copy", () => {
       "share.load-failed",
       "share.mid-puzzle",
       "share.build-failed",
+      "reply-dm.heading",
+      "reply-dm.subject",
+      "reply-dm.subject-blank",
+      "reply-dm.footer",
       "unsupported",
       "button.play",
       "button.add-server",
@@ -59,5 +63,6 @@ describe("discord copy", () => {
     expect(COPY["share.mid-puzzle"]).toContain("{mistakes}");
     expect(COPY["recap.streak"]).toContain("{streak}");
     expect(COPY["recap.streak"]).toContain("{fires}");
+    expect(COPY["reply-dm.subject"]).toContain("{subject}");
   });
 });

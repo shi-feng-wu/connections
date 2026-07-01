@@ -1,4 +1,5 @@
 import {
+  ChevronLeft,
   ChevronRight,
   CircleHelp,
   Coffee,
@@ -288,6 +289,14 @@ function DetailView({
   chat?: ChatBundle;
 }): ReactNode {
   useScrollLock();
+  // A thread inside the Feedback/Inbox page hands its "back to the list" action up here so the
+  // button can sit in the page chrome, across from the close X. null on the list (or the other
+  // pages), so only the X shows. Wrapped because setState treats a bare function as an updater.
+  const [threadBack, setThreadBack] = useState<(() => void) | null>(null);
+  const liftBack = useCallback(
+    (fn: (() => void) | null) => setThreadBack(() => fn),
+    [],
+  );
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") onBack();
@@ -312,6 +321,19 @@ function DetailView({
       >
         <X size={18} strokeWidth={2.25} aria-hidden />
       </button>
+      {/* Back, pinned top-left across from the close X — only while a chat thread is open. Tapping
+        it returns to the list, which clears threadBack and unmounts this button, so the same
+        CSS :hover-on-touch reasoning as the X holds (nothing to strand). */}
+      {threadBack && (
+        <button
+          type="button"
+          onClick={() => threadBack()}
+          aria-label="Back"
+          className="absolute left-4 top-[max(1rem,var(--sait))] z-10 grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] bg-white/[0.05] text-zinc-400 transition-colors hover:bg-white/[0.09] hover:text-zinc-200 min-[800px]:left-5 min-[800px]:top-5"
+        >
+          <ChevronLeft size={18} strokeWidth={2.25} aria-hidden />
+        </button>
+      )}
       {/* Content top padding clears the close button AND the same safe area (pt-14 + --sait),
         so the title never tucks under Discord's mobile header either. */}
       <div className="scrollbar-thin h-full overflow-y-auto px-5 pt-[calc(3.5rem_+_var(--sait))] pb-[max(2rem,var(--saib))] min-[800px]:pt-16">
@@ -334,8 +356,10 @@ function DetailView({
           </header>
           {id === "faq" && <Faq />}
           {id === "changelog" && <Changelog />}
-          {id === "feedback" && <ChatPanel api={chat?.api} onUnread={chat?.onUnread} />}
-          {id === "inbox" && chat && <AdminInbox api={chat.api} />}
+          {id === "feedback" && (
+            <ChatPanel api={chat?.api} onUnread={chat?.onUnread} me={chat?.me} liftBack={liftBack} />
+          )}
+          {id === "inbox" && chat && <AdminInbox api={chat.api} me={chat.me} liftBack={liftBack} />}
         </div>
       </div>
     </div>,

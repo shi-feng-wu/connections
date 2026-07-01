@@ -14,6 +14,7 @@ create table if not exists public.scores (
   avatar      text,                          -- Discord avatar URL
   score       integer     not null default 0, -- Game.score
   mistakes    integer     not null default 0,
+  hints_used  smallint    not null default 0, -- hints revealed (each −hintPenalty on a win)
   solved      boolean     not null default false,
   duration_ms integer,
   created_at  timestamptz not null default now(),
@@ -24,6 +25,7 @@ create table if not exists public.scores (
 alter table public.scores add column if not exists puzzle_date date;
 alter table public.scores add column if not exists avatar      text;
 alter table public.scores add column if not exists score       integer not null default 0;
+alter table public.scores add column if not exists hints_used  smallint not null default 0;
 
 -- guild_id generalized to scope_id (guild or DM/group channel). Rename in place
 -- on older installs; existing guild ids stay valid as scope ids.
@@ -567,10 +569,13 @@ create table if not exists public.progress (
   user_id     text        not null,
   puzzle_date date        not null,
   guesses     jsonb       not null default '[]'::jsonb, -- ordered [[w,w,w,w], …]
+  hints       jsonb       not null default '[]'::jsonb, -- levels revealed, easiest-first (authoritative hint count)
   started_at  timestamptz not null default now(),       -- pinned on first insert
   updated_at  timestamptz not null default now(),
   primary key (user_id, puzzle_date)
 );
+-- Added after launch; bring older tables up to date.
+alter table public.progress add column if not exists hints jsonb not null default '[]'::jsonb;
 
 -- Read-through cache of the official NYT daily puzzle, one row per date. Backs
 -- api/_nyt.ts fetchPuzzle: the first request for a date fetches NYT and upserts here;
@@ -738,12 +743,13 @@ begin
     'scores', coalesce((
       select json_agg(json_build_object(
         'user_id', s.user_id, 'name', s.name, 'avatar', s.avatar, 'solved', s.solved,
-        'mistakes', s.mistakes, 'groups_solved', s.groups_solved, 'duration_ms', s.duration_ms))
+        'mistakes', s.mistakes, 'hints_used', s.hints_used,
+        'groups_solved', s.groups_solved, 'duration_ms', s.duration_ms))
       from public.scores s join ids on ids.user_id = s.user_id
       where s.puzzle_date = p_date), '[]'::json),
     'progress', coalesce((
       select json_agg(json_build_object(
-        'user_id', pr.user_id, 'guesses', pr.guesses,
+        'user_id', pr.user_id, 'guesses', pr.guesses, 'hints', pr.hints,
         'started_at', pr.started_at, 'updated_at', pr.updated_at))
       from public.progress pr join ids on ids.user_id = pr.user_id
       where pr.puzzle_date = p_date), '[]'::json),

@@ -152,11 +152,14 @@ const solveGroup = (g: Game, members: string[]): void => {
   g.submit();
 };
 
-// In progress: one group solved, two tiles selected.
+// In progress: one group solved, two tiles selected, two hints revealed — SALT
+// (unselected → whole tile in its group colour) and SOAK (selected → dark face,
+// coloured word), so both hint-tile treatments show.
 const playing = new Game(puzzle);
 solveGroup(playing, puzzle.groups[0].members);
 playing.toggle("SOAK");
 playing.toggle("SPINE");
+playing.hintedLevels = [1, 2];
 
 // Results · won (perfect): all four groups, no mistakes.
 const perfect = new Game(puzzle);

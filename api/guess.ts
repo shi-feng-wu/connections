@@ -85,14 +85,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     // Load the committed record and replay it for the current state.
     const { data } = await db
       .from('progress')
-      .select('guesses')
+      .select('guesses, hints')
       .eq('user_id', uid)
       .eq('puzzle_date', date)
       .maybeSingle();
     const committed: string[][] =
       data && Array.isArray(data.guesses) ? (data.guesses as string[][]) : [];
 
-    const game = Game.fromGuesses(puzzle, committed);
+    // Seed revealed hints so the broadcast delta (and thus a finishing player's
+    // live-recomputed score) reflects the −hintPenalty. Hints are recorded on their
+    // own path (api/hint); replaying them here only affects the reported count.
+    const game = Game.fromGuesses(puzzle, committed, undefined, data?.hints);
     if (game.status !== 'playing') {
       // Already finished today; nothing to add.
       res.status(200).json({ ok: true, done: game.status, state: snapshot(game) });
@@ -149,6 +152,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
           solvedCount: game.groupsSolved,
           solvedLevels: game.deducedLevels,
           mistakesLeft: game.mistakesLeft,
+          hintsUsed: game.hintsUsed,
           done,
           finishedAt: done ? Date.now() : null,
         };

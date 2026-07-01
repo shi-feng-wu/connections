@@ -1,7 +1,9 @@
 import {
+  Check,
   Clock,
   Copy,
   Eraser,
+  Lightbulb,
   Share,
   Share2,
   Shuffle as ShuffleIcon,
@@ -396,6 +398,13 @@ function EndSummary({
                 <BreakRow caption={won ? "Solved" : "Categories"} value={`+${b.completion}`} />
                 <BreakRow caption="Speed" value={won ? `+${b.speed}` : "+0"} />
                 <BreakRow caption="Mistakes" value={won ? `−${b.penalty}` : "−0"} neg />
+                {b.hints > 0 && (
+                  <BreakRow
+                    caption={`Hints (${b.hints})`}
+                    value={won ? `−${b.hintPenalty}` : "−0"}
+                    neg
+                  />
+                )}
                 <BreakRow
                   caption="Total"
                   value={`+${game.score.toLocaleString()}`}
@@ -723,6 +732,7 @@ export function Board({
   game,
   onPresence,
   onCommit,
+  onHint,
   onFinish,
   initialRevealed = [],
 }: {
@@ -732,6 +742,9 @@ export function Board({
   // block the reveal on a failed commit). Absent in standalone/practice play, where
   // the game is purely in-memory. See commit-then-reveal in submit().
   onCommit?: (guess: string[]) => Promise<boolean>;
+  // Record one revealed hint (its group level) to the authoritative record. Absent
+  // in standalone/practice, where the reveal is purely local. See doHint.
+  onHint?: (level: number) => void;
   onFinish: () => void;
   // seeds revealed-on-loss bars when rehydrating a finished game (preview harness).
   initialRevealed?: number[];
@@ -785,6 +798,9 @@ export function Board({
   // (a second "Guessed…") still replays the pop.
   const [hint, setHint] = useState<string | null>(null);
   const [hintN, setHintN] = useState(0);
+  // Hint reveals are visual only (the tile's colour dot); this sr-only line keeps the
+  // reveal announced to assistive tech without any on-screen chip.
+  const [hintSR, setHintSR] = useState("");
   const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
@@ -952,6 +968,26 @@ export function Board({
     remaining.current = shuffle(remaining.current);
     rerenderSync();
     void playFlip(prev, 480);
+  }
+
+  // Reveal one hint: the easiest unsolved group's colour, pinned to one of its words
+  // (NYT's mechanic — see Game.useHint). Optimistic like a guess: reveal now from the
+  // puzzle the client already holds, record the −hintPenalty server-side in the
+  // background (onHint). rerenderSync paints the tile's colour dot and refreshes the
+  // button's canHint state; a scale pop draws the eye (no visible chip — the dot is the
+  // reveal); an sr-only status announces it; broadcast() refreshes the self row's hint
+  // count so the live score reflects it.
+  function doHint(): void {
+    const h = game.useHint();
+    if (!h) return;
+    onHint?.(h.level);
+    rerenderSync();
+    tileByWord(h.word)?.animate(
+      [{ transform: "scale(1)" }, { transform: "scale(1.09)" }, { transform: "scale(1)" }],
+      { duration: 360, easing: SPRING },
+    );
+    setHintSR(`${h.word} is in the ${LEVELS[h.level].key} group`);
+    broadcast();
   }
 
   // gather reorder: selected to top row, displaced into vacated holes.
@@ -1253,6 +1289,15 @@ export function Board({
 
   const showGrid = !ended.current && remaining.current.length > 0;
 
+  // Revealed-hint marks: word → its group level, one per hinted group (the group's
+  // first member). Rebuilt each render from game.hintedLevels so it reflects a live
+  // reveal, a rehydrated day, and a group leaving the board on solve.
+  const hintWords = new Map<string, number>();
+  for (const lvl of game.hintedLevels) {
+    const grp = game.puzzle.groups.find((g) => g.level === lvl);
+    if (grp) hintWords.set(grp.members[0], lvl);
+  }
+
   return (
     <div className="flex flex-col gap-3">
       {/* gap above the grid only once a solved bar exists — an empty solved
@@ -1345,11 +1390,24 @@ export function Board({
               const sel = selected.current.has(w) || locked.current.has(w);
               const lifted = hover === w;
               const palette = sel ? TILE_SELECTED : TILE_DEFAULT;
+              // A revealed hint paints its word's whole tile in the group colour;
+              // once selected, the tile takes the normal dark face and the word
+              // carries the colour instead. Derived from game.hintedLevels
+              // (persisted + rehydrated), so the mark survives reopens and vanishes
+              // once its group is solved (the tile leaves the board).
+              const hintLevel = hintWords.get(w);
+              const hintStyle =
+                hintLevel === undefined
+                  ? undefined
+                  : sel
+                    ? { color: LEVELS[hintLevel].color }
+                    : { background: LEVELS[hintLevel].color };
               return (
                 <button
                   key={w}
                   data-flip={w}
                   className={TILE + palette + (lifted ? TILE_HOVER : "")}
+                  style={hintStyle}
                   onClick={(e) => onTileClick(e, w)}
                   // mouse-only so a touch tap never strands the tile dimmed
                   onPointerEnter={(e) => {
@@ -1396,7 +1454,9 @@ export function Board({
   // the fade-out, so its content alone wouldn't re-announce a repeated message.
   function renderControls() {
     return (
-      <div className="flex items-center gap-3">
+      // gap tightens below 360px so the fourth control (Hint) + Submit still fit the
+      // narrowest phones / shrunk viewports, where Submit also collapses to an icon.
+      <div className="flex items-center gap-3 max-[359px]:gap-2">
         <span
           className="inline-flex flex-none items-center gap-1.75"
           aria-label="Mistakes remaining"
@@ -1424,8 +1484,22 @@ export function Board({
           <span className="sr-only" role="status">
             {hint}
           </span>
+          <span className="sr-only" role="status" aria-live="polite">
+            {hintSR}
+          </span>
         </div>
         <div className="flex items-center gap-2">
+          <HoverButton
+            className={BTN_ICON}
+            hover="opacity-80"
+            onClick={doHint}
+            disabled={!game.canHint}
+            aria-label="Reveal a hint"
+            title="Reveal a hint (−30)"
+          >
+            <Lightbulb size={18} strokeWidth={2.5} aria-hidden />
+            <span className="sr-only">Reveal a hint</span>
+          </HoverButton>
           <HoverButton
             className={BTN_ICON}
             hover="opacity-80"
@@ -1448,13 +1522,23 @@ export function Board({
             <span className="sr-only">Deselect all</span>
           </HoverButton>
           <HoverButton
-            className={BTN_PRIMARY}
+            // Below 360px the four controls + a text Submit overflow, so Submit
+            // collapses to a square icon (a check) — the icon-only fallback the task
+            // called for. Above it, the labelled pill stays (it reads clearer).
+            className={BTN_PRIMARY + " max-[359px]:w-[42px] max-[359px]:px-0"}
             hover="opacity-85"
             onClick={() => void submit()}
             disabled={selected.current.size !== 4}
+            aria-label="Submit"
             title="Submit"
           >
-            Submit
+            <Check
+              size={19}
+              strokeWidth={2.75}
+              aria-hidden
+              className="hidden max-[359px]:block"
+            />
+            <span className="max-[359px]:hidden">Submit</span>
           </HoverButton>
         </div>
       </div>

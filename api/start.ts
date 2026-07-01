@@ -39,6 +39,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   let startedAt = Date.now();
   let updatedAt = startedAt;
   let guesses: string[][] = [];
+  let hints: number[] = [];
   const db = auth ? admin() : null;
   if (db && auth) {
     try {
@@ -49,12 +50,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       );
       const { data } = await db
         .from('progress')
-        .select('guesses, started_at, updated_at')
+        .select('guesses, hints, started_at, updated_at')
         .eq('user_id', auth.uid)
         .eq('puzzle_date', date)
         .maybeSingle();
       if (data) {
         if (Array.isArray(data.guesses)) guesses = data.guesses as string[][];
+        if (Array.isArray(data.hints)) hints = (data.hints as unknown[]).map(Number);
         const s = Date.parse(data.started_at as string);
         if (!Number.isNaN(s)) startedAt = s;
         const u = Date.parse(data.updated_at as string);
@@ -70,5 +72,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     startedAt,
     updatedAt,
     guesses,
+    // Revealed-hint levels, so the client restores hintsUsed (score) and re-shows
+    // the reveal it left. Empty on a fresh day / store miss.
+    hints,
   });
 }

@@ -55,6 +55,7 @@ beforeAll(async () => {
       id bigint generated always as identity primary key,
       scope_id text, channel_id text, user_id text not null, name text not null, avatar text,
       score int not null default 0, mistakes int not null default 0,
+      hints_used smallint not null default 0,
       solved boolean not null default false, groups_solved smallint not null default 0,
       duration_ms int, puzzle_date date, created_at timestamptz not null default now()
     );

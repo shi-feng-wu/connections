@@ -16,6 +16,7 @@ import {
   useState,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { APP_VERSION, CHANGELOG } from "./changelog";
@@ -279,16 +280,53 @@ function useScrollLock(): void {
   }, []);
 }
 
+// Desktop only: track the game card's on-screen box so the DetailView can size itself to the
+// gameplay area (header + board + footer + roster) instead of covering the whole window. Below
+// the desktop breakpoint the game already fills the viewport, so we return null and the overlay
+// stays full-screen. Re-measures on resize and when the board rescales (the card observes its own
+// size); the card stays mounted behind the (portaled) overlay, so its rect is always live.
+const DESKTOP_BP = 800;
+type Box = { top: number; left: number; width: number; height: number };
+function useCardBounds(cardRef?: RefObject<HTMLElement | null>): Box | null {
+  const [box, setBox] = useState<Box | null>(null);
+  useEffect(() => {
+    const el = cardRef?.current;
+    if (!el) return;
+    const measure = (): void => {
+      if (window.innerWidth < DESKTOP_BP) {
+        setBox(null);
+        return;
+      }
+      const r = el.getBoundingClientRect();
+      setBox({ top: r.top, left: r.left, width: r.width, height: r.height });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [cardRef]);
+  return box;
+}
+
 function DetailView({
   id,
   onBack,
   chat,
+  cardRef,
 }: {
   id: LinkId;
   onBack: () => void;
   chat?: ChatBundle;
+  cardRef?: RefObject<HTMLElement | null>;
 }): ReactNode {
   useScrollLock();
+  // Desktop: the card's box, so the overlay opens at the size/position of the game rather than
+  // full-screen. null on mobile (and until measured) → the overlay falls back to fixed inset-0.
+  const bounds = useCardBounds(cardRef);
   // A thread inside the Feedback/Inbox page hands its "back to the list" action up here so the
   // button can sit in the page chrome, across from the close X. null on the list (or the other
   // pages), so only the X shows. Wrapped because setState treats a bare function as an updater.
@@ -306,8 +344,29 @@ function DetailView({
   }, [onBack]);
 
   const m = META[id];
-  return createPortal(
-    <div className="fixed inset-0 z-50 animate-detail-in bg-zinc-950">
+  const content = (
+    <div
+      // Desktop: a fixed panel sized/positioned to the game card (bounds), with matching rounded
+      // corners so it reads as the game "flipping over" to this page. Mobile / pre-measure: the
+      // original full-screen screen (fixed inset-0). Positioned via top/left so `animate-detail-in`
+      // is free to use transform for its entrance slide. bg-black matches the app background
+      // (body is bg-black) so the panel blends in rather than reading as an off-tone layer.
+      className={
+        bounds
+          ? "fixed z-50 animate-detail-in overflow-hidden rounded-[14px] bg-black shadow-[0_28px_90px_rgba(0,0,0,0.6)]"
+          : "fixed inset-0 z-50 animate-detail-in bg-black"
+      }
+      style={
+        bounds
+          ? {
+              top: bounds.top,
+              left: bounds.left,
+              width: bounds.width,
+              height: bounds.height,
+            }
+          : undefined
+      }
+    >
       {/* Close, pinned top-right. We portal to <body>, OUTSIDE #app, so we don't inherit its
         pt-[max(0.75rem,--sait)] mobile-header clearance — pin the button below the safe area
         (floored at the original 1rem for desktop/dev where --sait is 0) so Discord's mobile
@@ -362,7 +421,24 @@ function DetailView({
           {id === "inbox" && chat && <AdminInbox api={chat.api} me={chat.me} liftBack={liftBack} />}
         </div>
       </div>
-    </div>,
+    </div>
+  );
+  // Desktop (card-sized): dim + blur the rest of the window behind the panel, and let a click on
+  // that backdrop close the page (as a modal would). Mobile keeps the full-screen screen with no
+  // scrim (there's nothing beside it to reveal).
+  return createPortal(
+    bounds ? (
+      <>
+        <div
+          className="fixed inset-0 z-40 animate-overlay-fade bg-black/50 backdrop-blur-[2px]"
+          onClick={onBack}
+          aria-hidden
+        />
+        {content}
+      </>
+    ) : (
+      content
+    ),
     document.body,
   );
 }
@@ -649,6 +725,9 @@ function LinkBar({
 export function useInfoLinks(
   chat?: ChatBundle,
   onOpenExternal?: (url: string) => void,
+  // The visible game card, so the desktop DetailView can open at the gameplay area's size/position
+  // rather than full-screen. Omitted (preview/landing) → the overlay falls back to full-screen.
+  cardRef?: RefObject<HTMLElement | null>,
 ): {
   footer: (className?: string) => ReactNode;
   overlays: ReactNode;
@@ -751,7 +830,9 @@ export function useInfoLinks(
             onClose={() => setMenuOpen(false)}
           />
         )}
-        {active && <DetailView id={active} onBack={closeDetail} chat={chat} />}
+        {active && (
+          <DetailView id={active} onBack={closeDetail} chat={chat} cardRef={cardRef} />
+        )}
       </>
     ),
   };

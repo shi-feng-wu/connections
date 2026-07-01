@@ -70,7 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const puzzle = await fetchPuzzle(session.date);
     const { data: progress } = await db
       .from('progress')
-      .select('guesses')
+      .select('guesses, hints')
       .eq('user_id', user.id)
       .eq('puzzle_date', session.date)
       .maybeSingle();
@@ -79,7 +79,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       res.status(200).json({ ok: false, reason: 'no-progress' });
       return;
     }
-    const game = Game.fromGuesses(puzzle, committed.slice(0, MAX_GUESSES));
+    // Hints come from the same append-only record (api/hint), NOT the request body,
+    // so the −hintPenalty per hint can't be dodged by posting a clean body.
+    const game = Game.fromGuesses(puzzle, committed.slice(0, MAX_GUESSES), undefined, progress?.hints);
     // Only a finished game scores. A still-playing record means the client posted
     // early; bail rather than writing (and locking, via ignoreDuplicates) a 0.
     if (game.status === 'playing') {
@@ -117,6 +119,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         avatar: user.avatar ?? null,
         score: game.score,
         mistakes: MAX_MISTAKES - game.mistakesLeft,
+        hints_used: game.hintsUsed,
         // groups deduced (0-4); drives the weekly strip's per-day segments,
         // a loss keeps however many the player cracked
         groups_solved: game.groupsSolved,

@@ -491,6 +491,7 @@ export function GameView({
   onAddBot,
   onPresence,
   onCommit,
+  onHint,
   onFinish,
   chat,
   onOpenExternal,
@@ -514,6 +515,8 @@ export function GameView({
   onAddBot?: () => void;
   onPresence: (snap: BoardSnapshot) => void;
   onCommit?: (guess: string[]) => Promise<boolean>;
+  // Record one revealed hint server-side (its group level). Absent in standalone/practice.
+  onHint?: (level: number) => void;
   onFinish: () => void;
   // The player↔dev chat (the footer's "Feedback" page): its bound api plus the unread/isDev
   // badge state. Omitted by the dev preview / landing, where the page falls back to a
@@ -543,6 +546,9 @@ export function GameView({
   const scaleRef = useRef<HTMLDivElement>(null);
   const footerRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
+  // The visible (rounded) card frame. Measured by the info-links overlay so its DetailView
+  // can size itself to the game's on-screen bounds instead of covering the whole window.
+  const cardRef = useRef<HTMLDivElement>(null);
   const {
     scale,
     height: boxHeight,
@@ -558,7 +564,7 @@ export function GameView({
   // under the game on desktop; a kebab (⋮) in the players-tab row → bottom sheet on
   // mobile. Both open the same full-screen DetailView (changelog / FAQ / feedback).
   // overlays (sheet + detail screen) portal to <body>.
-  const info = useInfoLinks(chat, onOpenExternal);
+  const info = useInfoLinks(chat, onOpenExternal, cardRef);
 
   return (
     // Mobile: the unit fills the viewport (#app content box = 100dvh − top safe-area
@@ -583,6 +589,7 @@ export function GameView({
           the divider). overflow-hidden rounds the corners. The width is set explicitly
           (board area + padding) so it doesn't collapse to content. */}
         <div
+          ref={cardRef}
           className="flex w-full min-w-0 flex-col min-[800px]:overflow-hidden min-[800px]:rounded-[14px]"
           style={boxWidth ? { width: boxWidth + FRAME_PAD * 2 } : undefined}
         >
@@ -630,6 +637,7 @@ export function GameView({
                     game={game}
                     onPresence={onPresence}
                     onCommit={onCommit}
+                    onHint={onHint}
                     onFinish={() => {
                       setView("live");
                       setDone(true);

@@ -37,10 +37,18 @@ type ScoreRow = {
   avatar: string | null;
   solved: boolean;
   mistakes: number;
+  // Optional: absent on pre-migration rows / older fixtures → treated as 0.
+  hints_used?: number;
   groups_solved: number;
   duration_ms: number | null;
 };
-type ProgressRow = { user_id: string; guesses: unknown; started_at: string | null; updated_at: string | null };
+type ProgressRow = {
+  user_id: string;
+  guesses: unknown;
+  hints?: unknown; // optional; absent → no hints (see fromGuesses)
+  started_at: string | null;
+  updated_at: string | null;
+};
 
 // The roster row the client consumes — structurally a PlayerState (src/realtime.ts),
 // declared locally so this serverless route never imports client-only code.
@@ -51,6 +59,7 @@ type RosterPlayer = {
   mistakesLeft: number;
   solvedCount: number;
   solvedLevels: number[];
+  hintsUsed: number;
   picking: false;
   done: 'won' | 'lost' | null;
   startedAt: number;
@@ -81,6 +90,7 @@ function synthFromScore(p: CardPlayer, s: ScoreRow, now: number, online: boolean
     // `count`. Exact for a winner (all four); a partial loss may paint the wrong
     // category colours on the mini-board (cosmetic, rare fallback only).
     solvedLevels: Array.from({ length: count }, (_, i) => i),
+    hintsUsed: Math.max(0, s.hints_used ?? 0),
     picking: false,
     done: s.solved ? 'won' : 'lost',
     // Frozen timer: roster.tsx elapsed = (finishedAt ?? now) - (startedAt || now) = dur.
@@ -130,7 +140,7 @@ export function assembleRoster(
     const startedAt = row?.started_at ? Date.parse(row.started_at) : NaN;
     if (!Number.isNaN(startedAt)) {
       const guesses = row && Array.isArray(row.guesses) ? (row.guesses as string[][]) : [];
-      const game = Game.fromGuesses(puzzle, guesses, startedAt);
+      const game = Game.fromGuesses(puzzle, guesses, startedAt, row?.hints);
       const done = game.status === 'playing' ? null : game.status;
       const finishedAt = done && row?.updated_at ? Date.parse(row.updated_at) : NaN;
       const solvedLevels = game.deducedLevels;
@@ -142,6 +152,7 @@ export function assembleRoster(
           mistakesLeft: game.mistakesLeft,
           solvedCount: solvedLevels.length,
           solvedLevels,
+          hintsUsed: game.hintsUsed,
           picking: false as const,
           done,
           startedAt,

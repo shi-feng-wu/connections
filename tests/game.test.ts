@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { Game, LEVELS, MAX_MISTAKES, SCORING, shuffle, type Puzzle } from "../src/game";
+import {
+  Game,
+  LEVELS,
+  MAX_MISTAKES,
+  SCORING,
+  finishedScore,
+  shuffle,
+  type Puzzle,
+} from "../src/game";
 
 // Fixed 16-word puzzle; word names encode their group, e.g. "A2" is in level 2.
 const puzzle: Puzzle = {
@@ -317,6 +325,86 @@ describe("Game · score", () => {
   });
 });
 
+describe("Game · hints", () => {
+  it("reveals the easiest unsolved group first, one word per group", () => {
+    const g = newGame();
+    expect(g.canHint).toBe(true);
+    expect(g.hintableLevel()).toBe(0);
+    // members[0] of level 0 is "A0" in the fixture.
+    expect(g.useHint()).toEqual({ level: 0, word: "A0" });
+    expect(g.hintsUsed).toBe(1);
+    // next hint escalates to the next-easiest group.
+    expect(g.hintableLevel()).toBe(1);
+    expect(g.useHint()).toEqual({ level: 1, word: "A1" });
+    expect(g.hintedLevels).toEqual([0, 1]);
+  });
+
+  it("skips groups already solved by deduction", () => {
+    const g = newGame();
+    guess(g, group(0)); // solve the easiest group outright
+    // level 0 is out, so the easiest *unsolved* hint is level 1.
+    expect(g.hintableLevel()).toBe(1);
+    expect(g.useHint()?.level).toBe(1);
+  });
+
+  it("stops offering hints once fewer than two groups remain unsolved", () => {
+    const g = newGame();
+    guess(g, group(0));
+    guess(g, group(1));
+    // two groups (2,3) unsolved → still hintable (the harder one).
+    expect(g.canHint).toBe(true);
+    expect(g.hintableLevel()).toBe(2);
+    guess(g, group(2)); // now only the forced last group remains
+    expect(g.canHint).toBe(false);
+    expect(g.useHint()).toBeNull();
+    expect(g.hintsUsed).toBe(0);
+  });
+
+  it("offers no hint once the game is over", () => {
+    const g = newGame();
+    for (const lvl of [0, 1, 2, 3]) guess(g, group(lvl));
+    expect(g.status).toBe("won");
+    expect(g.canHint).toBe(false);
+    expect(g.useHint()).toBeNull();
+  });
+
+  it("subtracts a flat penalty per hint on a win — same weight as a mistake", () => {
+    const g = newGame();
+    g.useHint(); // level 0
+    g.useHint(); // level 1
+    for (const lvl of [0, 1, 2, 3]) guess(g, group(lvl));
+    g.durationMs = 0; // full speed
+    expect(g.hintsUsed).toBe(2);
+    const b = g.scoreBreakdown;
+    expect(b.hints).toBe(2);
+    expect(b.hintPenalty).toBe(2 * SCORING.hintPenalty);
+    expect(SCORING.hintPenalty).toBe(SCORING.mistakePenalty);
+    // 500 − 60 = 440.
+    expect(g.score).toBe(SCORING.solveBase + SCORING.speedMax - 2 * SCORING.hintPenalty);
+  });
+
+  it("charges no hint penalty on a loss, but still reports the count", () => {
+    const g = newGame();
+    g.useHint(); // level 0
+    guess(g, group(0)); // one group solved
+    for (const w of FOUR_WRONG) if (g.status === "playing") guess(g, w);
+    expect(g.status).toBe("lost");
+    const b = g.scoreBreakdown;
+    expect(b.hints).toBe(1);
+    expect(b.hintPenalty).toBe(0);
+    expect(g.score).toBe(SCORING.completionPerGroupSq); // 1 group, no hint charge
+  });
+
+  it("finishedScore mirrors the class: hint penalty on a win, none on a loss", () => {
+    // won, fast+clean, 2 hints → 500 − 60.
+    expect(finishedScore("won", 4, MAX_MISTAKES, 0, 2)).toBe(
+      SCORING.solveBase + SCORING.speedMax - 2 * SCORING.hintPenalty,
+    );
+    // lost with hints → group credit only, hints ignored.
+    expect(finishedScore("lost", 2, 0, 0, 3)).toBe(SCORING.completionPerGroupSq * 4);
+  });
+});
+
 describe("Game · fromGuesses (replay / resume)", () => {
   it("rebuilds the exact state of an abandoned in-progress game", () => {
     const live = newGame();
@@ -375,6 +463,23 @@ describe("Game · fromGuesses (replay / resume)", () => {
     expect(g.status).toBe("playing");
     expect(g.history).toEqual([]);
     expect(g.board).toEqual(puzzle.layout);
+  });
+
+  it("restores revealed hints (count drives the score) and sanitizes junk", () => {
+    // The server replays guesses + hints to re-derive the authoritative score.
+    const g = Game.fromGuesses(
+      puzzle,
+      [group(0), group(1), group(2), group(3)],
+      1_000_000,
+      [1, 2, "x", 9, -1], // only 1 and 2 are valid levels
+    );
+    expect(g.status).toBe("won");
+    expect(g.hintedLevels).toEqual([1, 2]);
+    expect(g.hintsUsed).toBe(2);
+    expect(g.durationMs).toBeGreaterThan(0);
+    // 500 (fast win) − 2·hintPenalty carried through from the seeded hints.
+    g.durationMs = 0;
+    expect(g.score).toBe(SCORING.solveBase + SCORING.speedMax - 2 * SCORING.hintPenalty);
   });
 });
 

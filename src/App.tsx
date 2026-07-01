@@ -171,6 +171,8 @@ type StartInfo = {
   startedAt: number;
   updatedAt: number;
   guesses: string[][];
+  // Revealed-hint levels, to restore hintsUsed (score) and re-show the reveal.
+  hints: number[];
 };
 
 // Groups the player actually deduced, excluding the back-fill a loss adds to
@@ -324,6 +326,7 @@ export function App({
       mistakesLeft: g?.mistakesLeft ?? MAX_MISTAKES,
       solvedCount: solved.length,
       solvedLevels: solved,
+      hintsUsed: g?.hintsUsed ?? 0,
       picking: false,
       done: g ? (g.status === "playing" ? null : g.status) : null,
       startedAt: g?.startedAt ?? Date.now(),
@@ -344,6 +347,7 @@ export function App({
       mistakesLeft: snap.mistakesLeft,
       solvedCount: snap.solvedLevels.length,
       solvedLevels: snap.solvedLevels,
+      hintsUsed: g.hintsUsed,
       picking: snap.picking,
       done: snap.done,
       startedAt: g.startedAt,
@@ -590,6 +594,42 @@ export function App({
     return false;
   }
 
+  // Record one revealed hint to the authoritative daily record (see /api/hint), so the
+  // −hintPenalty can't be dropped by relaunching. The Board already revealed it optimistically
+  // (game.useHint, computed locally from the puzzle it holds), so this just persists the count;
+  // chained onto commitChain so it serializes with guess writes and no concurrent read-modify-
+  // write on the progress row loses a hint. No-op in practice/standalone (nothing to track).
+  function commitHint(level: number): void {
+    if (!isDailyRef.current || !authTicketRef.current) return;
+    const g = gameRef.current;
+    if (!g) return;
+    const date = g.puzzle.date;
+    commitChain.current = commitChain.current.then(() => sendHint(date, level)).then(
+      () => {},
+      () => {},
+    );
+  }
+
+  async function sendHint(date: string, level: number, attempt = 0): Promise<void> {
+    try {
+      const r = await fetch("/api/hint", {
+        method: "POST",
+        keepalive: true,
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ date, level }),
+      });
+      if (r.ok) return;
+    } catch {
+      /* network blip → retry */
+    }
+    // The reveal already happened; the record just needs to land. A couple of backed-off
+    // retries cover a transient blip (same policy as sendGuess), then give up.
+    if (attempt < 2) {
+      await new Promise((res) => setTimeout(res, 400 * (attempt + 1)));
+      return sendHint(date, level, attempt + 1);
+    }
+  }
+
   // (The room's live card is refreshed server-side from /api/guess on every counted guess — the
   // same authoritative event that drives the live roster — so there's no client-side refresh call.)
 
@@ -617,6 +657,7 @@ export function App({
         startedAt: typeof d.startedAt === "number" ? d.startedAt : Date.now(),
         updatedAt: typeof d.updatedAt === "number" ? d.updatedAt : Date.now(),
         guesses: Array.isArray(d.guesses) ? d.guesses : [],
+        hints: Array.isArray(d.hints) ? d.hints : [],
       };
     } catch {
       return null;
@@ -650,6 +691,7 @@ export function App({
         puzzle,
         start?.guesses ?? [],
         start?.startedAt,
+        start?.hints,
       );
       // Rehydrated finished game: stamp the duration the server scored (last guess
       // minus start) so the end-screen hero matches the locked score and stays
@@ -1269,6 +1311,7 @@ export function App({
         }
         onPresence={onPresence}
         onCommit={commitGuess}
+        onHint={commitHint}
         onFinish={onFinish}
         chat={chatBundle}
         onOpenExternal={openExternal}

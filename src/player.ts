@@ -12,6 +12,8 @@ export type PlayerState = {
   solvedCount: number;
   // Solved difficulty levels (0-3); roster paints each mini-board row its color.
   solvedLevels: number[];
+  // Hints revealed (−hintPenalty each on a win). Absent on older/local rows → 0.
+  hintsUsed?: number;
   // Tiles selected but not yet submitted. Still carried, but the roster ring now
   // reflects the live heartbeat (see `online`), not this.
   picking: boolean;

@@ -26,6 +26,8 @@ export type ScoreBreakdown = {
   speed: number; // time bonus, 0–speedMax (wins only)
   penalty: number; // points lost to mistakes (wins only)
   mistakes: number; // mistake count, for the tooltip's sub-label
+  hintPenalty: number; // points lost to hints revealed (wins only)
+  hints: number; // hint count, for the tooltip's sub-label
   total: number;
 };
 
@@ -66,10 +68,19 @@ export const MAX_MISTAKES = 4;
 // solve on record is 18.6s). speedGraceSec zeroes that unreachable head of the
 // curve, so a genuine speed-limit solve actually reaches 500 instead of stalling
 // at ~498. Past the grace, speed decays linearly to zero over speedTargetSec.
+//
+// Hint penalty: a revealed hint (one word's color, NYT-style) costs the SAME as a
+// mistake — the clean framing is "a hint is a mistake you can take without risking
+// your game, but it tells you less." Priced flat and equal to mistakePenalty so
+// the rule is one sentence; subtracted only on a win (a loss already floors low,
+// and hints are orthogonal to the spent mistakes). See Game.hintableLevel for the
+// easiest-unsolved-first mechanic that makes reaching the hardest anchor when
+// broadly stuck cost more (you pay for the easy groups on the way).
 export const SCORING = {
   solveBase: 400, // flat reward for solving the puzzle (wins) — finish + speed − penalty caps at 500
   completionPerGroupSq: 20, // loss credit = this × groupsSolved² (max 2² = 80)
   mistakePenalty: 30, // subtracted per mistake on a win (0–90 over 0–3 mistakes)
+  hintPenalty: 30, // subtracted per hint revealed on a win — same weight as a mistake
   speedMax: 100, // largest speed bonus on a win (full anywhere inside the grace)
   speedTargetSec: 600, // after the grace, speed decays linearly from full to zero over 10 min
   speedGraceSec: 20, // solves at/under this get full speed — the human floor (fastest real solve ≈ 18.6s)
@@ -98,6 +109,11 @@ export class Game {
   selected = new Set<string>();
   solved: Group[] = [];
   mistakesLeft = MAX_MISTAKES;
+  // Levels (0-3) the player has revealed a hint for — easiest-first, one per group
+  // (see hintableLevel). Its length is the hint count scoring penalizes; the array
+  // also drives the UI's "skip already-hinted" and the reveal that reappears on
+  // relaunch. Seeded by fromGuesses so a server replay and a client rehydrate agree.
+  hintedLevels: number[] = [];
   status: 'playing' | 'won' | 'lost' = 'playing';
   history: number[][] = [];
   // words per guess (parallel to history); server replays these to score, since
@@ -123,9 +139,22 @@ export class Game {
   // intact) instead of resetting to a fresh board and handing out infinite tries.
   // Malformed rows and anything after the game ends are skipped, mirroring live
   // play. Pass startedAt so a replay that finishes stamps a real duration.
-  static fromGuesses(puzzle: Puzzle, guesses: unknown, startedAt?: number): Game {
+  static fromGuesses(
+    puzzle: Puzzle,
+    guesses: unknown,
+    startedAt?: number,
+    hintedLevels?: unknown,
+  ): Game {
     const game = new Game(puzzle);
     if (startedAt != null) game.startedAt = startedAt;
+    // Restore revealed hints (the count is what scoring penalizes). Sanitized to
+    // valid levels; the write path already dedupes one-per-group, so length is the
+    // honest hint count.
+    if (Array.isArray(hintedLevels)) {
+      game.hintedLevels = hintedLevels
+        .map(Number)
+        .filter((l) => Number.isInteger(l) && l >= 0 && l <= 3);
+    }
     if (Array.isArray(guesses)) {
       for (const guess of guesses) {
         if (game.status !== 'playing') break;
@@ -141,6 +170,42 @@ export class Game {
   // difficulty level (0-3) of a word, or undefined if not on this board.
   levelOf(word: string): number | undefined {
     return this.wordLevel.get(word);
+  }
+
+  // Hints revealed so far (the count scoring penalizes, −hintPenalty each on a win).
+  get hintsUsed(): number {
+    return this.hintedLevels.length;
+  }
+
+  // The next group a hint would reveal, or null when none is available. NYT's
+  // mechanic: the EASIEST (lowest-level) UNSOLVED group first, one reveal per group
+  // (skip already-hinted), and only while ≥2 groups are still unsolved — once three
+  // are out the last four words are forced, so a hint there would reveal nothing.
+  // Deterministic, so the client (optimistic reveal) and the server (/api/hint,
+  // authoritative record) always land on the same level and word.
+  hintableLevel(): number | null {
+    if (this.status !== 'playing') return null;
+    const solved = new Set(this.solved.map((s) => s.level));
+    const unsolved = [0, 1, 2, 3].filter((l) => !solved.has(l));
+    if (unsolved.length < 2) return null;
+    return unsolved.find((l) => !this.hintedLevels.includes(l)) ?? null;
+  }
+
+  // Whether a hint is offerable right now — drives the Hint button's enabled state.
+  get canHint(): boolean {
+    return this.hintableLevel() !== null;
+  }
+
+  // Reveal the next hint: record its level and return it with a representative word
+  // — the group's first member, deterministic so a relaunch shows the same word and
+  // the server only records the level (never a word choice to sync). null when no
+  // hint is available (see hintableLevel).
+  useHint(): { level: number; word: string } | null {
+    const level = this.hintableLevel();
+    if (level === null) return null;
+    this.hintedLevels.push(level);
+    const group = this.puzzle.groups.find((g) => g.level === level)!;
+    return { level, word: group.members[0] };
   }
 
   toggle(word: string): void {
@@ -248,16 +313,19 @@ export class Game {
   // see the SCORING note above). `total` clamps at 0 and equals `score`.
   get scoreBreakdown(): ScoreBreakdown {
     const mistakes = MAX_MISTAKES - this.mistakesLeft;
+    const hints = this.hintsUsed;
     if (this.status !== 'won') {
-      // playing → 0; lost → convex partial credit for groups reached.
+      // playing → 0; lost → convex partial credit for groups reached. No hint
+      // penalty on a loss (it already floors low; hints only shave a win).
       const g = this.status === 'lost' ? this.groupsSolved : 0;
       const completion = SCORING.completionPerGroupSq * g * g;
-      return { completion, speed: 0, penalty: 0, mistakes, total: completion };
+      return { completion, speed: 0, penalty: 0, mistakes, hintPenalty: 0, hints, total: completion };
     }
     const speed = speedBonus(this.durationMs ?? 0);
     const penalty = SCORING.mistakePenalty * mistakes;
-    const total = Math.max(0, SCORING.solveBase + speed - penalty);
-    return { completion: SCORING.solveBase, speed, penalty, mistakes, total };
+    const hintPenalty = SCORING.hintPenalty * hints;
+    const total = Math.max(0, SCORING.solveBase + speed - penalty - hintPenalty);
+    return { completion: SCORING.solveBase, speed, penalty, mistakes, hintPenalty, hints, total };
   }
 
   // 0 while playing. Wins reward fewer mistakes + speed; losses get convex
@@ -281,8 +349,10 @@ export function finishedScore(
   groupsSolved: number,
   mistakesLeft: number,
   durationMs: number,
+  hintsUsed = 0,
 ): number {
   if (done === 'lost') return SCORING.completionPerGroupSq * groupsSolved * groupsSolved;
   const penalty = SCORING.mistakePenalty * (MAX_MISTAKES - mistakesLeft);
-  return Math.max(0, SCORING.solveBase + speedBonus(durationMs) - penalty);
+  const hintPenalty = SCORING.hintPenalty * hintsUsed;
+  return Math.max(0, SCORING.solveBase + speedBonus(durationMs) - penalty - hintPenalty);
 }

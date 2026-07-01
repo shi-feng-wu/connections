@@ -67,7 +67,7 @@ const fmtElapsed = (p: PlayerState, now: number): string => {
 
 // Finished runs only — their elapsed is frozen (finishedAt − startedAt), so no `now`.
 const scoreOf = (p: PlayerState): number =>
-  p.done ? finishedScore(p.done, p.solvedCount, p.mistakesLeft, elapsedMs(p, 0)) : 0;
+  p.done ? finishedScore(p.done, p.solvedCount, p.mistakesLeft, elapsedMs(p, 0), p.hintsUsed ?? 0) : 0;
 
 // Points a live run has already BANKED — the score of busting right now, i.e. the
 // loss partial credit for groups solved. It only ever grows (a solve adds, nothing

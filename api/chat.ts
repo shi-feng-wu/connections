@@ -4,6 +4,7 @@ import { bearerToken, fetchDiscordUser, type DiscordUser } from './_discord.js';
 import { sendReplyDM } from './_dm.js';
 import { isCategory, postFeedbackWebhook } from './_feedback.js';
 import { todayET } from './_nyt.js';
+import { broadcastRoom } from './_realtime.js';
 import { isLocalDev, verifyAuth } from './_session.js';
 
 // Player ↔ dev feedback threads — a support-ticket model. Each note a player sends opens its own
@@ -12,6 +13,8 @@ import { isLocalDev, verifyAuth } from './_session.js';
 //
 //   GET                         a player lists THEIR tickets (id, tag, preview, unread). Cheap:
 //                               gated on the signed auth ticket (verifyAuth → uid), no Discord call.
+//                               Whole conversations ride along (budgeted — see inlineMessages) so
+//                               the client renders a clicked thread instantly, no fetch.
 //   POST {op:'open', threadId}  load one of the player's tickets + mark it read (ownership checked).
 //   POST {op:'new', …}          open a new ticket (authoritative Discord identity, like /api/score).
 //   POST {op:'reply', threadId} add to one of the player's tickets (identity + ownership checked).
@@ -25,6 +28,7 @@ const MAX_LEN = 2000; // Discord embed description limit; the thread mirrors to 
 const MAX_MESSAGES = 500; // a ticket never needs to render more than this at once
 const SUBJECT_LEN = 140; // player-written title kept on the ticket for the inbox row titles
 const PREVIEW_LEN = 160; // latest message, truncated — the line under each inbox title
+const LIST_MSG_BUDGET = 400; // total messages inlined across one inbox list response
 
 function devIds(): string[] {
   return (process.env.DEV_DISCORD_IDS ?? '')
@@ -33,6 +37,14 @@ function devIds(): string[] {
     .filter(Boolean);
 }
 const isDevId = (id: string): boolean => devIds().includes(id);
+
+// Poke the other side's personal relay room (u:<uid>) so their client refreshes live — the badge
+// lights and an open thread updates without a poll. Contentless (just the threadId): the client
+// re-reads over its own authenticated call, so nothing private rides the relay. Best-effort, like
+// every relay push — a miss just means they see it on their next list.
+async function pokeChat(userIds: string[], threadId: number): Promise<void> {
+  await Promise.all(userIds.map((id) => broadcastRoom(`u:${id}`, 'chat', { threadId })));
+}
 
 // Local dev only (vercel dev + a plain browser, no Discord handshake): a stub identity so the inbox
 // is usable at localhost without embedding. Every use is behind isLocalDev(), which is false on any
@@ -112,6 +124,48 @@ async function avatarsByUser(db: Db, ids: string[]): Promise<Map<string, string>
   return byUser;
 }
 
+// Inline whole conversations into an inbox list response, so the client can render a thread the
+// instant its row is clicked — no per-thread fetch, no "Loading…" flash. Bounded by a total message
+// budget using each thread's denormalized msg_count: threads are considered newest-first, and one
+// that would blow the budget is skipped (not a break) so later small threads still ride along. A
+// thread that doesn't fit (or a legacy row with no count) simply omits `messages` and loads the
+// old way on open. Returns threadId → messages in the same shape readThread serves.
+async function inlineMessages(db: Db, threads: ThreadRow[]): Promise<Map<number, object[]>> {
+  const ids: number[] = [];
+  let used = 0;
+  for (const t of threads) {
+    if (!t.msg_count || used + t.msg_count > LIST_MSG_BUDGET) continue;
+    used += t.msg_count;
+    ids.push(t.id);
+  }
+  const byThread = new Map<number, object[]>();
+  if (ids.length === 0) return byThread;
+  const { data } = await db
+    .from('chat_messages')
+    .select('id, thread_id, sender, text, created_at, author_id, author_name')
+    .in('thread_id', ids)
+    .order('created_at', { ascending: true })
+    .limit(LIST_MSG_BUDGET * 2);
+  const rows = (data as (MessageRow & { thread_id: number })[] | null) ?? [];
+  // Hitting the query cap means a drifted msg_count let more rows through than budgeted, and the
+  // last thread may be cut mid-conversation. Serving a partial thread as if complete is worse than
+  // the fetch-on-open fallback, so inline nothing.
+  if (rows.length >= LIST_MSG_BUDGET * 2) return byThread;
+  const avatars = await avatarsByUser(db, [...new Set(rows.map((m) => m.author_id))]);
+  for (const m of rows) {
+    let list = byThread.get(m.thread_id);
+    if (!list) byThread.set(m.thread_id, (list = []));
+    list.push({
+      id: m.id,
+      sender: m.sender,
+      text: m.text,
+      created_at: m.created_at,
+      author: { name: m.author_name, avatar: avatars.get(m.author_id) ?? null },
+    });
+  }
+  return byThread;
+}
+
 // The player's most recent message in a ticket — the note a dev reply is answering. Quoted into
 // the DM as context. null when the player has somehow never written (shouldn't happen for a real
 // ticket, which always opens with a player note).
@@ -168,11 +222,12 @@ async function listTickets(req: VercelRequest, res: VercelResponse): Promise<voi
   }
   const { data } = await db
     .from('chat_threads')
-    .select('id, category, subject, last_message_at, last_sender, last_text, user_last_read_at, dev_last_read_at')
+    .select('id, category, subject, last_message_at, last_sender, last_text, user_last_read_at, dev_last_read_at, msg_count')
     .eq('user_id', auth.uid)
     .order('last_message_at', { ascending: false })
     .limit(200);
   const rows = (data as ThreadRow[] | null) ?? [];
+  const inline = await inlineMessages(db, rows);
   const tickets = rows.map((t) => ({
     id: t.id,
     category: t.category,
@@ -181,6 +236,7 @@ async function listTickets(req: VercelRequest, res: VercelResponse): Promise<voi
     lastMessageAt: t.last_message_at,
     lastSender: t.last_sender,
     unread: playerUnread(t),
+    messages: inline.get(t.id), // undefined (over budget) drops out of the JSON → fetch on open
   }));
   res.status(200).json({
     tickets,
@@ -269,6 +325,7 @@ async function post(req: VercelRequest, res: VercelResponse): Promise<void> {
       })
       .eq('id', threadId);
     await mirror(thread, user, text, 'in');
+    await pokeChat(devIds(), threadId); // a live dev sees the reply land in their inbox
     res.status(200).json({ ok: true, messages: await readMessages(db, threadId) });
     return;
   }
@@ -313,6 +370,7 @@ async function post(req: VercelRequest, res: VercelResponse): Promise<void> {
     category,
     puzzle,
   });
+  await pokeChat(devIds(), threadId); // a live dev sees the new ticket land in their inbox
   res.status(200).json({ ok: true, threadId, messages: await readMessages(db, threadId) });
 }
 
@@ -333,10 +391,12 @@ async function adminAction(req: VercelRequest, res: VercelResponse): Promise<voi
   if (body.admin === 'inbox') {
     const { data } = await db
       .from('chat_threads')
-      .select('id, user_id, name, avatar, category, subject, last_message_at, last_sender, last_text, dev_last_read_at')
+      .select('id, user_id, name, avatar, category, subject, last_message_at, last_sender, last_text, dev_last_read_at, msg_count')
       .order('last_message_at', { ascending: false })
       .limit(300);
-    const tickets = ((data as ThreadRow[] | null) ?? []).map((t) => ({
+    const rows = (data as ThreadRow[] | null) ?? [];
+    const inline = await inlineMessages(db, rows);
+    const tickets = rows.map((t) => ({
       threadId: t.id,
       userId: t.user_id,
       name: t.name,
@@ -347,6 +407,7 @@ async function adminAction(req: VercelRequest, res: VercelResponse): Promise<voi
       lastMessageAt: t.last_message_at,
       lastSender: t.last_sender,
       unread: devUnread(t),
+      messages: inline.get(t.id), // undefined (over budget) drops out of the JSON → fetch on open
     }));
     res.status(200).json({ tickets });
     return;
@@ -420,6 +481,7 @@ async function adminAction(req: VercelRequest, res: VercelResponse): Promise<voi
       replyText: text,
       contextText: await lastUserText(db, threadId),
     });
+    await pokeChat([thread.user_id], threadId); // their badge/open thread updates live
     res.status(200).json({ ok: true, messages: await readMessages(db, threadId) });
     return;
   }

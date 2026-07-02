@@ -30,6 +30,9 @@ export type ChatTicket = {
   lastMessageAt: string;
   lastSender: 'user' | 'dev';
   unread: boolean; // an unread reply from us
+  // The whole conversation, inlined by the server (budgeted) so clicking the row renders the
+  // thread instantly. Absent for a thread that didn't fit the budget → fetched on open.
+  messages?: ChatMessage[];
 };
 
 export type ChatList = {
@@ -50,6 +53,8 @@ export type InboxTicket = {
   lastMessageAt: string;
   lastSender: 'user' | 'dev';
   unread: boolean; // a new player message we haven't read
+  // The whole conversation, inlined by the server (budgeted) — same contract as ChatTicket.
+  messages?: ChatMessage[];
 };
 
 export type TicketView = { messages: ChatMessage[]; category: string | null; subject: string | null };
@@ -82,6 +87,9 @@ export type ChatBundle = {
   isDev: boolean; // surface the admin Inbox entry
   onUnread: (unread: boolean) => void; // the player read/added tickets → resync App's badge
   me: ChatIdentity; // the current Discord user, for their own avatar in chat threads
+  // Bumped by App whenever a relay chat poke (or its own list refresh) lands — an open chat
+  // surface re-reads on the bump, so replies appear live without a poll.
+  version: number;
 };
 
 async function postJson<T>(body: object, headers: Record<string, string> = {}): Promise<T | null> {

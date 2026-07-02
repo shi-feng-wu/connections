@@ -1,5 +1,5 @@
 import { Common, DiscordSDK, RPCCloseCodes } from "@discord/embedded-app-sdk";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BoardSnapshot } from "./board";
 import {
   createTicket,
@@ -399,8 +399,11 @@ export function App({
   const [botInstalled, setBotInstalled] = useState<boolean | null>(null);
   // Player↔dev chat badge state, loaded after the handshake: whether a reply is waiting (the
   // dot on the Feedback entry) and whether this player is a dev (surfaces the admin Inbox).
+  // chatVersion bumps whenever a fresh list lands (a relay chat poke, tab-focus, launch) — an
+  // open Feedback page / dev Inbox re-reads on the bump, so replies appear live.
   const [chatUnread, setChatUnread] = useState(false);
   const [chatIsDev, setChatIsDev] = useState(false);
+  const [chatVersion, setChatVersion] = useState(0);
   // Midnight day-rollover veil (src/components.tsx DayTurnover): `resetting` drives the
   // overlay; the ref guards swapToNewDay so the precise timer and the 30s poll can't both
   // fire a swap; newDayDate is the date we're rolling into, shown on the veil; newDayNo is
@@ -1119,6 +1122,61 @@ export function App({
     participantCountRef.current = participantIds.size;
   }, [participantIds]);
 
+  // The player↔dev chat handlers, bound to this player's identity (refs) + the current puzzle.
+  // Stable, so the chat UI loads its inbox once on mount instead of refetching every render.
+  // Reads go through the cheap signed ticket; writes/admin actions through the live Discord token.
+  const chatApi = useMemo<ChatApi>(
+    () => ({
+      list: () => listChat(authTicketRef.current ?? ""),
+      open: (threadId) => openTicket(authTicketRef.current ?? "", threadId),
+      create: (text, category, subject) =>
+        createTicket({
+          accessToken: accessTokenRef.current ?? "",
+          text,
+          category,
+          subject,
+          puzzle: gameRef.current?.puzzle.id ?? null,
+        }),
+      reply: (threadId, text) =>
+        replyTicket(accessTokenRef.current ?? "", threadId, text),
+      admin: {
+        inbox: () => loadInbox(accessTokenRef.current ?? ""),
+        thread: (threadId) =>
+          loadAdminThread(accessTokenRef.current ?? "", threadId),
+        reply: (threadId, text) =>
+          sendAdminReply(accessTokenRef.current ?? "", threadId, text),
+        resetProgress: () => resetTodayProgress(accessTokenRef.current ?? ""),
+      },
+    }),
+    [],
+  );
+
+  // Re-pull the ticket list: primes the Feedback page caches (the list inlines whole
+  // conversations, so this pre-loads every thread too — no Loading screen on click), resyncs the
+  // unread dot, and bumps chatVersion so an open chat surface re-reads live.
+  const refreshChat = useCallback((): void => {
+    void chatApi.list().then((l) => {
+      if (!l) return;
+      primeTicketCache(l.tickets);
+      setChatUnread(l.unread);
+      setChatIsDev(l.isDev);
+      setChatVersion((v) => v + 1);
+    });
+  }, [chatApi]);
+
+  // Once the handshake is done, list tickets for the unread dot + the dev's Inbox entry, and
+  // re-check when the tab regains focus — the backstop behind the relay's live chat pokes below.
+  // Embedded only: preview/landing have no ticket and fall back to the local form.
+  useEffect(() => {
+    if ((!isEmbedded && !mockEmbedded) || phase !== "ready") return;
+    refreshChat();
+    const onVisible = (): void => {
+      if (!document.hidden) refreshChat();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [isEmbedded, mockEmbedded, phase, refreshChat]);
+
   // Join the room's Realtime channel once the daily is ready and we have identity. Fast path:
   // progress/join broadcasts merge instantly and Presence drives the online ring, with the poll
   // above demoted to a 5-minute backstop (plus a reconcile on every reconnect). connect() is
@@ -1136,13 +1194,22 @@ export function App({
     }
     void rl.connect({
       scope,
+      // My personal room rides the same stream — feedback-chat pokes land there.
+      personalScope: meRef.current.id ? `u:${meRef.current.id}` : undefined,
       ticket,
-      // On every reconnect, re-read the roster: the relay keeps no backlog, so deltas pushed while
-      // the stream was down (a blip, or a relay redeploy) are only recoverable this way.
+      // On every reconnect, re-read the roster and the chat list: the relay keeps no backlog, so
+      // anything pushed while the stream was down (a blip, or a relay redeploy) is only
+      // recoverable this way.
       handlers: {
         onDelta: applyDelta,
         onTiles: handleTiles,
-        onReconnect: () => void fetchServerRoster(),
+        // A reply landed in a thread of mine (or, as a dev, a player wrote in) — refresh live:
+        // the badge lights and an open Feedback page / Inbox re-reads, all without a poll.
+        onChat: () => refreshChat(),
+        onReconnect: () => {
+          void fetchServerRoster();
+          refreshChat();
+        },
       },
     });
   }, [phase, isEmbedded]);
@@ -1212,56 +1279,6 @@ export function App({
     }, 180_000);
     return () => clearInterval(id);
   }, [isEmbedded]);
-
-  // The player↔dev chat handlers, bound to this player's identity (refs) + the current puzzle.
-  // Stable, so the chat UI loads its inbox once on mount instead of refetching every render.
-  // Reads go through the cheap signed ticket; writes/admin actions through the live Discord token.
-  const chatApi = useMemo<ChatApi>(
-    () => ({
-      list: () => listChat(authTicketRef.current ?? ""),
-      open: (threadId) => openTicket(authTicketRef.current ?? "", threadId),
-      create: (text, category, subject) =>
-        createTicket({
-          accessToken: accessTokenRef.current ?? "",
-          text,
-          category,
-          subject,
-          puzzle: gameRef.current?.puzzle.id ?? null,
-        }),
-      reply: (threadId, text) =>
-        replyTicket(accessTokenRef.current ?? "", threadId, text),
-      admin: {
-        inbox: () => loadInbox(accessTokenRef.current ?? ""),
-        thread: (threadId) =>
-          loadAdminThread(accessTokenRef.current ?? "", threadId),
-        reply: (threadId, text) =>
-          sendAdminReply(accessTokenRef.current ?? "", threadId, text),
-        resetProgress: () => resetTodayProgress(accessTokenRef.current ?? ""),
-      },
-    }),
-    [],
-  );
-
-  // Once the handshake is done, list tickets for the unread dot + the dev's Inbox entry, and
-  // re-check when the tab regains focus (a reply may have landed while away). Embedded only:
-  // preview/landing have no ticket and fall back to the local form.
-  useEffect(() => {
-    if ((!isEmbedded && !mockEmbedded) || phase !== "ready") return;
-    const refresh = (): void => {
-      void chatApi.list().then((l) => {
-        if (!l) return;
-        primeTicketCache(l.tickets); // seed the Feedback page so its first open shows instantly
-        setChatUnread(l.unread);
-        setChatIsDev(l.isDev);
-      });
-    };
-    refresh();
-    const onVisible = (): void => {
-      if (!document.hidden) refresh();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [isEmbedded, mockEmbedded, phase, chatApi]);
 
   // Precise midnight-ET swap: a self-rescheduling one-shot timer fires at the exact reset
   // (+2s so NYT has published the new puzzle), then re-arms for the next day. swapToNewDay
@@ -1377,11 +1394,14 @@ export function App({
   // without kicking the player out. Available on every failure (each press is a user gesture,
   // so it can't loop); the sessionStorage counter rides the handshake-error beacon's r param to
   // measure how often the rescue works and how many presses it takes.
+  // The bust is a fresh PATH (/b/<nonce>, rewritten to index.html in vercel.json), matching the
+  // boot watchdog's recover(): Discord's proxy ignores the query string in its document cache
+  // key, so a ?param bust can re-serve the same stale HTML and waste the retry.
   const reloadForHandshake = (): void => {
     bumpHsRetry();
     try {
       const u = new URL(location.href);
-      u.searchParams.set("cxb", String(Date.now()));
+      u.pathname = `/b/${Date.now()}`;
       location.replace(u.href);
     } catch {
       location.reload();
@@ -1408,6 +1428,7 @@ export function App({
           isDev: chatIsDev,
           onUnread: setChatUnread,
           me: { name: meRef.current.name, avatar: meRef.current.avatar ?? null },
+          version: chatVersion,
         }
       : undefined;
   // Open an external URL (the footer's Ko-fi link). Embedded, it must go through the Discord

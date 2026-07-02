@@ -261,12 +261,13 @@ function ScoreCell({ v }: { v: number }) {
 // Shared column track on header + every row so they line up. The stat columns are
 // kept tight (and the gap snug) so the name column keeps real room in the ~418px
 // desktop rail — names stay readable instead of truncating to a couple of letters.
-// Phones get a 4-column track: Played and Avg ✗ drop out (hidden cells below) and
-// the gap tightens, otherwise the fixed columns swallow the name entirely at 360px.
+// Phones keep all five stat columns but squeezed to their content minimum (score/
+// streak/won shaved, Avg ✗ down to 26px, gap-1) — the extra column costs the name
+// only ~4px vs the old 4-column track, which matters at the 320px floor.
 // Rank leads in a 22px column; the position change is layered over it (RankCell), not
 // given a column of its own — which also realigns rank→name with the live roster.
 const LGRID =
-  "grid grid-cols-[22px_minmax(0,1fr)_62px_32px_48px] items-center gap-1.5 min-[800px]:grid-cols-[22px_minmax(0,1fr)_64px_44px_52px_32px] min-[800px]:gap-2";
+  "grid grid-cols-[22px_minmax(0,1fr)_54px_30px_38px_26px] items-center gap-1 min-[800px]:grid-cols-[22px_minmax(0,1fr)_64px_44px_52px_32px] min-[800px]:gap-2";
 
 type LedgerEntry = {
   id: string;
@@ -314,13 +315,16 @@ function LedgerRow({
         delta={e.delta}
         flashKey={flashScope ? `${flashScope}:${e.id}` : null}
       />
-      {/* pl-1 on mobile widens just the rank→avatar gap (matching the live roster);
-          the legend's "Player" label gets the same pad so they stay aligned. */}
-      <div className="flex min-w-0 items-center gap-2.5 pl-1 min-[800px]:pl-0">
+      {/* pl-1.5 on mobile widens just the rank→avatar gap (gap-1's 4px + 6px = the
+          10px the live roster has); the legend's "Player" label gets the same pad. */}
+      <div className="flex min-w-0 items-center gap-2.5 pl-1.5 min-[800px]:pl-0">
         <LeaderAvatar id={e.id} name={e.name} avatar={e.avatar} you={you} />
+        {/* No ellipsis: an overflowing name clips under a right-edge fade instead — the
+            "…" glyph cost ~2 characters of room on narrow phones. flex-1 keeps the span
+            full-width so short names end well before the fade zone and stay untouched. */}
         <span
           className={
-            "truncate text-[13.5px] " +
+            "min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[13.5px] [mask-image:linear-gradient(to_right,#000_calc(100%_-_12px),transparent)] " +
             (you ? "font-bold text-zinc-100" : "text-[#d4d4d8]")
           }
         >
@@ -337,8 +341,7 @@ function LedgerRow({
       <div className="text-right text-[13px] tabular-nums text-zinc-600">
         <span className="font-semibold text-zinc-300">{e.wins}</span>/{e.plays}
       </div>
-      {/* Avg ✗ is a desktop-only column (see LGRID) */}
-      <div className="hidden text-right text-[13px] tabular-nums text-zinc-400 min-[800px]:block">
+      <div className="text-right text-[13px] tabular-nums text-zinc-400">
         {Number(e.avg_mistakes).toFixed(1)}
       </div>
     </div>
@@ -442,7 +445,7 @@ export function LedgerBody({
         }
       >
         <span />
-        <span className="pl-1 text-left min-[800px]:pl-0">Player</span>
+        <span className="pl-1.5 text-left min-[800px]:pl-0">Player</span>
         <span className="text-right">Score</span>
         {/* the word doesn't fit the mobile streak column; the flame alone reads fine
             since every row pairs it with a count */}
@@ -451,8 +454,11 @@ export function LedgerBody({
           <span className="hidden min-[800px]:inline">Streak</span>
         </span>
         <span className="text-right">Won</span>
-        <span className="hidden items-center justify-end gap-0.5 min-[800px]:flex">
-          Avg <X size={9} strokeWidth={2.6} aria-hidden />
+        {/* "Avg" doesn't fit the mobile column; the ✗ alone reads fine next to Won,
+            mirroring the streak column's bare flame */}
+        <span className="flex items-center justify-end gap-0.5">
+          <span className="hidden min-[800px]:inline">Avg</span>
+          <X size={9} strokeWidth={2.6} aria-hidden />
         </span>
       </div>
     </>

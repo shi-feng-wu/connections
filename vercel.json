@@ -9,6 +9,7 @@
     { "path": "/api/interactions", "schedule": "* * * * *" },
     { "path": "/api/finalize-cards", "schedule": "*/2 * * * *" }
   ],
+  "rewrites": [{ "source": "/b/:nonce", "destination": "/index.html" }],
   "headers": [
     {
       "source": "/",
@@ -16,6 +17,10 @@
     },
     {
       "source": "/index.html",
+      "headers": [{ "key": "Cache-Control", "value": "no-store, max-age=0" }]
+    },
+    {
+      "source": "/b/(.*)",
       "headers": [{ "key": "Cache-Control", "value": "no-store, max-age=0" }]
     },
     {

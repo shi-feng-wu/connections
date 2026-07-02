@@ -17,6 +17,12 @@
   at the very top. Group everything that ships together into one release.
 -->
 
+## v1.14.2 — Jul 1, 2026
+
+### Changed
+
+- The leaderboard's average-mistakes column now shows on phones too.
+
 ## v1.14.1 — Jul 1, 2026
 
 ### Fixed

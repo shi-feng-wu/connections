@@ -432,9 +432,11 @@ function DetailView({
           {id === "faq" && <Faq />}
           {id === "changelog" && <Changelog />}
           {id === "feedback" && (
-            <ChatPanel api={chat?.api} onUnread={chat?.onUnread} me={chat?.me} liftBack={liftBack} />
+            <ChatPanel api={chat?.api} onUnread={chat?.onUnread} me={chat?.me} version={chat?.version} />
           )}
-          {id === "inbox" && chat && <AdminInbox api={chat.api} me={chat.me} liftBack={liftBack} />}
+          {id === "inbox" && chat && (
+            <AdminInbox api={chat.api} me={chat.me} liftBack={liftBack} version={chat.version} />
+          )}
         </div>
       </div>
     </div>

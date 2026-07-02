@@ -552,9 +552,11 @@ const RosterRow = memo(function RosterRow({
         picking={!you && (p.pickingWords?.length ?? 0) > 0}
       />
       <MiniBoard p={p} solved={!!ev?.solved} mistake={!!ev?.mistake} />
+      {/* No ellipsis: overflow clips under a right-edge fade (matches the leaderboard's
+          name cell) — the "…" glyph cost ~2 characters of room on narrow phones. */}
       <span
         className={
-          "min-w-0 flex-1 truncate text-[13px] " +
+          "min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[13px] [mask-image:linear-gradient(to_right,#000_calc(100%_-_12px),transparent)] " +
           (you ? "font-bold text-zinc-100" : "text-zinc-300")
         }
       >

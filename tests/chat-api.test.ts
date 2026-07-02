@@ -148,6 +148,14 @@ vi.mock("../api/_dm.js", () => ({
   },
 }));
 vi.mock("../api/_nyt.js", () => ({ todayET: () => "2026-06-26" }));
+// Record the relay pokes (contentless u:<uid> pushes) so we can assert who gets woken and that no
+// message content rides them.
+const pokes: { scope: string; event: string; payload: any }[] = [];
+vi.mock("../api/_realtime.js", () => ({
+  broadcastRoom: async (scope: string, event: string, payload: any) => {
+    pokes.push({ scope, event, payload });
+  },
+}));
 
 // Imported after the mocks are registered (vi.mock is hoisted, so this is fine).
 const { default: handler, devUnread, playerUnread } = await import("../api/chat");
@@ -196,6 +204,7 @@ beforeEach(() => {
   seq.chat_threads = 0;
   seq.chat_messages = 0;
   dmCalls.length = 0;
+  pokes.length = 0;
 });
 
 describe("api/chat — dev reset-progress (redo today)", () => {
@@ -387,6 +396,64 @@ describe("api/chat handler — full ticket lifecycle", () => {
     // Unauthenticated list → 401.
     const noAuth = await call("GET", {});
     expect(noAuth.statusCode).toBe(401);
+  });
+
+  it("inlines whole conversations into both inbox lists (so opening a chat needs no fetch)", async () => {
+    const created = await call("POST", {
+      body: { op: "new", accessToken: "p1", text: "first note", category: "Bug", subject: "S" },
+    });
+    const threadId = created.body.threadId as number;
+    await call("POST", { body: { admin: "reply", accessToken: "dev1", threadId, text: "our reply" } });
+
+    // The player's list carries the full thread, in order, with per-message authorship.
+    const list = await call("GET", { headers: { authorization: "Bearer p1" } });
+    expect(list.body.tickets[0].messages.map((m: any) => m.text)).toEqual(["first note", "our reply"]);
+    expect(list.body.tickets[0].messages[1]).toMatchObject({ sender: "dev", author: { name: "Name-dev1" } });
+
+    // The dev inbox carries it too.
+    const inbox = await call("POST", { body: { admin: "inbox", accessToken: "dev1" } });
+    expect(inbox.body.tickets[0].messages.map((m: any) => m.text)).toEqual(["first note", "our reply"]);
+  });
+
+  it("skips inlining a thread whose msg_count would blow the list budget", async () => {
+    const now = new Date().toISOString();
+    store.chat_threads.push({
+      id: ++seq.chat_threads,
+      user_id: "p1",
+      name: "Name-p1",
+      avatar: null,
+      category: "Bug",
+      subject: "huge",
+      puzzle_id: null,
+      last_message_at: now,
+      last_sender: "user",
+      last_text: "…",
+      user_last_read_at: now,
+      dev_last_read_at: null,
+      msg_count: 999, // > LIST_MSG_BUDGET → this thread loads the old way, on open
+    });
+    const list = await call("GET", { headers: { authorization: "Bearer p1" } });
+    expect(list.body.tickets).toHaveLength(1);
+    expect(list.body.tickets[0].messages).toBeUndefined();
+  });
+
+  it("pokes the right personal relay rooms, with no message content riding them", async () => {
+    // A new ticket wakes the dev's client…
+    const created = await call("POST", {
+      body: { op: "new", accessToken: "p1", text: "hello", category: "Bug", subject: "S" },
+    });
+    const threadId = created.body.threadId as number;
+    expect(pokes).toEqual([{ scope: "u:dev1", event: "chat", payload: { threadId } }]);
+
+    // …a dev reply wakes the ticket owner…
+    pokes.length = 0;
+    await call("POST", { body: { admin: "reply", accessToken: "dev1", threadId, text: "hi" } });
+    expect(pokes).toEqual([{ scope: "u:p1", event: "chat", payload: { threadId } }]);
+
+    // …and a player reply wakes the dev again. Never any text in the payload.
+    pokes.length = 0;
+    await call("POST", { body: { op: "reply", accessToken: "p1", threadId, text: "more" } });
+    expect(pokes).toEqual([{ scope: "u:dev1", event: "chat", payload: { threadId } }]);
   });
 
   it("predicate sanity: the denormalized row drives both badges", () => {

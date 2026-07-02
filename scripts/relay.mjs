@@ -12,6 +12,10 @@
 // Endpoints:
 //   GET  /sub?room=<scope>&ct=<ticket>   SSE stream of the room's deltas. Ticket in the QUERY
 //                                        because EventSource can't set headers. verifyAuth gates it.
+//                                        `room` may repeat — one stream can hold several rooms
+//                                        (the game room plus the caller's personal u:<uid> room,
+//                                        where feedback-chat pokes land). A u:<uid> room is only
+//                                        subscribable by its owner (uid must match the ticket).
 //   POST /pub  {room,event,payload}      Fan a delta out to a room.
 //                                          • header x-relay-secret == RELAY_SECRET  → trusted server
 //                                            push (progress/join from the Vercel API), payload trusted.
@@ -158,11 +162,17 @@ const server = createServer((req, res) => {
     return;
   }
 
-  // SSE subscribe — the long-lived stream each client holds open.
+  // SSE subscribe — the long-lived stream each client holds open (possibly for several rooms).
   if (req.method === 'GET' && url.pathname === '/sub') {
-    const scope = url.searchParams.get('room');
-    if (!scope || !verifyAuth(url.searchParams.get('ct'))) {
+    const scopes = [...new Set(url.searchParams.getAll('room'))];
+    const a = verifyAuth(url.searchParams.get('ct'));
+    if (scopes.length === 0 || !a) {
       json(res, 401, { error: 'unauthorized' });
+      return;
+    }
+    // A personal room (u:<uid>) carries that user's private pokes — only its owner may hold it.
+    if (scopes.some((s) => s.startsWith('u:') && s.slice(2) !== a.uid)) {
+      json(res, 403, { error: 'forbidden room' });
       return;
     }
     res.writeHead(200, {
@@ -174,8 +184,8 @@ const server = createServer((req, res) => {
     });
     res.write('retry: 3000\n\n'); // EventSource auto-reconnect backoff if the stream drops
     res.write(': connected\n\n');
-    const set = roomSet(scope);
-    set.add(res);
+    const sets = scopes.map((s) => roomSet(s));
+    for (const set of sets) set.add(res);
     // Heartbeat comment keeps idle intermediaries from closing the connection.
     const hb = setInterval(() => {
       try {
@@ -186,8 +196,10 @@ const server = createServer((req, res) => {
     }, 20000);
     req.on('close', () => {
       clearInterval(hb);
-      set.delete(res);
-      if (set.size === 0) rooms.delete(scope);
+      sets.forEach((set, i) => {
+        set.delete(res);
+        if (set.size === 0) rooms.delete(scopes[i]);
+      });
     });
     return;
   }

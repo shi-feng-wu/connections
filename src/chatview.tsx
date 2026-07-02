@@ -1,4 +1,4 @@
-import { Bug, Check, ChevronLeft, Lightbulb, MessageSquare, Send } from "lucide-react";
+import { Bug, Check, ChevronLeft, Lightbulb, MessageSquare, Send, SquarePen } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ChatApi, ChatIdentity, ChatMessage, ChatTicket, InboxTicket, TicketView } from "./chat";
 import { HoverButton } from "./hoverbutton";
@@ -6,29 +6,37 @@ import { HoverButton } from "./hoverbutton";
 // Session-scoped cache for the player's Feedback page. Opening Feedback mounts a fresh subtree and
 // closing it unmounts the whole thing (DetailView is conditionally mounted), and opening a thread
 // unmounts the inbox list — so without a cache every reopen reset to null and flashed "Loading…".
-// We seed initial state from the cache so reopening shows the last-known inbox/thread instantly,
-// then refresh in the background. The app-level unread poll primes the list (primeTicketCache), so
-// even the first open is usually instant. Only the very first fetch with nothing cached shows Loading.
+// The list response inlines whole conversations (ChatTicket.messages, budgeted server-side), so
+// priming the list primes every thread too: clicking ANY row — even the first time — renders from
+// cache instantly, and the open call just marks-read in the background. The app-level refresh
+// primes on launch, tab-focus, and every relay chat poke, so the caches are always warm.
 let ticketCache: ChatTicket[] | null = null;
 const threadCache = new Map<number, TicketView>();
-// The dev-only Inbox is the same story (it unmounts on close), so it gets its own list + per-thread
-// caches. There's no app-level prime for it, so its very first open still fetches; reopens are instant.
+// The dev-only Inbox is the same story (it unmounts on close), with its own list + thread caches
+// primed the same way from the inbox response's inlined conversations.
 let adminCache: InboxTicket[] | null = null;
 const adminThreadCache = new Map<number, { messages: ChatMessage[]; name: string | null }>();
 
 export function primeTicketCache(tickets: ChatTicket[]): void {
   ticketCache = tickets;
+  for (const t of tickets) {
+    if (t.messages)
+      threadCache.set(t.id, { messages: t.messages, category: t.category, subject: t.subject });
+  }
 }
 
 // The conversation surfaces for the player↔dev feedback chat (api/chat.ts) — a support-ticket
 // model laid out as a "Feedback Inbox" (claude.ai/design import). ChatPanel is the player's Feedback
-// page: a single screen where the composer and their message inbox sit side by side (no "New" gate).
-// Each message you start gets a subject that names it — the title of its row — and the line beneath
-// is the last message from either side ("You: …" when you sent last), so the inbox reads like any
-// chat app. Opening a row drills into the thread, with the subject heading the conversation.
-// AdminInbox is the dev-only screen (gated by the list response's isDev): every player's ticket,
-// visually identical rows, openable to reply. Strictly zinc chrome; the only colour is the green
-// unread dot, reused from the changelog badge.
+// page, a mail-style two-pane screen: the inbox list on one side (headed by a "New message" row)
+// and a detail pane on the other, which holds the compose form until a row is clicked and then
+// swaps to that conversation in place — no separate screen, no navigation. Each message you start
+// gets a subject that names it — the title of its row — and the line beneath is the last message
+// from either side ("You: …" when you sent last), so the inbox reads like any chat app. On a
+// narrow surface the panes stack (detail above list) and opening a row scrolls the detail pane
+// into view. AdminInbox is the dev-only screen (gated by the list response's isDev): every
+// player's ticket, visually identical rows, openable to reply (that one still drills in — it has
+// no compose pane). Strictly zinc chrome; the only colour is the green unread dot, reused from
+// the changelog badge.
 
 const CHIPS = ["Bug", "Idea", "Other"];
 
@@ -370,13 +378,15 @@ function InitialAvatar({
 }
 
 // One inbox row: a leading avatar, the subject as a title with the time top-right, and the last
-// message as a preview line with the unread dot.
+// message as a preview line with the unread dot. `selected` marks the conversation the detail
+// pane is showing (player inbox only — the dev inbox drills in, nothing stays selected).
 function Row({
   leading,
   title,
   preview,
   time,
   unread,
+  selected,
   onClick,
 }: {
   leading: ReactNode;
@@ -384,13 +394,17 @@ function Row({
   preview: ReactNode;
   time: string;
   unread: boolean;
+  selected?: boolean;
   onClick: () => void;
 }): ReactNode {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full cursor-pointer items-start gap-3 rounded-xl bg-transparent p-2.5 text-left transition-colors hover:bg-white/[0.055]"
+      className={
+        "flex w-full cursor-pointer items-start gap-3 rounded-xl p-2.5 text-left transition-colors " +
+        (selected ? "bg-white/[0.07]" : "bg-transparent hover:bg-white/[0.055]")
+      }
     >
       {leading}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -421,9 +435,31 @@ function Row({
   );
 }
 
+// The head row of the player's inbox: a "New message" action styled like a chat row, swapping the
+// detail pane back to the compose form. The filled icon disc marks it as the primary action (it
+// echoes the Send button); `selected` while the compose form is the pane showing.
+function NewMessageRow({ selected, onClick }: { selected: boolean; onClick: () => void }): ReactNode {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={
+        "flex w-full cursor-pointer items-center gap-3 rounded-xl p-2.5 text-left transition-colors " +
+        (selected ? "bg-white/[0.07]" : "bg-transparent hover:bg-white/[0.055]")
+      }
+    >
+      <span className="grid h-9.5 w-9.5 flex-none place-items-center rounded-full bg-zinc-100 text-zinc-900">
+        <SquarePen size={17} strokeWidth={2.25} aria-hidden />
+      </span>
+      <span className="font-sans text-[14.5px] font-semibold text-zinc-100">New message</span>
+    </button>
+  );
+}
+
 // The shared conversation layout (player + dev): the category as an eyebrow, the subject as a serif
-// heading, the avatared bubbles, then a composer. The back action sits in the page chrome (across
-// from the close X); only the chrome-less preview shows an inline back here (showInlineBack).
+// heading, the avatared bubbles, then a composer. The player's pane needs no back at all (the
+// inbox stays beside it); the dev inbox drills in, so its back sits in the page chrome (across
+// from the close X), with an inline one only on the chrome-less preview (showInlineBack).
 function ThreadShell({
   onBack,
   showInlineBack,
@@ -435,8 +471,8 @@ function ThreadShell({
   participants,
   self,
 }: {
-  onBack: () => void;
-  showInlineBack: boolean;
+  onBack?: () => void;
+  showInlineBack?: boolean;
   category: string | null;
   subject: string | null;
   messages: ChatMessage[] | null;
@@ -448,7 +484,7 @@ function ThreadShell({
   return (
     <div className="mx-auto flex w-full max-w-[640px] flex-col gap-5">
       <div className="flex flex-col gap-2.5">
-        {showInlineBack && <InlineBack onClick={onBack} />}
+        {showInlineBack && onBack && <InlineBack onClick={onBack} />}
         <div className="flex items-center gap-1.75 text-zinc-500">
           <CategoryIcon category={category} size={13} />
           <Eyebrow>{category ?? "Message"}</Eyebrow>
@@ -488,110 +524,107 @@ export function ChatPanel({
   api,
   onUnread,
   me,
-  liftBack,
+  version,
 }: {
   api?: ChatApi;
   onUnread?: (unread: boolean) => void;
   me?: ChatIdentity;
-  // Hand the open thread's back action to the page chrome (the button across from the close X);
-  // omitted in the chrome-less preview, where the thread shows its own inline back instead.
-  liftBack?: (back: (() => void) | null) => void;
+  // App bumps this on every relay chat poke — the list and any open thread re-read live.
+  version?: number;
 }): ReactNode {
   if (!api) return <LocalForm />;
-  return <LiveChat api={api} onUnread={onUnread} me={me} liftBack={liftBack} />;
+  return <LiveChat api={api} onUnread={onUnread} me={me} version={version} />;
 }
 
 function LiveChat({
   api,
   onUnread,
   me,
-  liftBack,
+  version,
 }: {
   api: ChatApi;
   onUnread?: (unread: boolean) => void;
   me?: ChatIdentity;
-  liftBack?: (back: (() => void) | null) => void;
+  version?: number;
 }): ReactNode {
   const [tickets, setTickets] = useState<ChatTicket[] | null>(ticketCache);
+  // The conversation the detail pane is showing; null = the compose form (the resting state).
   const [openId, setOpenId] = useState<number | null>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
 
-  // Re-pull the list and resync the app-level unread badge. Called after every change.
+  // Re-pull the list (also re-priming the thread caches) and resync the app-level unread badge.
+  // Called after every change.
   const refresh = useCallback(async (): Promise<void> => {
     const l = await api.list();
     if (!l) return;
-    ticketCache = l.tickets;
+    primeTicketCache(l.tickets);
     setTickets(l.tickets);
     onUnread?.(l.unread);
   }, [api, onUnread]);
-
-  // Leave the open thread back to the inbox list (the open already marked it read; resync).
-  const back = useCallback((): void => {
-    void refresh();
-    setOpenId(null);
-  }, [refresh]);
-
-  // Surface that back action to the page chrome while a thread is open; null on the list, so the
-  // chrome shows just the close X.
-  useEffect(() => {
-    if (!liftBack) return;
-    liftBack(openId !== null ? back : null);
-    return () => liftBack(null);
-  }, [liftBack, openId, back]);
 
   useEffect(() => {
     let live = true;
     void api.list().then((l) => {
       if (!live) return;
       const next = l?.tickets ?? [];
-      ticketCache = next;
+      primeTicketCache(next);
       setTickets(next);
       if (l) onUnread?.(l.unread);
     });
     return () => {
       live = false;
     };
-    // api/onUnread are stable (App memoizes); load once on mount.
+    // api/onUnread are stable (App memoizes); load on mount + whenever a chat poke bumps version.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [version]);
 
-  if (openId !== null) {
-    return (
-      <TicketThread
-        api={api}
-        threadId={openId}
-        onBack={back}
-        onOpened={refresh}
-        showInlineBack={!liftBack}
-        participants={{ user: meIdent(me), dev: SUPPORT }}
-      />
-    );
-  }
+  // Swap what the detail pane shows. On a wide surface the pane is already beside the list (the
+  // scroll is a no-op); stacked, the pane sits above the list, so scroll it back into view.
+  const show = (id: number | null): void => {
+    setOpenId(id);
+    detailRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
 
-  // Combined screen: composer and inbox together (stacked on a narrow surface, two columns split by
-  // a hairline on a wide one — a container query, so it tracks the surface width, not the viewport).
+  // Two-pane mail layout in one screen: the detail pane (compose form, or the open conversation
+  // in its place) beside the inbox list — stacked on a narrow surface, columns split by a hairline
+  // on a wide one (a container query, so it tracks the surface width, not the viewport). The pane
+  // order flips at the breakpoint: stacked puts the detail on top (the compose form is the resting
+  // state, same as before); wide reads list → detail like any inbox.
   return (
     <div className="@container">
       <div className="flex flex-col gap-7 @[620px]:grid @[620px]:grid-cols-2 @[620px]:gap-0">
-        <div className="@[620px]:border-r @[620px]:border-white/[0.08] @[620px]:pr-9">
-          <ComposeBlock
-            api={api}
-            onCreated={(threadId) => {
-              void refresh();
-              setOpenId(threadId);
-            }}
-          />
-        </div>
-        <div className="flex flex-col gap-3 border-t border-white/[0.08] pt-7 @[620px]:border-t-0 @[620px]:pt-0 @[620px]:pl-9">
-          <Eyebrow>Your messages</Eyebrow>
-          {tickets === null ? (
-            <Loading />
-          ) : tickets.length === 0 ? (
-            <EmptyNote>
-              Your messages show up here. We read every one and reply right in the thread.
-            </EmptyNote>
+        <div ref={detailRef} className="@[620px]:order-last @[620px]:pl-9">
+          {openId === null ? (
+            <ComposeBlock
+              api={api}
+              onCreated={(threadId) => {
+                void refresh();
+                setOpenId(threadId);
+              }}
+            />
           ) : (
-            <div className="flex flex-col gap-0.5">
-              {tickets.map((t) => (
+            <TicketThread
+              api={api}
+              threadId={openId}
+              ticket={tickets?.find((t) => t.id === openId)}
+              version={version}
+              onOpened={refresh}
+              participants={{ user: meIdent(me), dev: SUPPORT }}
+            />
+          )}
+        </div>
+        <div className="flex flex-col gap-3 border-t border-white/[0.08] pt-7 @[620px]:border-t-0 @[620px]:border-r @[620px]:border-white/[0.08] @[620px]:pt-0 @[620px]:pr-9">
+          <Eyebrow>Your messages</Eyebrow>
+          <div className="flex flex-col gap-0.5">
+            <NewMessageRow selected={openId === null} onClick={() => show(null)} />
+            {tickets === null ? (
+              <Loading />
+            ) : tickets.length === 0 ? (
+              <EmptyNote>
+                Your messages show up here. We read every one and reply right in the thread.
+              </EmptyNote>
+            ) : (
+              tickets.map((t) => (
                 <Row
                   key={t.id}
                   leading={<CatAvatar category={t.category} />}
@@ -599,48 +632,50 @@ function LiveChat({
                   preview={(t.lastSender === "user" ? "You: " : "") + (t.preview ?? "")}
                   time={ago(t.lastMessageAt)}
                   unread={t.unread}
-                  onClick={() => setOpenId(t.id)}
+                  selected={t.id === openId}
+                  onClick={() => show(t.id)}
                 />
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-// One of the player's tickets: the conversation + a reply composer.
+// One of the player's tickets, shown in the detail pane: the conversation + a reply composer.
+// The row that was clicked (`ticket`) seeds the header instantly, and the primed cache seeds the
+// messages — the open call below is just a background mark-read/refresh, so there's no loading
+// screen on the way in. No back button: the inbox list stays right beside it.
 function TicketThread({
   api,
   threadId,
-  onBack,
+  ticket,
+  version,
   onOpened,
-  showInlineBack,
   participants,
 }: {
   api: ChatApi;
   threadId: number;
-  onBack: () => void;
+  ticket?: ChatTicket;
+  version?: number;
   onOpened: () => void;
-  showInlineBack: boolean;
   participants: Participants;
 }): ReactNode {
   const cached = threadCache.get(threadId);
   const [messages, setMessages] = useState<ChatMessage[] | null>(cached?.messages ?? null);
-  const [category, setCategory] = useState<string | null>(cached?.category ?? null);
-  const [subject, setSubject] = useState<string | null>(cached?.subject ?? null);
+  const [category, setCategory] = useState<string | null>(cached?.category ?? ticket?.category ?? null);
+  const [subject, setSubject] = useState<string | null>(cached?.subject ?? ticket?.subject ?? null);
   const endRef = useScrollToEnd(messages?.length ?? 0);
 
   useEffect(() => {
     let live = true;
     void api.open(threadId).then((d) => {
-      if (!live) return;
-      const view: TicketView = {
-        messages: d?.messages ?? [],
-        category: d?.category ?? null,
-        subject: d?.subject ?? null,
-      };
+      // A failed open keeps whatever the cache showed (and skips the read-resync) instead of
+      // blanking a rendered conversation.
+      if (!live || !d) return;
+      const view: TicketView = { messages: d.messages, category: d.category, subject: d.subject };
       threadCache.set(threadId, view);
       setMessages(view.messages);
       setCategory(view.category);
@@ -650,13 +685,13 @@ function TicketThread({
     return () => {
       live = false;
     };
+    // Re-runs on a chat poke (version bump): the viewer is looking at the thread, so re-opening
+    // both pulls the new reply in and marks it read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId]);
+  }, [threadId, version]);
 
   return (
     <ThreadShell
-      onBack={onBack}
-      showInlineBack={showInlineBack}
       participants={participants}
       self="user"
       category={category}
@@ -738,10 +773,13 @@ export function AdminInbox({
   api,
   me,
   liftBack,
+  version,
 }: {
   api: ChatApi;
   me?: ChatIdentity;
   liftBack?: (back: (() => void) | null) => void;
+  // App bumps this on every relay chat poke — the inbox and any open ticket re-read live.
+  version?: number;
 }): ReactNode {
   const [tickets, setTickets] = useState<InboxTicket[] | null>(adminCache);
   const [open, setOpen] = useState<InboxTicket | null>(null);
@@ -750,10 +788,16 @@ export function AdminInbox({
     void api.admin.inbox().then((t) => {
       if (!t) return; // a failed refresh keeps the last-known list rather than blanking to a spinner
       adminCache = t;
+      // The inbox inlines whole conversations (budgeted server-side) — prime the thread cache so
+      // clicking any row, even the first time, renders instantly.
+      for (const row of t) {
+        if (row.messages)
+          adminThreadCache.set(row.threadId, { messages: row.messages, name: row.name });
+      }
       setTickets(t);
     });
   }, [api]);
-  useEffect(refresh, [refresh]);
+  useEffect(refresh, [refresh, version]);
 
   // Leave the open ticket back to the inbox (reading it cleared the unread flag; reflect that).
   const back = useCallback((): void => {
@@ -773,6 +817,7 @@ export function AdminInbox({
       <AdminThread
         api={api}
         ticket={open}
+        version={version}
         onBack={back}
         showInlineBack={!liftBack}
         me={me}
@@ -810,12 +855,14 @@ export function AdminInbox({
 function AdminThread({
   api,
   ticket,
+  version,
   onBack,
   showInlineBack,
   me,
 }: {
   api: ChatApi;
   ticket: InboxTicket;
+  version?: number;
   onBack: () => void;
   showInlineBack: boolean;
   me?: ChatIdentity;
@@ -825,20 +872,22 @@ function AdminThread({
   const [name, setName] = useState<string | null>(cached?.name ?? ticket.name);
   const endRef = useScrollToEnd(messages?.length ?? 0);
 
+  // Background mark-read/refresh (the cache already painted the thread); re-runs on a chat poke
+  // (version bump) so a player reply lands in the open ticket live. A failed read keeps whatever
+  // the cache showed instead of blanking a rendered conversation.
   useEffect(() => {
     let live = true;
     void api.admin.thread(ticket.threadId).then((d) => {
-      if (!live) return;
-      const msgs = d?.messages ?? [];
-      const nm = d?.name ?? ticket.name;
-      adminThreadCache.set(ticket.threadId, { messages: msgs, name: nm });
-      setMessages(msgs);
-      if (d?.name) setName(d.name);
+      if (!live || !d) return;
+      const nm = d.name ?? ticket.name;
+      adminThreadCache.set(ticket.threadId, { messages: d.messages, name: nm });
+      setMessages(d.messages);
+      if (d.name) setName(d.name);
     });
     return () => {
       live = false;
     };
-  }, [api, ticket.threadId]);
+  }, [api, ticket.threadId, ticket.name, version]);
 
   return (
     <ThreadShell

@@ -125,12 +125,14 @@
           // Reload via a cache-busted URL, not location.reload(): if the entry document came out
           // of a stale proxy/webview cache (its chunk hashes point at a purged prior deploy),
           // re-requesting the SAME url can re-serve the same stale HTML and burn the one-shot
-          // retry on an identical failure. A unique param forces a cache-miss re-fetch of '/'
-          // (no-store at the origin, so never stale there); Discord's launch params are
-          // preserved and the app reads only known ones, so the extra param is inert.
+          // retry on an identical failure. Bust with a fresh PATH (/b/<nonce>, rewritten to
+          // index.html in vercel.json), NOT a query param: Discord's proxy ignores the query
+          // string in its document cache key (measured 2026-07-02 — ?cxb=… returned the same
+          // hours-old cached copy), so only a new path is guaranteed a cache miss. Discord's
+          // launch params ride along in the preserved query string.
           try {
             var u = new URL(location.href);
-            u.searchParams.set("cxb", String(Date.now()));
+            u.pathname = "/b/" + Date.now();
             location.replace(u.href);
           } catch (e) {
             location.reload();

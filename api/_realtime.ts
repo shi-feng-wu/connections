@@ -15,12 +15,18 @@ import type { RosterDelta } from '../src/player.js';
 const RELAY_URL = process.env.RELAY_URL ?? ''; // https://<relay-host> (server-to-server, no proxy)
 const RELAY_SECRET = process.env.RELAY_SECRET ?? ''; // shared secret the relay checks on server pushes
 
-// The room a delta fans out to: everyone in a guild shares g:<id>, a DM/group shares c:<id> — the
-// canonical scope, byte-for-byte the same string the client subscribes with.
+// A contentless feedback-chat poke: "thread <id> changed for you", pushed to a user's personal
+// room (u:<uid>). The client re-pulls its inbox over its own authenticated call, so no message
+// content ever rides the relay.
+export type ChatPoke = { threadId: number };
+
+// The room a delta fans out to: everyone in a guild shares g:<id>, a DM/group shares c:<id>, and
+// each user privately holds u:<their id> (chat pokes) — the canonical scope, byte-for-byte the
+// same string the client subscribes with.
 export async function broadcastRoom(
   scope: string,
-  event: 'progress' | 'join',
-  payload: RosterDelta,
+  event: 'progress' | 'join' | 'chat',
+  payload: RosterDelta | ChatPoke,
 ): Promise<void> {
   if (!RELAY_URL || !RELAY_SECRET || !scope) return;
   try {

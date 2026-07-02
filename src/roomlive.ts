@@ -16,9 +16,14 @@ import type { RosterDelta } from './player';
 // ticket (so nobody can broadcast as someone else) and fans it out. Pure cosmetic, never persisted.
 export type TilesMsg = { userId: string; channelId?: string | null; selected: string[] };
 
+// A contentless feedback-chat poke on the caller's personal room: "thread <id> changed for you".
+// The client re-reads its inbox over its own authenticated call — no content rides the relay.
+export type ChatPoke = { threadId: number };
+
 export type RoomLiveHandlers = {
   onDelta: (d: RosterDelta) => void; // a player's progress/identity changed (server push)
   onTiles: (t: TilesMsg) => void; // a player's live tile selection (client push)
+  onChat?: (p: ChatPoke) => void; // a feedback-chat thread of mine changed (server push)
   // The stream (re)connected. The relay buffers nothing, so anything pushed while we were
   // disconnected is gone — reconcile against the authoritative roster read on each (re)open.
   onReconnect?: () => void;
@@ -26,6 +31,7 @@ export type RoomLiveHandlers = {
 
 type ConnectOpts = {
   scope: string; // room key (g:<guild> / c:<channel>) — matches the room the API pushes to
+  personalScope?: string; // the caller's own u:<uid> room, held on the SAME stream — chat pokes land here
   ticket: string; // signed x-ct auth ticket: gates the SSE sub and stamps tile authorship
   handlers: RoomLiveHandlers;
 };
@@ -48,11 +54,15 @@ export class RoomLive {
     if (!this.opts) return;
     if (this.es && this.es.readyState !== EventSource.CLOSED) return;
     if (this.es) this.es.close(); // drop a dead stream before replacing it
-    const { scope, ticket, handlers } = this.opts;
+    const { scope, personalScope, ticket, handlers } = this.opts;
     // Relative URL — the `/relay` URL mapping proxies it out to the Railway relay. EventSource is
     // NOT rewritten by patchUrlMappings, so we use the proxied path directly; and it can't set
-    // headers, so the ticket rides in the query string.
-    const url = `/relay/sub?room=${encodeURIComponent(scope)}&ct=${encodeURIComponent(ticket)}`;
+    // headers, so the ticket rides in the query string. `room` repeats to hold the game room and
+    // the personal room on one stream (the relay enforces that u:<uid> matches the ticket).
+    const roomParams = [scope, ...(personalScope ? [personalScope] : [])]
+      .map((r) => `room=${encodeURIComponent(r)}`)
+      .join('&');
+    const url = `/relay/sub?${roomParams}&ct=${encodeURIComponent(ticket)}`;
     const es = new EventSource(url);
     // `open` fires on the first connect AND on every EventSource auto-reconnect. Skip the first
     // (the cold-start read already covered it) and reconcile on reconnects — the relay has no
@@ -70,6 +80,9 @@ export class RoomLive {
     });
     es.addEventListener('tiles', (e) => {
       handlers.onTiles(JSON.parse((e as MessageEvent).data) as TilesMsg);
+    });
+    es.addEventListener('chat', (e) => {
+      handlers.onChat?.(JSON.parse((e as MessageEvent).data) as ChatPoke);
     });
     this.es = es;
   }

@@ -1176,10 +1176,14 @@ function LoadState({
   label,
   error,
   blocked,
+  retry,
 }: {
   label: string;
   error?: boolean;
   blocked?: boolean;
+  // the embedded blocked variant: a retryable handshake failure ("Try again" — the plain
+  // in-place re-run, or the document reload for a READY timeout)
+  retry?: boolean;
 }) {
   return (
     <section className="w-full max-w-[940px] px-4">
@@ -1190,6 +1194,7 @@ function LoadState({
         error={error}
         blocked={blocked}
         onRetry={noop}
+        onRetryHandshake={retry ? noop : undefined}
         date="2026-06-06"
         number={1169}
         // bot-less-guild path so the harness shows the targeted tip
@@ -1205,6 +1210,7 @@ const STATES = [
   <LoadState key="ld" label="Loading" />,
   <LoadState key="er" label="Error · couldn’t load" error />,
   <LoadState key="bl" label="Blocked · open in Discord" blocked />,
+  <LoadState key="blr" label="Blocked · handshake retry" blocked retry />,
   <State key="p" label="In progress" game={playing} />,
   <State key="pf" label="Results · won · perfect" game={perfect} />,
   <State key="w" label="Results · won" game={won} />,
@@ -1228,6 +1234,8 @@ const known = [
   "loading",
   "error",
   "blocked",
+  "retry",
+  "handshake",
   "simulate",
   "feedback",
   "overlap",
@@ -1663,6 +1671,8 @@ const FILTERS = [
   "loading",
   "error",
   "blocked",
+  "retry",
+  "handshake",
   "simulate",
   "feedback",
   "chat",

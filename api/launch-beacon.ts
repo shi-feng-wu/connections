@@ -43,6 +43,11 @@ export default function handler(req: VercelRequest, res: VercelResponse): void {
   // (acked launches that never opened an iframe) — the direct counter for the stuck-channel bug.
   const iage = q.get("iage");
   if (iage) data.iage = iage.slice(0, 12);
+  // handshake-error only: which attempt this document is (0 = the launch's original document,
+  // 1 = the in-instance reload retry). An r=0 error whose instance later completes the funnel
+  // means the reload rescue worked; an r=1 error is a dead instance (close is the only exit).
+  const r = q.get("r");
+  if (r) data.r = r.slice(0, 4);
 
   // One greppable line per launch stage. "[launch] beacon" + the existing "[launch] ack" together
   // make the client/server launch funnel visible in Vercel's runtime logs.

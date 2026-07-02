@@ -100,6 +100,57 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   ]);
 }
 
+// One SDK per frame, constructed at MODULE EVALUATION time, not inside the React bootstrap
+// effect. The DiscordSDK constructor is what posts the RPC HANDSHAKE to the Discord client —
+// ready() only waits for the answering READY event — and the launch funnel caught real launches
+// dying with 'discord-ready-timeout' (the client never answered). Sending the handshake the
+// moment the bundle evaluates, instead of after React mounts, paints, and runs the effect,
+// shaves the better part of a second off that exposure window. setupDiscord() reuses this
+// instance across retries: there is no dispose() short of close(), a duplicate constructor
+// would re-handshake a frame whose READY may already be consumed, and a re-awaited ready()
+// resolves instantly once the underlying handshake completes.
+let sdkSingleton: DiscordSDK | null = null;
+function getOrCreateSdk(): DiscordSDK {
+  if (!sdkSingleton) sdkSingleton = new DiscordSDK(CLIENT_ID);
+  return sdkSingleton;
+}
+// In-instance handshake-reload counter, keyed in sessionStorage so it survives the very reload
+// it counts; cleared when a handshake completes. Telemetry only (the r param on the
+// handshake-error beacon distinguishes original documents from reload retries) — the reload
+// button itself stays available on every failure, since each press is a user gesture and can
+// never loop on its own. -1 = storage unusable (partitioned iframe); the beacon just reports it.
+const HS_RETRY_KEY = "cx:hs-reload";
+function hsRetryCount(): number {
+  try {
+    const n = Number(sessionStorage.getItem(HS_RETRY_KEY) ?? "0");
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return -1;
+  }
+}
+function bumpHsRetry(): void {
+  try {
+    sessionStorage.setItem(HS_RETRY_KEY, String(Math.max(0, hsRetryCount()) + 1));
+  } catch {
+    /* storage blocked — hsRetryCount() reports -1 and the reload path stays off */
+  }
+}
+function clearHsRetry(): void {
+  try {
+    sessionStorage.removeItem(HS_RETRY_KEY);
+  } catch {
+    /* nothing to clear */
+  }
+}
+try {
+  // Only a real Discord frame can complete the handshake; the constructor throws on forged or
+  // missing params (frame_id, platform). Leave the singleton unset then — setupDiscord's own
+  // getOrCreateSdk() call will re-throw into its catch and route to the blocked screen.
+  if (/[?&]frame_id=/.test(window.location.search)) getOrCreateSdk();
+} catch {
+  /* not a launchable frame */
+}
+
 // Explicit funnel beacon for a failed/hung handshake. Before this, a handshake failure was
 // only INFERABLE server-side (a "mounted" beacon never followed by /api/token); now it's a
 // counted stage with a reason, so hung authorize()/token/authenticate cases are directly
@@ -116,6 +167,10 @@ function beaconHandshakeError(e: unknown): void {
     navigator.sendBeacon?.(
       `/api/launch-beacon?stage=handshake-error&embedded=1` +
         `&t=${Math.round(performance.now())}` +
+        // r = which handshake attempt this frame is: 0 = the launch's original document,
+        // 1 = the one reload-retry (so an r=0 error followed by a clean funnel for the same
+        // instance means the reload RECOVERED it; r=1 errors are truly dead instances).
+        `&r=${hsRetryCount()}` +
         `&reason=${encodeURIComponent(reason.slice(0, 40))}` +
         `&channel=${encodeURIComponent(qp.get("channel_id") ?? "")}` +
         `&guild=${encodeURIComponent(qp.get("guild_id") ?? "")}` +
@@ -326,6 +381,13 @@ export function App({
   const [phase, setPhase] = useState<"loading" | "ready" | "error" | "blocked">(
     "loading",
   );
+  // Why the last Discord handshake failed (the withTimeout label / error message), so the
+  // blocked screen's Try again does the RIGHT thing. 'discord-ready-timeout' means the client
+  // never answered this frame's handshake; re-awaiting in the same document never succeeds
+  // (READY is once-per-instance), so its retry is a full document reload — a fresh document the
+  // client re-handshakes with (reloadForHandshake). Everything else (authorize/token hiccups)
+  // is transient and keeps the plain in-place retry.
+  const [handshakeFail, setHandshakeFail] = useState<string | null>(null);
   // Dev-only: in a plain browser (not embedded in Discord) we still want the embedded-only chat/
   // inbox usable for local testing. mockEmbedded ungates JUST that surface and pairs with the stub
   // identity set at boot; the live roster/presence stay Discord-only. The backend (/api/chat) takes
@@ -795,12 +857,9 @@ export function App({
   // handshake, hence the timeout) gates the app behind the "Open in Discord" screen.
   async function setupDiscord(): Promise<boolean> {
     try {
-      // Reuse one SDK across handshake retries. Each DiscordSDK constructor starts its own
-      // postMessage handshake with the Discord client and there is no dispose() short of
-      // close() (which would close the whole activity) — so a retry that constructed a fresh
-      // SDK left the previous instance's listeners/handshake dangling. ready() resolves
-      // immediately once the underlying handshake has completed, so re-entering here is cheap.
-      const sdk = sdkRef.current ?? new DiscordSDK(CLIENT_ID);
+      // The module-scope singleton: constructed at bundle evaluation, so its handshake has
+      // been in flight since before React mounted (see getOrCreateSdk above).
+      const sdk = getOrCreateSdk();
       sdkRef.current = sdk; // so pushPresence() can drive Rich Presence post-handshake
       // ready() never resolves outside Discord; cap the wait so a forged ?frame_id
       // lands on the blocked screen instead of hanging on "Loading…".
@@ -881,6 +940,7 @@ export function App({
       });
       if (!res.ok) {
         beaconHandshakeError(new Error(`token-http-${res.status}`));
+        setHandshakeFail(`token-http-${res.status}`);
         return false;
       }
       const { access_token, auth } = (await res.json()) as {
@@ -889,6 +949,7 @@ export function App({
       };
       if (!access_token || !auth) {
         beaconHandshakeError(new Error("token-malformed"));
+        setHandshakeFail("token-malformed");
         return false;
       }
       // access_token: live identity for /api/score & /api/join. auth: the
@@ -950,10 +1011,13 @@ export function App({
           /* no card this time */
         });
 
+      setHandshakeFail(null);
+      clearHsRetry(); // a completed handshake ends any reload-recovery episode
       return true;
     } catch (e) {
       console.warn("Discord auth failed:", e);
       beaconHandshakeError(e);
+      setHandshakeFail(e instanceof Error ? e.message : "handshake-failed");
       return false;
     }
   }
@@ -1304,6 +1368,26 @@ export function App({
       await refreshLeaderboard();
     })();
   };
+  // Retry for a dead READY handshake that KEEPS the activity open: reload the whole document
+  // (cache-busted, like the boot watchdog's reload) so the Discord client re-initializes its
+  // side of the frame and re-handshakes with a fresh SDK. Re-awaiting ready() in the same
+  // document is pointless (READY is once-per-instance and this frame's never came), but a new
+  // document is a new chance — and there is NO auto-relaunch after close (launching an activity
+  // always takes a user interaction), so in-place reload is the only retry that can succeed
+  // without kicking the player out. Available on every failure (each press is a user gesture,
+  // so it can't loop); the sessionStorage counter rides the handshake-error beacon's r param to
+  // measure how often the rescue works and how many presses it takes.
+  const reloadForHandshake = (): void => {
+    bumpHsRetry();
+    try {
+      const u = new URL(location.href);
+      u.searchParams.set("cxb", String(Date.now()));
+      location.replace(u.href);
+    } catch {
+      location.reload();
+    }
+  };
+  const deadHandshake = handshakeFail === "discord-ready-timeout";
   // Open Discord's guild-install consent (the same link as /enable-posts' button) in the
   // user's browser. Embedded-only by construction: botInstalled is only ever set after a
   // Discord handshake, so the prompt never renders standalone where sdkRef is null.
@@ -1349,7 +1433,15 @@ export function App({
         onRetry={retry}
         // Embedded-blocked is a recoverable handshake failure (non-embedded blocked renders
         // <Landing/> above and never reaches here), so offer a retry instead of a dead end.
-        onRetryHandshake={isEmbedded ? retryHandshake : undefined}
+        // Dead handshake → the retry is the document reload; anything else → the plain
+        // in-place handshake re-run.
+        onRetryHandshake={
+          !isEmbedded
+            ? undefined
+            : deadHandshake
+              ? reloadForHandshake
+              : retryHandshake
+        }
         date={etDate()}
         number={cachedPuzzleNo(etDate())}
         // Tip only where it can act: a guild that positively lacks the bot. Installed

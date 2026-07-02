@@ -17,6 +17,12 @@
   at the very top. Group everything that ships together into one release.
 -->
 
+## v1.14.1 — Jul 1, 2026
+
+### Fixed
+
+- If Discord doesn't answer a launch, Try again now reloads the activity in place, which can actually recover it (before, it retried in a way that couldn't succeed). The game also connects to Discord earlier while loading, making these failures less likely.
+
 ## v1.14.0 — Jul 1, 2026
 
 ### Added

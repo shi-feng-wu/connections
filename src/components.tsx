@@ -101,8 +101,9 @@ export function LoadingScreen({
   error?: boolean;
   blocked?: boolean;
   onRetry: () => void;
-  // Re-run the Discord handshake from the blocked screen. App passes this only when embedded
-  // (a recoverable handshake failure); absent → the screen just shows the "open in Discord" copy.
+  // Retry from the blocked screen. App passes this only when embedded (a recoverable handshake
+  // failure): the plain handshake re-run for transient failures, or the in-place document
+  // reload for a READY timeout. Absent → the screen just shows the "open in Discord" copy.
   onRetryHandshake?: () => void;
   date?: string;
   number?: number;

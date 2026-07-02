@@ -32,6 +32,7 @@ import {
   IS_COMPONENTS_V2,
   type MessageData,
   missingPermsNudgePayload,
+  replyDm,
   shareCard,
   unsubscribeMessage,
 } from "./discord-messages";
@@ -1616,6 +1617,15 @@ const SHARE_PAYLOAD: MessageData = {
     score: 372,
   }),
 };
+// The reply DM a player gets when a dev answers their feedback ticket (api/_dm.ts sends it;
+// same replyDm builder, so this preview is the real card).
+const REPLY_DM_PAYLOAD: MessageData = replyDm({
+  subject: "Timer rewound after pause",
+  replyText:
+    "Good catch, that was on us. The pause clock drifted on reconnect, fixed in tonight’s update. Thanks for flagging it!",
+  contextText:
+    "The timer jumped back like 20 seconds when I paused mid-puzzle on my phone. Happened twice today.",
+});
 const MESSAGES = (
   <>
     <DiscordMessage
@@ -1652,6 +1662,7 @@ const MESSAGES = (
     />
     <DiscordMessage label="/donate" payload={donateMessage()} />
     <DiscordMessage label="/share · result grid" payload={SHARE_PAYLOAD} />
+    <DiscordMessage label="Reply DM · dev answers a feedback ticket" payload={REPLY_DM_PAYLOAD} />
   </>
 );
 

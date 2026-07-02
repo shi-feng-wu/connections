@@ -63,15 +63,46 @@ function inline(text: string): ReactNode[] {
   return out;
 }
 
-// Block-level markdown: ### headings, -# subtext, "- " bullets, blank-line spacing. Mirrors
-// the small subset Discord renders for the bot's messages (api/interactions.ts copy).
+// Block-level markdown: ### headings, -# subtext, "- " bullets, "> " blockquotes, blank-line
+// spacing. Mirrors the small subset Discord renders for the bot's messages.
 function Markdown({ content }: { content: string }): ReactNode {
-  const lines = content.split("\n");
+  // Group consecutive "> " lines so a multi-line quote draws ONE inset bar, like Discord.
+  const blocks: Array<{ quote: string[] } | { line: string }> = [];
+  for (const line of content.split("\n")) {
+    const last = blocks[blocks.length - 1];
+    if (line.startsWith("> ") || line === ">") {
+      const text = line === ">" ? "" : line.slice(2);
+      if (last && "quote" in last) last.quote.push(text);
+      else blocks.push({ quote: [text] });
+    } else {
+      blocks.push({ line });
+    }
+  }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      {lines.map((line, idx) => {
-        if (line === "")
-          return <div key={idx} style={{ height: 8 }} aria-hidden />;
+      {blocks.map((block, idx) => {
+        if ("quote" in block)
+          return (
+            <div key={idx} style={{ display: "flex", gap: 10 }}>
+              <span
+                style={{ width: 4, borderRadius: 2, background: C.btn, flexShrink: 0 }}
+                aria-hidden
+              />
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {block.quote.map((q, qi) =>
+                  q === "" ? (
+                    <div key={qi} style={{ height: 8 }} aria-hidden />
+                  ) : (
+                    <div key={qi} style={{ lineHeight: 1.4 }}>
+                      {inline(q)}
+                    </div>
+                  ),
+                )}
+              </div>
+            </div>
+          );
+        const line = block.line;
+        if (line === "") return <div key={idx} style={{ height: 8 }} aria-hidden />;
         if (line.startsWith("### "))
           return (
             <div
@@ -161,8 +192,9 @@ function Buttons({ rows }: { rows: ActionRow[] }): ReactNode {
 type V2Block = { type: number; content?: string; divider?: boolean };
 type V2Container = { type: number; components?: V2Block[] };
 
-// The Components V2 /share card: a bordered Container (Wordle-style frame) holding text
-// blocks (TextDisplay=10) and separators (Separator=14; divider:true draws a hairline).
+// A Components V2 card (the /share result, the reply DM): a bordered Container (Wordle-style
+// frame, no embed accent stripe) holding text blocks (TextDisplay=10, full markdown) and
+// separators (Separator=14; divider:true draws a hairline).
 function V2Card({ container }: { container: V2Container }): ReactNode {
   return (
     <div
@@ -191,20 +223,9 @@ function V2Card({ container }: { container: V2Container }): ReactNode {
           ) : (
             <div key={idx} style={{ height: 6 }} aria-hidden />
           );
-        // TextDisplay: the grid is emoji squares with hard line breaks; keep them.
         return (
-          <div
-            key={idx}
-            style={{
-              whiteSpace: "pre-wrap",
-              lineHeight: 1.3,
-              fontSize: (b.content ?? "").startsWith("-#") ? 12.5 : 15,
-              color: (b.content ?? "").startsWith("-#") ? C.muted : C.body,
-            }}
-          >
-            {(b.content ?? "").startsWith("-#")
-              ? inline((b.content ?? "").slice(3))
-              : b.content}
+          <div key={idx}>
+            <Markdown content={b.content ?? ""} />
           </div>
         );
       })}
@@ -252,7 +273,8 @@ export function DiscordMessage({
             alt=""
             width={40}
             height={40}
-            style={{ borderRadius: "50%", flexShrink: 0, objectFit: "cover" }}
+            // alignSelf keeps the flex row from stretching the avatar into a tall ellipse.
+            style={{ borderRadius: "50%", flexShrink: 0, objectFit: "cover", alignSelf: "flex-start" }}
           />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

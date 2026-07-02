@@ -7,13 +7,14 @@
 // and never throws into the request (the message is already persisted by the time we post).
 // Leading underscore keeps Vercel from treating this file as a route.
 
+import { REPLY_COLOR } from '../src/discord-messages.js';
+
 const MAX_LEN = 2000; // Discord embed description limit
 export const CATEGORIES = ['Bug', 'Idea', 'Other'];
 const COLOR: Record<string, number> = { Bug: 0xe06c75, Idea: 0xf9df6d, Other: 0xb0c4ef };
 const EMOJI: Record<string, string> = { Bug: '🐛', Idea: '💡', Other: '💬' };
-// Replies get their own hue + arrow so the webhook channel reads as a conversation, not a pile
-// of inbound notes.
-const REPLY_COLOR = 0x7fc8a9;
+// Replies get their own hue (REPLY_COLOR, shared with the player DM) + arrow so the webhook
+// channel reads as a conversation, not a pile of inbound notes.
 
 export function isCategory(c: unknown): c is string {
   return typeof c === 'string' && CATEGORIES.includes(c);

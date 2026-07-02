@@ -21,7 +21,7 @@
 
 ### Fixed
 
-- If Discord doesn't answer a launch, Try again now reloads the activity in place, which can actually recover it (before, it retried in a way that couldn't succeed). The game also connects to Discord earlier while loading, making these failures less likely.
+- If Discord doesn't answer a launch, Try again now reloads the activity in place, which can recover it. Hopefully there will be fewer failed launches.
 
 ## v1.14.0 — Jul 1, 2026
 

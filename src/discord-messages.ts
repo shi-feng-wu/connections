@@ -12,6 +12,7 @@
 // interaction response (content + flags + components). routeInteraction wraps these in
 // `{ type: 4, data }`; the preview renders them as Discord chrome.
 import { COPY } from "./discord-copy.js";
+import { fill } from "./copy-util.js";
 import { Game, MAX_MISTAKES } from "./game.js";
 
 // Discord message flags.
@@ -20,7 +21,7 @@ export const IS_COMPONENTS_V2 = 1 << 15; // render via the component tree, not c
 // The interaction callback type that posts a message (used by routeInteraction + unsubscribeResult).
 export const CHANNEL_MESSAGE_WITH_SOURCE = 4;
 
-// Components V2 component type numbers (the framed /share card is built from these).
+// Components V2 component type numbers (the framed /share card + reply DM are built from these).
 const CONTAINER = 17; // the bordered box (Wordle-style frame)
 const TEXT_DISPLAY = 10; // a markdown text block
 const SEPARATOR = 14; // a divider/spacer between blocks
@@ -182,4 +183,68 @@ export function shareCard(
       ],
     },
   ];
+}
+
+// ——— the reply DM (api/_dm.ts) — the bot DM a player gets when a dev answers their ticket ———
+
+// The reply hue the dev-channel webhook mirror (api/_feedback.ts) paints "our reply" embeds with.
+export const REPLY_COLOR = 0x7fc8a9;
+
+const MAX_REPLY = 2000; // matches the chat message cap (insertMessage already slices to this)
+const MAX_CONTEXT = 600; // the quoted "You wrote" snippet — enough to anchor the reply
+// The quoted block re-truncated after "> " prefixing: a newline-heavy note can double in size, and
+// a V2 message's text displays share a 4000-char budget with the 2000-char reply.
+const MAX_QUOTE = 1024;
+
+function truncate(s: string, n: number): string {
+  const t = s.trim();
+  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+}
+
+// Prefix every line so a multi-line player message renders as one Discord blockquote — a single
+// "> " quotes only its own line.
+function blockquote(s: string): string {
+  return s
+    .split("\n")
+    .map((l) => `> ${l}`)
+    .join("\n");
+}
+
+export type ReplyDmInput = {
+  subject: string | null; // the ticket title, heading the card
+  replyText: string; // the dev's full reply (non-empty — the sender gates)
+  contextText: string | null; // the player message this reply answers
+};
+
+// The reply DM as a Components V2 card — our own frame (the /share Container, no embed accent
+// stripe, no lead-in content line). It reads like a short letter: the ticket subject as the
+// heading, the reply itself, the player's own note quoted under a small "You wrote" label, then
+// the open-the-app nudge as the footer. A V2 message carries NO content/embeds, so notifications
+// preview the card's text instead.
+export function replyDm(input: ReplyDmInput): MessageData {
+  const title = input.subject
+    ? truncate(fill(COPY["reply-dm.subject"], { subject: input.subject }), 256)
+    : COPY["reply-dm.subject-blank"];
+  const blocks: object[] = [
+    { type: TEXT_DISPLAY, content: `### ${title}` },
+    { type: SEPARATOR, divider: false, spacing: 1 },
+    { type: TEXT_DISPLAY, content: truncate(input.replyText, MAX_REPLY) },
+    { type: SEPARATOR, divider: true, spacing: 1 },
+  ];
+  const context = input.contextText ? truncate(input.contextText, MAX_CONTEXT) : "";
+  if (context) {
+    blocks.push(
+      // One block so the label hugs its quote: "-#" styles only its own line.
+      {
+        type: TEXT_DISPLAY,
+        content: `-# ${COPY["reply-dm.context-label"]}\n${truncate(blockquote(context), MAX_QUOTE)}`,
+      },
+      { type: SEPARATOR, divider: true, spacing: 1 },
+    );
+  }
+  blocks.push({ type: TEXT_DISPLAY, content: `-# ${COPY["reply-dm.footer"]}` });
+  return {
+    flags: IS_COMPONENTS_V2,
+    components: [{ type: CONTAINER, components: blocks }],
+  };
 }

@@ -100,6 +100,47 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   ]);
 }
 
+// Timeout signal for fetch(), with a fallback: the older WebKit builds some Discord webviews
+// still run don't have AbortSignal.timeout — the launch funnel logged real handshakes dying
+// with "AbortSignal.timeout is not a function", every attempt, for those clients. They get a
+// plain AbortController + setTimeout instead (aborting an already-settled fetch is a no-op,
+// so the stray timer needs no cleanup).
+function timeoutSignal(ms: number): AbortSignal | undefined {
+  if (
+    typeof AbortSignal !== "undefined" &&
+    typeof AbortSignal.timeout === "function"
+  )
+    return AbortSignal.timeout(ms);
+  try {
+    const c = new AbortController();
+    setTimeout(() => c.abort(), ms);
+    return c.signal;
+  } catch {
+    return undefined; // no AbortController either — the fetch runs uncapped
+  }
+}
+
+// Human-readable reason from whatever a handshake step threw. The embedded SDK rejects with
+// plain {code, message} objects, not Error instances — String() renders those as
+// "[object Object]", which is what the funnel's handshake-error beacons were logging in
+// place of roughly half the real reasons.
+function errText(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "object" && e !== null) {
+    const o = e as { code?: unknown; message?: unknown };
+    if (typeof o.message === "string" && o.message)
+      return o.code !== undefined
+        ? `rpc-${String(o.code)} ${o.message}`
+        : o.message;
+    try {
+      return JSON.stringify(e).slice(0, 120);
+    } catch {
+      /* circular — fall through to String() */
+    }
+  }
+  return String(e);
+}
+
 // One SDK per frame, constructed at MODULE EVALUATION time, not inside the React bootstrap
 // effect. The DiscordSDK constructor is what posts the RPC HANDSHAKE to the Discord client —
 // ready() only waits for the answering READY event — and the launch funnel caught real launches
@@ -163,7 +204,7 @@ function beaconHandshakeError(e: unknown): void {
       : /iPhone|iPad|iPod/i.test(navigator.userAgent)
         ? "ios"
         : "web";
-    const reason = e instanceof Error ? e.message : String(e);
+    const reason = errText(e);
     navigator.sendBeacon?.(
       `/api/launch-beacon?stage=handshake-error&embedded=1` +
         `&t=${Math.round(performance.now())}` +
@@ -939,7 +980,7 @@ export function App({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code }),
-        signal: AbortSignal.timeout(10_000),
+        signal: timeoutSignal(10_000),
       });
       if (!res.ok) {
         beaconHandshakeError(new Error(`token-http-${res.status}`));
@@ -1020,7 +1061,7 @@ export function App({
     } catch (e) {
       console.warn("Discord auth failed:", e);
       beaconHandshakeError(e);
-      setHandshakeFail(e instanceof Error ? e.message : "handshake-failed");
+      setHandshakeFail(errText(e) || "handshake-failed");
       return false;
     }
   }

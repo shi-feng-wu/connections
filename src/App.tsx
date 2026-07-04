@@ -224,11 +224,10 @@ function beaconHandshakeError(e: unknown): void {
   }
 }
 
-// Funnel beacon for document teardown: which unloads happen, how old the document was, and
-// whether the clean-exit close fired. "mounted → unload ce-sent" within a second of boot is
-// the fingerprint of a young document ending the instance (the open-then-instantly-closes
-// launch failure); "ce-skip-n0" is the same teardown correctly declining to close.
-function beaconUnload(reason: string): void {
+// Shared minimal sender for the client-side funnel stages that need no extra params
+// (unload + trace). Same channel/instance correlation context and build tag as the boot
+// beacon; the server just logs stage+reason (api/launch-beacon.ts).
+function sendStageBeacon(stage: string, reason: string): void {
   try {
     const qp = new URLSearchParams(location.search);
     const plat = /Android/i.test(navigator.userAgent)
@@ -237,7 +236,7 @@ function beaconUnload(reason: string): void {
         ? "ios"
         : "web";
     navigator.sendBeacon?.(
-      `/api/launch-beacon?stage=unload&embedded=1` +
+      `/api/launch-beacon?stage=${encodeURIComponent(stage)}&embedded=1` +
         `&t=${Math.round(performance.now())}` +
         `&reason=${encodeURIComponent(reason)}` +
         `&channel=${encodeURIComponent(qp.get("channel_id") ?? "")}` +
@@ -247,8 +246,23 @@ function beaconUnload(reason: string): void {
         `&b=${encodeURIComponent(window.__cxBuild ?? "")}`,
     );
   } catch {
-    /* telemetry only — never let it affect the unload */
+    /* telemetry only — never let it affect the caller */
   }
+}
+
+// Funnel beacon for document teardown: which unloads happen, how old the document was, and
+// whether the clean-exit close fired. "mounted → unload ce-sent" within a second of boot is
+// the fingerprint of a young document ending the instance (the open-then-instantly-closes
+// launch failure); "ce-skip-*" is the same teardown declining to close.
+function beaconUnload(reason: string): void {
+  sendStageBeacon("unload", reason);
+}
+
+// Death-window trace (stage "trace"): heartbeats, handshake steps, lifecycle flips, and JS
+// errors between "mounted" and whatever kills the document. Added for the open-then-dies
+// desktop launch failure — the last trace line before silence names the step that died.
+function mark(label: string): void {
+  sendStageBeacon("trace", label);
 }
 
 // Kill-switch for the clean-exit experiment (see the `pagehide` effect that calls sdk.close()).
@@ -936,6 +950,7 @@ export function App({
       // ready() never resolves outside Discord; cap the wait so a forged ?frame_id
       // lands on the blocked screen instead of hanging on "Loading…".
       await withTimeout(sdk.ready(), 8000, "discord-ready-timeout");
+      mark("hs-ready");
       // Same channel launch = same instance.
       roomRef.current = sdk.instanceId;
       // Season scope persists across launches (instanceId resets). Prefer the guild
@@ -1001,6 +1016,7 @@ export function App({
         45_000,
         "discord-authorize-timeout",
       );
+      mark("hs-authz");
       // 10s cap on the code exchange: the function is a sub-second Discord OAuth round-trip, so
       // anything past 10s is a dead lambda/proxy path — fail to the blocked screen (retryable),
       // don't hold the handshake open.
@@ -1029,6 +1045,7 @@ export function App({
       // from the token, so the client can't claim to be someone else.
       accessTokenRef.current = access_token;
       authTicketRef.current = auth;
+      mark("hs-token");
 
       // Display identity (the server still trusts only the token). Non-fatal: a
       // failure here shouldn't lock out an otherwise-authenticated player.
@@ -1083,6 +1100,7 @@ export function App({
           /* no card this time */
         });
 
+      mark("hs-done");
       setHandshakeFail(null);
       clearHsRetry(); // a completed handshake ends any reload-recovery episode
       return true;
@@ -1309,20 +1327,28 @@ export function App({
   useEffect(() => {
     if (!isEmbedded || !CLOSE_ON_EXIT) return;
     const onPageHide = (e: PageTransitionEvent): void => {
-      if (e.persisted) return; // bfcache candidate, not a real close
-      if (document.visibilityState !== "hidden") return; // pop-out/PIP stays visible — don't close
-      // Close ONLY when the participant list has resolved and it's exactly us. The ref is 0
-      // until getInstanceConnectedParticipants answers — true for every document less than a
-      // handshake old — and 0 must read as "unknown", never "empty": Discord re-creates
-      // activity iframes (teardown + fresh document), and a CLOSE_NORMAL sent from the dying
-      // young document told Discord "last player left", turning a recoverable swap into the
-      // open-then-instantly-closes launch failure. >1 keeps protecting co-players.
-      const n = participantCountRef.current;
-      if (n !== 1) {
-        beaconUnload(`ce-skip-n${n}`);
+      if (e.persisted) {
+        mark("pagehide-bf"); // bfcache candidate, not a real close
         return;
       }
-      beaconUnload("ce-sent");
+      if (document.visibilityState !== "hidden") {
+        mark("pagehide-visible"); // pop-out/PIP stays visible — don't close
+        return;
+      }
+      // Close ONLY from a document that became a real session (handshake completed) and isn't
+      // co-played. The participant count can't carry this decision alone: it's 0 both BEFORE
+      // getInstanceConnectedParticipants answers (every document less than a handshake old)
+      // and at normal session-end (Discord empties the list before the iframe unloads — the
+      // funnel showed every Android exit with n=0). The token ref splits the two: a young
+      // pre-handshake document unloading is an iframe swap/reload/teardown, and a CLOSE_NORMAL
+      // from it told Discord "last player left", turning a recoverable swap into the
+      // open-then-instantly-closes launch failure. n>1 keeps protecting co-players.
+      const n = participantCountRef.current;
+      if (!accessTokenRef.current || n > 1) {
+        beaconUnload(accessTokenRef.current ? `ce-skip-n${n}` : "ce-skip-hs");
+        return;
+      }
+      beaconUnload(`ce-sent-n${n}`);
       try {
         sdkRef.current?.close(RPCCloseCodes.CLOSE_NORMAL, "");
       } catch {
@@ -1331,6 +1357,35 @@ export function App({
     };
     window.addEventListener("pagehide", onPageHide);
     return () => window.removeEventListener("pagehide", onPageHide);
+  }, [isEmbedded]);
+
+  // Death-window instrumentation for the open-then-dies launch failure (100% repro on the
+  // dev's desktop DM launches; the document dies without pagehide, so only signals sent
+  // BEFORE death can name the killer). Heartbeats pin the moment the document stops
+  // existing; visibility flips and JS errors catch anything that precedes it. Roughly ten
+  // tiny 204s per launch — dial back once the failure is understood.
+  useEffect(() => {
+    if (!isEmbedded) return;
+    const timers = [1, 2, 3, 5, 8, 15, 30].map((s) =>
+      setTimeout(() => mark(`hb-${s}s`), s * 1000),
+    );
+    let errBudget = 5; // cap error beacons so a throw loop can't flood the funnel
+    const onVis = (): void => mark(`vis-${document.visibilityState}`);
+    const onErr = (e: ErrorEvent): void => {
+      if (errBudget-- > 0) mark(`err:${(e.message ?? "").slice(0, 32)}`);
+    };
+    const onRej = (e: PromiseRejectionEvent): void => {
+      if (errBudget-- > 0) mark(`rej:${errText(e.reason).slice(0, 32)}`);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("error", onErr);
+    window.addEventListener("unhandledrejection", onRej);
+    return () => {
+      timers.forEach(clearTimeout);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("error", onErr);
+      window.removeEventListener("unhandledrejection", onRej);
+    };
   }, [isEmbedded]);
 
   // A hidden tab can drop the socket silently; re-establish it (and catch up) when the tab is

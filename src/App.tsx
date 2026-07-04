@@ -223,6 +223,32 @@ function beaconHandshakeError(e: unknown): void {
   }
 }
 
+// Funnel beacon for document teardown: which unloads happen, how old the document was, and
+// whether the clean-exit close fired. "mounted → unload ce-sent" within a second of boot is
+// the fingerprint of a young document ending the instance (the open-then-instantly-closes
+// launch failure); "ce-skip-n0" is the same teardown correctly declining to close.
+function beaconUnload(reason: string): void {
+  try {
+    const qp = new URLSearchParams(location.search);
+    const plat = /Android/i.test(navigator.userAgent)
+      ? "android"
+      : /iPhone|iPad|iPod/i.test(navigator.userAgent)
+        ? "ios"
+        : "web";
+    navigator.sendBeacon?.(
+      `/api/launch-beacon?stage=unload&embedded=1` +
+        `&t=${Math.round(performance.now())}` +
+        `&reason=${encodeURIComponent(reason)}` +
+        `&channel=${encodeURIComponent(qp.get("channel_id") ?? "")}` +
+        `&guild=${encodeURIComponent(qp.get("guild_id") ?? "")}` +
+        `&instance=${encodeURIComponent(qp.get("instance_id") ?? "")}` +
+        `&plat=${plat}`,
+    );
+  } catch {
+    /* telemetry only — never let it affect the unload */
+  }
+}
+
 // Kill-switch for the clean-exit experiment (see the `pagehide` effect that calls sdk.close()).
 // When the LAST participant truly closes the Activity, we send Discord a CLOSE_NORMAL so the
 // per-channel instance "finishes its lifecycle" (the only documented way an instance ends) and the
@@ -1283,7 +1309,18 @@ export function App({
     const onPageHide = (e: PageTransitionEvent): void => {
       if (e.persisted) return; // bfcache candidate, not a real close
       if (document.visibilityState !== "hidden") return; // pop-out/PIP stays visible — don't close
-      if (participantCountRef.current > 1) return; // others still in — closing would end their game
+      // Close ONLY when the participant list has resolved and it's exactly us. The ref is 0
+      // until getInstanceConnectedParticipants answers — true for every document less than a
+      // handshake old — and 0 must read as "unknown", never "empty": Discord re-creates
+      // activity iframes (teardown + fresh document), and a CLOSE_NORMAL sent from the dying
+      // young document told Discord "last player left", turning a recoverable swap into the
+      // open-then-instantly-closes launch failure. >1 keeps protecting co-players.
+      const n = participantCountRef.current;
+      if (n !== 1) {
+        beaconUnload(`ce-skip-n${n}`);
+        return;
+      }
+      beaconUnload("ce-sent");
       try {
         sdkRef.current?.close(RPCCloseCodes.CLOSE_NORMAL, "");
       } catch {

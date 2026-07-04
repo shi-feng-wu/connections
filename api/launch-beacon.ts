@@ -23,6 +23,9 @@ export default function handler(req: VercelRequest, res: VercelResponse): void {
   const data: Record<string, unknown> = {
     // "boot" | "mounted" | "boot-error" | "handshake-error" (App.tsx setupDiscord failure —
     // the mounted-but-no-token class, now explicit with a reason instead of infer-only)
+    // | "unload" (document teardown; reason "ce-sent" = the clean-exit close fired,
+    // "ce-skip-n<count>" = it declined — a young "unload" right after "mounted" is the
+    // open-then-instantly-closes fingerprint)
     stage: q.get("stage") ?? "boot",
     embedded: q.get("embedded") === "1",
     // channel_id is the correlation key back to /api/interactions' "[launch] ack" — a launch whose

@@ -216,7 +216,8 @@ function beaconHandshakeError(e: unknown): void {
         `&channel=${encodeURIComponent(qp.get("channel_id") ?? "")}` +
         `&guild=${encodeURIComponent(qp.get("guild_id") ?? "")}` +
         `&instance=${encodeURIComponent(qp.get("instance_id") ?? "")}` +
-        `&plat=${plat}`,
+        `&plat=${plat}` +
+        `&b=${encodeURIComponent(window.__cxBuild ?? "")}`,
     );
   } catch {
     /* telemetry only — never let it affect the handshake result */
@@ -242,7 +243,8 @@ function beaconUnload(reason: string): void {
         `&channel=${encodeURIComponent(qp.get("channel_id") ?? "")}` +
         `&guild=${encodeURIComponent(qp.get("guild_id") ?? "")}` +
         `&instance=${encodeURIComponent(qp.get("instance_id") ?? "")}` +
-        `&plat=${plat}`,
+        `&plat=${plat}` +
+        `&b=${encodeURIComponent(window.__cxBuild ?? "")}`,
     );
   } catch {
     /* telemetry only — never let it affect the unload */

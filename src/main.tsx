@@ -51,7 +51,8 @@ try {
     `&channel=${encodeURIComponent(params.get('channel_id') ?? '')}` +
     `&guild=${encodeURIComponent(params.get('guild_id') ?? '')}` +
     `&instance=${encodeURIComponent(params.get('instance_id') ?? '')}` +
-    `&plat=${plat}`;
+    `&plat=${plat}` +
+    `&b=${encodeURIComponent(window.__cxBuild ?? '')}`;
   navigator.sendBeacon?.(
     `/api/launch-beacon?stage=mounted&embedded=${isEmbedded ? 1 : 0}&t=${Math.round(performance.now())}${ctx}`,
   );

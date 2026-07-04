@@ -32,10 +32,22 @@ const cardImageDev = (): Plugin => ({
   },
 });
 
+// Stamp the deployment id into index.html (the __CX_BUILD__ placeholder in the boot script).
+// Every funnel beacon carries it as `b=`, answering THE post-deploy question — "which build's
+// HTML/bundle did this client actually run?" — directly in the logs. Discord's proxy pins
+// documents per POP for hours, so launches routinely run a previous build long after a promote;
+// without this tag a client-side fix can look broken when the client simply never ran it.
+const buildIdTag = (): Plugin => ({
+  name: 'build-id-tag',
+  transformIndexHtml(html) {
+    return html.replaceAll('__CX_BUILD__', process.env.VERCEL_DEPLOYMENT_ID ?? 'dev');
+  },
+});
+
 // `vercel dev` runs this Vite server and the /api functions together. In prod
 // Vercel serves dist/ from its CDN and api/ as serverless functions.
 export default defineConfig({
-  plugins: [react(), tailwindcss(), cardImageDev()],
+  plugins: [react(), tailwindcss(), cardImageDev(), buildIdTag()],
   // Skew protection for a plain Vite app: tag every built asset URL with the deployment it
   // belongs to. Vercel routes `?dpl=`-tagged requests to that exact deployment, so an HTML
   // document held by Discord's proxy cache keeps fetching ITS OWN chunks after a newer deploy

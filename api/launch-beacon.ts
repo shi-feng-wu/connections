@@ -39,6 +39,11 @@ export default function handler(req: VercelRequest, res: VercelResponse): void {
   };
   const reason = q.get("reason");
   if (reason) data.reason = reason.slice(0, 40); // boot-error: "asset"|"watchdog"; handshake-error: the failed step
+  // Which build's HTML/bundle the client ran (the ?dpl= deployment id, or "dev"). THE
+  // disambiguator after a promote: Discord's proxy pins documents per POP for hours, so a
+  // failure logged minutes after a deploy routinely comes from the PREVIOUS build's code.
+  const b = q.get("b");
+  if (b) data.b = b.slice(0, 40);
   const failed = q.get("res");
   if (failed) data.res = failed.slice(0, 300); // the failed resource URL (boot-error only)
   // Age (s) of the activity instance at boot, decoded client-side from the instance_id

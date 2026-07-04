@@ -21,4 +21,6 @@ interface Window {
   __appMounted?: boolean;
   __cxBootMounted?: () => void;
   __cxRetried?: boolean;
+  /** Build/deployment id stamped into index.html at build time (beacon `b=` tag). */
+  __cxBuild?: string;
 }

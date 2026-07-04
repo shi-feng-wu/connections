@@ -77,12 +77,21 @@
               iage = String(Math.round((Date.now() - its) / 1000));
           }
         } catch (e) {}
+        // Which build this document is — the deployment id injected at build time
+        // (vite.config.ts buildIdTag; "dev" locally). Rides every beacon as `b=` and is
+        // exposed on window for the bundle's beacons (App.tsx/main.tsx): a funnel line's
+        // build tag is what says whether a client-side fix was actually in the code path,
+        // since Discord's proxy can serve a previous build's HTML for hours after a promote.
+        var build = "__CX_BUILD__";
+        if (build.slice(0, 2) === "__") build = ""; // placeholder survived (raw file, no Vite)
+        window.__cxBuild = build;
         var ctx =
           "&channel=" + encodeURIComponent(ctxParam("channel_id")) +
           "&guild=" + encodeURIComponent(ctxParam("guild_id")) +
           "&instance=" + encodeURIComponent(ctxParam("instance_id")) +
           "&plat=" + plat +
-          (iage ? "&iage=" + iage : "");
+          (iage ? "&iage=" + iage : "") +
+          (build ? "&b=" + encodeURIComponent(build) : "");
         function beacon(stage, extra) {
           try {
             var p = "stage=" + stage + "&embedded=" + embedded + "&t=" + Math.round(performance.now());

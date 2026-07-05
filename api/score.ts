@@ -85,6 +85,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     // Only a finished game scores. A still-playing record means the client posted
     // early; bail rather than writing (and locking, via ignoreDuplicates) a 0.
     if (game.status === 'playing') {
+      // Greppable: guesses commit in the background, so a finish can race its own final
+      // guess write and land here (the missing-score/broken-streak class). The client now
+      // flushes its commit chain first AND retries this verdict, so a burst of these that
+      // never converts into a scores row is the signal that protection has regressed.
+      console.warn('[score] not-finished replay', { user: user.id, date: session.date });
       res.status(200).json({ ok: false, reason: 'not-finished' });
       return;
     }

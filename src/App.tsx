@@ -703,6 +703,12 @@ export function App({
     const accessToken = accessTokenRef.current;
     if (!isDailyRef.current || !session || !accessToken) return;
     void (async () => {
+      // The finishing guess commits in the BACKGROUND (commitChain) while its reveal runs, so
+      // right now the server's progress record may not contain it yet — and /api/score replays
+      // that record, so posting immediately can come back "not-finished" and the score is
+      // silently dropped (the missing-score/broken-streak reports, 2026-07-05). Flush the
+      // chain first; submitScore's not-finished retry covers any residual write lag.
+      await commitChain.current;
       await submitScore({
         session,
         accessToken,

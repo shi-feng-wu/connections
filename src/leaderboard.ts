@@ -13,21 +13,37 @@ import { supabase } from './supabase';
 // scope, then replays the player's server-side committed guesses (api/guess) —
 // never the browser's word — to time and compute the score. The browser is trusted
 // neither with the number nor with which board it lands on.
-export async function submitScore(input: {
-  session: string;
-  accessToken: string;
-  guildId: string | null;
-  channelId: string | null;
-}): Promise<void> {
+export async function submitScore(
+  input: {
+    session: string;
+    accessToken: string;
+    guildId: string | null;
+    channelId: string | null;
+  },
+  attempt = 0,
+): Promise<void> {
   try {
-    await fetch('/api/score', {
+    const r = await fetch('/api/score', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
     });
+    if (r.ok) {
+      const body = (await r.json()) as { ok?: boolean; reason?: string };
+      // "not-finished" = the server replayed the committed record before the finishing
+      // guess landed (guesses commit in the background — the optimistic-commit race).
+      // The write is at most seconds away, so retry briefly rather than dropping the
+      // score: a silent drop here is a lost leaderboard row and a broken streak.
+      if (body.ok !== false || body.reason !== 'not-finished' || attempt >= 3) return;
+    } else if (attempt >= 3) {
+      return; // non-2xx after retries: give up (server rejected or is down)
+    }
   } catch {
-    /* best-effort; a failed submit means no leaderboard row */
+    /* network blip → retry below */
+    if (attempt >= 3) return;
   }
+  await new Promise((res) => setTimeout(res, 800 * (attempt + 1)));
+  return submitScore(input, attempt + 1);
 }
 
 // One leaderboard row: cumulative score over the window plus stats.

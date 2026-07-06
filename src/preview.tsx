@@ -964,6 +964,28 @@ function Simulate() {
     })();
   }, []);
 
+  // #faildemo drives a full LIVE loss through the real board (four wrong guesses), so
+  // the end-of-game auto-reveal choreography — failed groups morphing in as covered
+  // SpoilerBars — can be captured headlessly. #faildemotap additionally taps every
+  // spoiler bar once the loss settles, verifying the tap-to-reveal wipe end to end.
+  useEffect(() => {
+    const h = location.hash.toLowerCase();
+    if (h !== "#faildemo" && h !== "#faildemotap") return;
+    void (async () => {
+      await until(() => tilesLeft() >= 16);
+      await simulateFail();
+      await until(
+        () => (ref.current?.querySelectorAll(".spoiler-bar").length ?? 0) >= 2,
+      );
+      if (h === "#faildemotap") {
+        await delay(800); // let the last bar's pop-in settle before tapping
+        ref.current
+          ?.querySelectorAll<HTMLElement>(".spoiler-bar")
+          .forEach((b) => b.click());
+      }
+    })();
+  }, []);
+
   // #overlap fires three correct guesses ~360ms apart WITHOUT waiting for each to
   // finish, so the solves gather concurrently — the harness for verifying the
   // overlap refactor (each group lands in its own forming slot at the same time).
@@ -1241,6 +1263,8 @@ const known = [
   "feedback",
   "overlap",
   "overlapwin",
+  "faildemo",
+  "faildemotap",
   "chat",
   "card",
   "pip",
@@ -1265,7 +1289,9 @@ const onlySim =
   pick === "simulate" ||
   pick === "feedback" ||
   pick === "overlap" ||
-  pick === "overlapwin";
+  pick === "overlapwin" ||
+  pick === "faildemo" ||
+  pick === "faildemotap";
 const onlyCard = pick === "card";
 const onlyPip = pick === "pip";
 // #scope isolates the roster panel that carries the Channel/Server toggle; #recap

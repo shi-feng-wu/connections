@@ -826,3 +826,25 @@ create table if not exists public.chat_messages (
 create index if not exists chat_messages_thread_idx on public.chat_messages (thread_id, created_at);
 
 alter table public.chat_messages enable row level security;
+
+-- Join-time room authorization for finish-time scoring. /api/join resolves the player's
+-- identity from their Discord token and (for g: scopes) confirms guild membership — the same
+-- gate /api/score applies — then stamps the verified room here, one row per player per day
+-- (last join wins: you score where you most recently opened the Activity). /api/guess reads
+-- the stamp when the finishing guess lands and writes the scores row IN THAT SAME REQUEST,
+-- so scoring never depends on a second client-initiated call: a player who closes the
+-- Activity the instant they finish still scores, on any client version. The client-posted
+-- /api/score remains as the fallback for sessions that never got a stamp. Written only by
+-- the service role (RLS, no policy → anon sees nothing).
+create table if not exists public.room_auth (
+  user_id     text        not null,
+  puzzle_date date        not null,
+  scope_id    text        not null,
+  channel_id  text,
+  name        text        not null,
+  avatar      text,
+  verified_at timestamptz not null default now(),
+  primary key (user_id, puzzle_date)
+);
+
+alter table public.room_auth enable row level security;

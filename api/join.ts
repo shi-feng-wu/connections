@@ -8,6 +8,7 @@ import { botInGuild, fetchDiscordUser, fetchUserGuildIds } from './_discord.js';
 import { botCardUrl, CARD_JOIN_THROTTLE_MS, cardPayload, playerFinished, playingLine, sendCard, withGrids } from './_livecard.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
 import { broadcastRoom } from './_realtime.js';
+import { stampRoomAuth } from './_scoring.js';
 
 // Registers a player on the room's "who's playing today" card when they open the
 // Activity, then refreshes the card. The card is a bot message in the channel (posted
@@ -40,12 +41,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const guildId = typeof body.guildId === 'string' ? body.guildId : null;
     const channelId = typeof body.channelId === 'string' ? body.channelId : null;
     const scope = canonicalScope(guildId, channelId);
+    const db = admin();
     // DM/group (c:) rooms have no "who's playing" card, but progress deltas already fan out for them
     // (/api/guess), so announce the join too — otherwise a newcomer's tile only appears on their
     // first guess or the next backstop. Identity only; progress arrives on their first guess. The
     // authoritative /api/roster read already lists finishers, so recipients treat this as a known
     // player (identity refresh), not a fresh insert.
     if (scope && scope.startsWith('c:') && channelId) {
+      // Stamp the verified room for finish-time scoring (api/_scoring.ts). A c: room needs no
+      // membership check — knowing the channel id IS being in the DM/group — and identity above
+      // came from the token. Off the response path; it only has to land before the player's
+      // finishing guess, which is at least a whole game away.
+      if (db) {
+        waitUntil(
+          stampRoomAuth(db, {
+            userId: user.id,
+            date: todayET(),
+            scopeId: scope,
+            channelId,
+            name: user.name,
+            avatar: user.avatar ?? null,
+          }).catch((e) => {
+            console.warn('[join] room stamp failed', e instanceof Error ? e.message : e);
+          }),
+        );
+      }
       waitUntil(
         broadcastRoom(scope, 'join', {
           userId: user.id,
@@ -61,7 +81,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
-    const db = admin();
     if (!db) {
       res.status(503).json({ error: 'unavailable' });
       return;
@@ -107,6 +126,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       res.status(403).json({ ok: false, reason: 'not-a-member' });
       return;
     }
+
+    // Membership confirmed → stamp the verified room for finish-time scoring
+    // (api/_scoring.ts): /api/guess scores the finishing guess into this stamp, in the
+    // same request that commits it. Off the response path; it only has to land before
+    // that finishing guess, which is at least a whole game away.
+    waitUntil(
+      stampRoomAuth(db, {
+        userId: user.id,
+        date,
+        scopeId: scope,
+        channelId,
+        name: user.name,
+        avatar: user.avatar ?? null,
+      }).catch((e) => {
+        console.warn('[join] room stamp failed', e instanceof Error ? e.message : e);
+      }),
+    );
 
     const { players } = mergePlayer(existing, {
       id: user.id,

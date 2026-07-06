@@ -691,6 +691,33 @@ export function App({
     }
   }
 
+  // Register this player in the room: appends them to the "who's playing" card and — the
+  // part scoring depends on — has the server verify the room against the Discord token
+  // (guild membership for g: scopes) and stamp it in room_auth, so /api/guess can score the
+  // finishing guess in the same request that commits it (api/_scoring.ts). Called after the
+  // handshake, and AGAIN at the midnight-ET day swap: the stamp is per puzzle day, so a
+  // session that crosses the rollover must re-verify for the new date or its finish would
+  // have no room to score into (and would fall back to the client-posted /api/score).
+  async function joinRoom(): Promise<{ botInstalled?: boolean | null } | null> {
+    const accessToken = accessTokenRef.current;
+    if (!accessToken) return null;
+    try {
+      const r = await fetch("/api/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accessToken,
+          guildId: guildIdRef.current,
+          channelId: channelIdRef.current,
+        }),
+      });
+      if (!r.ok) return null;
+      return (await r.json()) as { botInstalled?: boolean | null };
+    } catch {
+      return null; // best-effort; a miss means no card edit and the /api/score fallback
+    }
+  }
+
   function onFinish(): void {
     const g = gameRef.current;
     if (!g) return;
@@ -929,6 +956,9 @@ export function App({
     setNewDayDate(etDate());
     setNewDayNo(undefined); // clear last turnover's number; the new one resolves post-load
     setResetting(true);
+    // Re-stamp the room for the NEW puzzle date (room_auth is per player per day) so a
+    // finish after the rollover scores server-side too, not just via the client fallback.
+    void joinRoom();
     await sleep(540); // let the veil fade fully opaque (500ms) over the old board first
     await loadPuzzle();
     // The new puzzle is now in hand (behind the still-opaque veil); surface its number so
@@ -1079,32 +1109,19 @@ export function App({
         console.warn("Discord authenticate failed:", e);
       }
 
-      // Add this player to the channel's "who's playing today" card (append-only; the
-      // server edits the room's live card — the launcher's /connections message — via the
-      // interaction token). Fire-and-forget: the card is a nicety and must never block play.
-      // The response also carries botInstalled — whether this server has the bot — which
-      // targets the install prompts (loading tip, end-screen recap pitch).
+      // Register this player in the room (see joinRoom): the "who's playing" card append
+      // AND the join-time room stamp that finish-time scoring depends on. Fire-and-forget:
+      // the card is a nicety and must never block play. The response also carries
+      // botInstalled — whether this server has the bot — which targets the install prompts
+      // (loading tip, end-screen recap pitch).
       const launchGuild = guildIdRef.current;
-      void fetch("/api/join", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accessToken: access_token,
-          guildId: launchGuild,
-          channelId: channelIdRef.current,
-        }),
-      })
-        .then(async (r) => {
-          if (!r.ok || !launchGuild) return;
-          const d = (await r.json()) as { botInstalled?: boolean | null };
-          if (typeof d.botInstalled === "boolean") {
-            setBotInstalled(d.botInstalled);
-            writeBotInstalled(launchGuild, d.botInstalled);
-          }
-        })
-        .catch(() => {
-          /* no card this time */
-        });
+      void joinRoom().then((d) => {
+        if (!d || !launchGuild) return;
+        if (typeof d.botInstalled === "boolean") {
+          setBotInstalled(d.botInstalled);
+          writeBotInstalled(launchGuild, d.botInstalled);
+        }
+      });
 
       mark("hs-done");
       setHandshakeFail(null);

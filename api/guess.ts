@@ -9,6 +9,7 @@ import { triggerCardRefresh } from './_internal.js';
 import { cardNeedsRefresh } from './_livecard.js';
 import { fetchPuzzle, isValidDate, todayET } from './_nyt.js';
 import { broadcastRoom } from './_realtime.js';
+import { MAX_GUESSES, scoreRow, upsertScore } from './_scoring.js';
 import { isLocalDev, verifyAuth } from './_session.js';
 
 // Commit one guess to the player's authoritative daily record, then return its
@@ -22,7 +23,6 @@ import { isLocalDev, verifyAuth } from './_session.js';
 // Gated by the same auth ticket as /api/puzzle and /api/start; the ticket's uid is
 // the Discord user id — identical to the id /api/score resolves from the token — so
 // the (user_id, puzzle_date) row lines up across all three endpoints.
-const MAX_GUESSES = 40; // upper bound on a real game's submissions
 
 const snapshot = (game: Game) => ({
   mistakesLeft: game.mistakesLeft,
@@ -85,19 +85,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     // Load the committed record and replay it for the current state.
     const { data } = await db
       .from('progress')
-      .select('guesses, hints')
+      .select('guesses, hints, started_at, updated_at')
       .eq('user_id', uid)
       .eq('puzzle_date', date)
       .maybeSingle();
     const committed: string[][] =
       data && Array.isArray(data.guesses) ? (data.guesses as string[][]) : [];
 
+    // Duration for finish-time scoring: from the pinned start (set once, /api/start or the
+    // column default — the same pin /api/score's session iat mirrors) to the given end.
+    const startedAt = data?.started_at ? Date.parse(data.started_at as string) : NaN;
+    const durationTo = (endMs: number): number =>
+      Number.isFinite(startedAt) ? endMs - startedAt : 1000;
+
+    // Write the scores row for a finished replay, into the room /api/join verified and
+    // stamped for this player today (room_auth). Idempotent (first finish wins), so it's
+    // safe on every path that can see a finished game; a session with no stamp (opened
+    // before stamping existed, or local dev) is left to the client-posted /api/score
+    // fallback. Throws on a real write error → this request 500s → the client retries the
+    // guess → the already-finished branch below re-runs this until the row exists.
+    const ensureScored = async (endMs: number): Promise<void> => {
+      const { data: room } = await db
+        .from('room_auth')
+        .select('scope_id, channel_id, name, avatar')
+        .eq('user_id', uid)
+        .eq('puzzle_date', date)
+        .maybeSingle();
+      if (!room?.scope_id) {
+        // Greppable: a finish with no verified room to score into — the fallback path's job.
+        console.warn('[score] finish without room stamp', { user: uid, date });
+        return;
+      }
+      await upsertScore(
+        db,
+        scoreRow(
+          puzzle,
+          game,
+          { userId: uid, name: (room.name as string | null) ?? uid, avatar: (room.avatar as string | null) ?? null },
+          { scopeId: room.scope_id as string, channelId: (room.channel_id as string | null) ?? null },
+          durationTo(endMs),
+        ),
+      );
+    };
+
     // Seed revealed hints so the broadcast delta (and thus a finishing player's
     // live-recomputed score) reflects the −hintPenalty. Hints are recorded on their
     // own path (api/hint); replaying them here only affects the reported count.
     const game = Game.fromGuesses(puzzle, committed, undefined, data?.hints);
     if (game.status !== 'playing') {
-      // Already finished today; nothing to add.
+      // Already finished today; nothing to add — but make sure the finish is SCORED before
+      // answering. This is the self-heal for a finish whose score write failed (that request
+      // 500s, the client retries the guess, and lands here): duration ends at the record's
+      // updated_at (the real finishing guess), not now, so a late retry can't stretch it.
+      await ensureScored(data?.updated_at ? Date.parse(data.updated_at as string) : Date.now());
       res.status(200).json({ ok: true, done: game.status, state: snapshot(game) });
       return;
     }
@@ -118,7 +158,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     // intentionally omitted from the payload: set once by /api/start (or the column
     // default on a first-guess insert) and never overwritten here.
     const counted = result.type !== 'duplicate' && result.type !== 'noop';
-    if (counted && committed.length < MAX_GUESSES) {
+    const persisted = counted && committed.length < MAX_GUESSES;
+    if (persisted) {
       await db.from('progress').upsert(
         {
           user_id: uid,
@@ -128,6 +169,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         },
         { onConflict: 'user_id,puzzle_date' },
       );
+    }
+
+    // Finish-time scoring: the guess that ended the game is now durably committed above, so
+    // score it HERE, in the same request — never in a second client-initiated call that a
+    // closing Activity can lose (that design silently dropped finished games; 2026-07-05).
+    // Awaited before the response on purpose: when this returns 200, the finish is fully
+    // finalized. Gated on `persisted` so a finish whose append was skipped (the MAX_GUESSES
+    // ceiling) can never score a record that doesn't contain its own finishing guess.
+    if (persisted && game.status !== 'playing') {
+      await ensureScored(Date.now());
     }
 
     // Fan the new state out to everyone watching this room's roster, instantly (the SSE relay —

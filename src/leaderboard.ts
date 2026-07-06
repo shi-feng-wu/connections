@@ -25,6 +25,10 @@ export async function submitScore(
   try {
     const r = await fetch('/api/score', {
       method: 'POST',
+      // keepalive: if the player closes the Activity the moment they finish, the attempt
+      // still leaves the building (the retry loop dies with the document, but the
+      // finish-time write in /api/guess is the real safety net — this is the fallback).
+      keepalive: true,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
     });

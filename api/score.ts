@@ -1,9 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { Game, MAX_MISTAKES } from '../src/game.js';
+import { Game } from '../src/game.js';
 import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import { fetchDiscordUser, fetchUserGuildIds } from './_discord.js';
 import { fetchPuzzle, todayET } from './_nyt.js';
+import { MAX_GUESSES, scoreRow, upsertScore } from './_scoring.js';
 import { verifySession } from './_session.js';
 
 // The only path a score reaches the leaderboard. The client is trusted only for
@@ -17,14 +18,16 @@ import { verifySession } from './_session.js';
 // via the channel slot. Writes use the service role, so the anon key can't touch
 // the table.
 
+// This is now the FALLBACK scoring path: the authoritative write happens server-side the
+// moment the finishing guess commits (/api/guess + the /api/join room stamp — see
+// api/_scoring.ts). This route stays for sessions that never got a stamp (a session opened
+// before stamping existed, a failed stamp write) and for older cached client bundles; its
+// upsert is first-finish-wins, so double-writing with the finish-time path is harmless.
+
 // A full day. The daily-reset check (session.date !== todayET, below) is the real
 // per-day boundary — anyone who hasn't finished by reset just stays incomplete — so
 // this is only a hard ceiling that stops an ancient session from scoring.
 const SESSION_MAX_AGE = 24 * 60 * 60 * 1000;
-// Speed-component cap. The reset ends the day before this binds, so it only guards
-// extremes (e.g. a session started right at midnight ET and finished a full day later).
-const DURATION_CAP = 24 * 60 * 60 * 1000;
-const MAX_GUESSES = 40; // upper bound on a real game's submissions
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
@@ -93,11 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       res.status(200).json({ ok: false, reason: 'not-finished' });
       return;
     }
-    // 5. Server-measured duration drives the speed component. age = now - session
-    //    iat, and iat is the pinned started_at, so a relaunch can't shrink it.
-    game.durationMs = Math.min(DURATION_CAP, Math.max(1000, age));
-
-    // 6. Authorize the room. Guild ids aren't secret, so write a guild board only after
+    // 5. Authorize the room. Guild ids aren't secret, so write a guild board only after
     //    confirming this user belongs to that guild — this matters because the server-view
     //    board derives its roster from scores.scope_id, so an unauthorized g: write would
     //    plant the player on a server they're not in. A DM/group channel id is known only to
@@ -110,30 +109,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
     const scopeId = canonicalScope(guildId, channelId);
+    // No room at all (no guild, no channel) → nothing this score could land on: every
+    // board and roster derives from scope_id. Don't write an unreachable row.
+    if (!scopeId) {
+      res.status(200).json({ ok: false, reason: 'no-room' });
+      return;
+    }
 
-    await db.from('scores').upsert(
-      {
-        puzzle_id: puzzle.id,
-        puzzle_date: puzzle.date,
-        scope_id: scopeId,
-        // Records which channel this finish happened in, so the leaderboard/roster can be
-        // narrowed to one channel (server view ignores it). null for a c: DM/group scope.
-        channel_id: channelId,
-        user_id: user.id,
-        name: user.name,
-        avatar: user.avatar ?? null,
-        score: game.score,
-        mistakes: MAX_MISTAKES - game.mistakesLeft,
-        hints_used: game.hintsUsed,
-        // groups deduced (0-4); drives the weekly strip's per-day segments,
-        // a loss keeps however many the player cracked
-        groups_solved: game.groupsSolved,
-        solved: game.status === 'won',
-        duration_ms: game.durationMs,
-      },
-      // first finish wins; a reload of today's puzzle can't overwrite it
-      { onConflict: 'puzzle_id,user_id', ignoreDuplicates: true },
+    // 6. Same row construction as the finish-time path (api/_scoring.ts): first finish
+    //    wins, a reload of today's puzzle can't overwrite it. Duration = now - the pinned
+    //    session start (a relaunch can't shrink it); scoreRow clamps it.
+    const inserted = await upsertScore(
+      db,
+      scoreRow(
+        puzzle,
+        game,
+        { userId: user.id, name: user.name, avatar: user.avatar ?? null },
+        { scopeId, channelId },
+        age,
+      ),
     );
+    // Greppable: the fallback actually wrote the row — finish-time scoring missed this
+    // finish. Expected while pre-stamp sessions drain after deploy; a steady rate beyond
+    // that means the /api/join stamp or the /api/guess write path has regressed.
+    if (inserted) console.log('[score] fallback write', { user: user.id, date: session.date });
 
     res.status(200).json({ ok: true, score: game.score, solved: game.status === 'won' });
   } catch (e) {

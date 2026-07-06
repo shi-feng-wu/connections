@@ -33,7 +33,7 @@
 
 ### Added
 
-- Need a hint? Tap the lightbulb to paint one word's tile in its group's color from the easiest group you haven't solved yet, like the NYT hint page. Each hint costs 30 points.
+- Need a hint? Tap the lightbulb to paint one word's tile in its group's color from the easiest unsolved group, like the NYT hint page. Each hint costs 30 points.
 
 ## v1.13.0 — Jul 1, 2026
 

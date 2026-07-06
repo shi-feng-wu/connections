@@ -21,7 +21,7 @@
 
 ### Changed
 
-- The leaderboard's average-mistakes column now shows on phones too.
+- The leaderboard's average-mistakes column now shows on mobile too.
 
 ## v1.14.1 — Jul 1, 2026
 

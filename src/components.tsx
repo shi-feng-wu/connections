@@ -358,7 +358,9 @@ function MobileMasthead({
           onClick={onOpenMenu}
           hover="opacity-70"
           aria-label="Open menu"
-          className="relative grid h-9 w-9 flex-none cursor-pointer place-items-center rounded-lg text-zinc-300 transition-opacity active:opacity-60"
+          // ::before pads the 36px box out to a ~44px hit area (touch app) without
+          // moving the layout — same trick as the roster tabs.
+          className="relative grid h-9 w-9 flex-none cursor-pointer place-items-center rounded-lg text-zinc-300 transition-opacity before:absolute before:-inset-1 before:content-[''] active:opacity-60"
         >
           <Menu size={20} strokeWidth={2.2} aria-hidden />
           {hasNew && (

@@ -6,7 +6,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { Check, Newspaper, RotateCw, X } from "lucide-react";
+import { Check, Hourglass, Newspaper, X } from "lucide-react";
 import { ResetCountdown } from "./countdown";
 import { finishedScore, LEVELS, MAX_MISTAKES } from "./game";
 import type { PlayerState } from "./player";
@@ -670,16 +670,19 @@ function RecapPrompt({ onAdd }: { onAdd: () => void }) {
   if (dismissed) return null;
   return (
     <div className="relative flex flex-none animate-fade-in flex-col rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+      {/* hover dims via opacity (an appended text-zinc-* can't out-cascade the base
+          shade — lower shades emit earlier in the sheet, so the old text-zinc-300
+          hover was dead); the ::before pads the ~30px box to a ~44px hit area */}
       <HoverButton
         onClick={() => setDismissed(true)}
-        hover="text-zinc-300"
+        hover="opacity-70"
         aria-label="Dismiss"
         title="Dismiss"
-        className="absolute right-1.5 top-1.5 cursor-pointer rounded-full p-2 text-zinc-600 transition-colors duration-150 ease-out active:text-zinc-300"
+        className="absolute right-1.5 top-1.5 cursor-pointer rounded-full p-2 text-zinc-500 transition duration-150 ease-out before:absolute before:-inset-[7px] before:content-[''] active:text-zinc-300"
       >
         <X size={14} strokeWidth={2.5} aria-hidden />
       </HoverButton>
-      {/* icon-anchored heading: the newspaper glyph echoes the RotateCw on the
+      {/* icon-anchored heading: the newspaper glyph echoes the Hourglass on the
           Next-puzzle row below, so the rail footer reads as one consistent stack */}
       <div className="flex gap-2.5 pr-7">
         <Newspaper
@@ -857,7 +860,7 @@ export function Roster({
               );
             })
           ) : (
-            <div className="px-2 py-6 text-center text-[13px] text-zinc-600">
+            <div className="px-2 py-6 text-center text-[13px] text-zinc-400">
               No one here yet.
             </div>
           )}
@@ -871,7 +874,9 @@ export function Roster({
           fade dissolves into it) */}
       {nextPuzzle && (
         <div className="flex flex-none items-center gap-2.25 border-t border-white/[0.07] px-1 pt-2.75">
-          <RotateCw size={15} strokeWidth={2.25} className="flex-none text-zinc-500" aria-hidden />
+          {/* Hourglass, not a refresh arrow — a circular arrow reads as "replay/redo
+              today's puzzle", which the daily format doesn't allow. */}
+          <Hourglass size={15} strokeWidth={2.25} className="flex-none text-zinc-500" aria-hidden />
           <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-zinc-500">
             Next puzzle
           </span>

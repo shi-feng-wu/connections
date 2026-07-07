@@ -78,7 +78,7 @@ function CategoryIcon({
 const TA_CLS =
   "w-full resize-y rounded-xl border border-zinc-700 bg-transparent px-3.5 py-3.25 font-sans text-[14px] leading-[1.5] text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-zinc-500";
 const SEND_CLS =
-  "inline-flex h-[44px] w-full cursor-pointer items-center justify-center gap-1.75 rounded-full bg-zinc-100 font-sans text-[14px] font-semibold text-zinc-900 transition-opacity disabled:cursor-default disabled:opacity-40";
+  "inline-flex h-[44px] w-full cursor-pointer items-center justify-center gap-1.75 rounded-full bg-zinc-100 font-sans text-[14px] font-semibold text-zinc-900 transition-opacity active:opacity-70 disabled:cursor-default disabled:opacity-40";
 
 // A short relative time for the inbox lists ("3m", "2h", "5d"). Coarse on purpose.
 function ago(iso: string): string {
@@ -148,27 +148,31 @@ function Bubble({
 }
 
 // The Bug / Idea / Other selector — line-icon pills. Selected = outlined in zinc-100 (no fill), so
-// the composer stays monochrome.
+// the composer stays monochrome. Chips stay mounted after a tap, so hover must be mouse-only
+// (HoverButton) — CSS :hover would strand on the tapped chip on touch. The hover is a faint
+// bg tint rather than the border/text brightening: an appended class can't out-cascade the
+// base border/text shade (lower zinc shades emit earlier in the sheet), a fresh property can.
 function CategoryChips({ value, onChange }: { value: string; onChange: (c: string) => void }): ReactNode {
   return (
     <div className="flex flex-wrap gap-2">
       {CHIPS.map((c) => {
         const on = value === c;
         return (
-          <button
+          <HoverButton
             key={c}
             type="button"
             onClick={() => onChange(c)}
+            hover={on ? "" : "bg-white/[0.04]"}
             className={
-              "inline-flex cursor-pointer items-center gap-1.75 rounded-full border px-3 py-2 font-sans text-[13px] font-semibold transition-colors " +
+              "inline-flex cursor-pointer items-center gap-1.75 rounded-full border px-3 py-2 font-sans text-[13px] font-semibold transition-colors active:scale-[0.98] " +
               (on
-                ? "border-zinc-100 bg-transparent text-zinc-100"
-                : "border-zinc-700 bg-transparent text-zinc-400 hover:border-zinc-600 hover:text-zinc-300")
+                ? "border-zinc-100 text-zinc-100"
+                : "border-zinc-700 text-zinc-400")
             }
           >
             <CategoryIcon category={c} size={15} />
             {c}
-          </button>
+          </HoverButton>
         );
       })}
     </div>
@@ -311,13 +315,15 @@ function ComposeBlock({
 
 // An icon-only back button shown at the head of a thread when the page chrome can't host one
 // (the dev preview playground — the real app lifts this up to sit across from the close X).
+// :hover is safe here — tapping unmounts the thread (and this button) so it can't strand.
+// The ::before extends the 36px box to a ~44px hit area without moving the layout.
 function InlineBack({ onClick }: { onClick: () => void }): ReactNode {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label="Back"
-      className="grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] bg-white/[0.05] text-zinc-400 transition-colors hover:bg-white/[0.09] hover:text-zinc-200"
+      className="relative grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] bg-white/[0.05] text-zinc-400 transition-colors before:absolute before:-inset-1 before:content-[''] hover:bg-white/[0.09] hover:text-zinc-200 active:scale-[0.97]"
     >
       <ChevronLeft size={18} strokeWidth={2.25} aria-hidden />
     </button>
@@ -344,7 +350,7 @@ function Loading(): ReactNode {
 // A dashed placeholder for an empty inbox.
 function EmptyNote({ children }: { children: ReactNode }): ReactNode {
   return (
-    <p className="m-0 rounded-xl border border-dashed border-zinc-800 px-3.5 py-6 text-center font-sans text-[13px] leading-[1.5] text-zinc-500">
+    <p className="m-0 rounded-xl border border-dashed border-zinc-800 px-3.5 py-6 text-center font-sans text-[13px] leading-[1.5] text-zinc-400">
       {children}
     </p>
   );
@@ -398,12 +404,15 @@ function Row({
   onClick: () => void;
 }): ReactNode {
   return (
-    <button
+    // Rows persist after a tap (they just become `selected`), so the hover tint is
+    // mouse-only via HoverButton — raw :hover would strand on the last-tapped row on touch.
+    <HoverButton
       type="button"
       onClick={onClick}
+      hover={selected ? "" : "bg-white/[0.055]"}
       className={
-        "flex w-full cursor-pointer items-start gap-3 rounded-xl p-2.5 text-left transition-colors " +
-        (selected ? "bg-white/[0.07]" : "bg-transparent hover:bg-white/[0.055]")
+        "flex w-full cursor-pointer items-start gap-3 rounded-xl p-2.5 text-left transition-colors active:bg-white/[0.08]" +
+        (selected ? " bg-white/[0.07]" : "")
       }
     >
       {leading}
@@ -431,7 +440,7 @@ function Row({
           {unread && <span className="h-2 w-2 flex-none rounded-full bg-[#a0c35a]" aria-label="Unread" />}
         </span>
       </span>
-    </button>
+    </HoverButton>
   );
 }
 
@@ -440,19 +449,21 @@ function Row({
 // echoes the Send button); `selected` while the compose form is the pane showing.
 function NewMessageRow({ selected, onClick }: { selected: boolean; onClick: () => void }): ReactNode {
   return (
-    <button
+    // Same mouse-only hover reasoning as Row above — this row persists after a tap too.
+    <HoverButton
       type="button"
       onClick={onClick}
+      hover={selected ? "" : "bg-white/[0.055]"}
       className={
-        "flex w-full cursor-pointer items-center gap-3 rounded-xl p-2.5 text-left transition-colors " +
-        (selected ? "bg-white/[0.07]" : "bg-transparent hover:bg-white/[0.055]")
+        "flex w-full cursor-pointer items-center gap-3 rounded-xl p-2.5 text-left transition-colors active:bg-white/[0.08]" +
+        (selected ? " bg-white/[0.07]" : "")
       }
     >
       <span className="grid h-9.5 w-9.5 flex-none place-items-center rounded-full bg-zinc-100 text-zinc-900">
         <SquarePen size={17} strokeWidth={2.25} aria-hidden />
       </span>
       <span className="font-sans text-[14.5px] font-semibold text-zinc-100">New message</span>
-    </button>
+    </HoverButton>
   );
 }
 
@@ -594,24 +605,28 @@ function LiveChat({
     <div className="@container">
       <div className="flex flex-col gap-7 @[620px]:grid @[620px]:grid-cols-2 @[620px]:gap-0">
         <div ref={detailRef} className="@[620px]:order-last @[620px]:pl-9">
-          {openId === null ? (
-            <ComposeBlock
-              api={api}
-              onCreated={(threadId) => {
-                void refresh();
-                setOpenId(threadId);
-              }}
-            />
-          ) : (
-            <TicketThread
-              api={api}
-              threadId={openId}
-              ticket={tickets?.find((t) => t.id === openId)}
-              version={version}
-              onOpened={refresh}
-              participants={{ user: meIdent(me), dev: SUPPORT }}
-            />
-          )}
+          {/* keyed so a pane swap (compose ↔ thread) re-fires animate-tab-in — the same
+              fade-up the roster tabs use, instead of an instant cut */}
+          <div key={openId ?? "compose"} className="animate-tab-in">
+            {openId === null ? (
+              <ComposeBlock
+                api={api}
+                onCreated={(threadId) => {
+                  void refresh();
+                  setOpenId(threadId);
+                }}
+              />
+            ) : (
+              <TicketThread
+                api={api}
+                threadId={openId}
+                ticket={tickets?.find((t) => t.id === openId)}
+                version={version}
+                onOpened={refresh}
+                participants={{ user: meIdent(me), dev: SUPPORT }}
+              />
+            )}
+          </div>
         </div>
         <div className="flex flex-col gap-3 border-t border-white/[0.08] pt-7 @[620px]:border-t-0 @[620px]:border-r @[620px]:border-white/[0.08] @[620px]:pt-0 @[620px]:pr-9">
           <Eyebrow>Your messages</Eyebrow>
@@ -812,16 +827,20 @@ export function AdminInbox({
     return () => liftBack(null);
   }, [liftBack, open, back]);
 
+  // The open thread and the list are keyed so the drill-in/back swap re-fires
+  // animate-tab-in (the roster tabs' fade-up) rather than cutting.
   if (open) {
     return (
-      <AdminThread
-        api={api}
-        ticket={open}
-        version={version}
-        onBack={back}
-        showInlineBack={!liftBack}
-        me={me}
-      />
+      <div key={open.threadId} className="animate-tab-in">
+        <AdminThread
+          api={api}
+          ticket={open}
+          version={version}
+          onBack={back}
+          showInlineBack={!liftBack}
+          me={me}
+        />
+      </div>
     );
   }
 
@@ -830,7 +849,7 @@ export function AdminInbox({
     return <p className="py-10 text-center font-sans text-[14px] text-zinc-500">No messages yet.</p>;
   }
   return (
-    <div className="flex flex-col gap-0.5">
+    <div key="list" className="flex animate-tab-in flex-col gap-0.5">
       {tickets.map((t) => (
         <Row
           key={t.threadId}

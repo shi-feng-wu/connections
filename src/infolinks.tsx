@@ -340,17 +340,45 @@ function DetailView({
     (fn: (() => void) | null) => setThreadBack(() => fn),
     [],
   );
+
+  // Animated close: play `detailin` in reverse (fade + drop) and fade the scrim, then
+  // unmount — the mirror of the UtilitySheet's animateOut, so no overlay ever just
+  // vanishes. Exits run quicker than the 0.3s entrance (leaving shouldn't feel slower
+  // than arriving). Every close route (X, Esc, scrim tap) runs through here; idempotent.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const scrimRef = useRef<HTMLDivElement>(null);
+  const closing = useRef(false);
+  const animateOut = useCallback((): void => {
+    if (closing.current) return;
+    closing.current = true;
+    const el = panelRef.current;
+    if (el) {
+      // The `detailin` entrance fills `both`, and a filled animation pins opacity/
+      // transform against inline styles — cancel it so the exit styles can take.
+      el.getAnimations().forEach((a) => a.cancel());
+      el.style.transition = "opacity 0.18s ease-out, transform 0.18s ease-out";
+      el.style.opacity = "0";
+      el.style.transform = "translateY(10px)";
+    }
+    if (scrimRef.current) {
+      scrimRef.current.style.transition = "opacity 0.18s ease-out";
+      scrimRef.current.style.opacity = "0";
+    }
+    window.setTimeout(onBack, 170);
+  }, [onBack]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") onBack();
+      if (e.key === "Escape") animateOut();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onBack]);
+  }, [animateOut]);
 
   const m = META[id];
   const content = (
     <div
+      ref={panelRef}
       // Three tiers, mirroring the gameplay area's visual tiers (its 800 desktop cut + the
       // max-w-480 "roomy phone" column cap that makes 500–799 read as a tablet band):
       //  • ≥800 (bounds): a fixed panel sized/positioned to the game card, with matching rounded
@@ -389,9 +417,9 @@ function DetailView({
         touch :hover has nothing to sit on. Esc closes it too (above). */}
       <button
         type="button"
-        onClick={onBack}
+        onClick={animateOut}
         aria-label="Close"
-        className="absolute right-4 top-[max(1rem,var(--sait))] z-10 grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] bg-white/[0.05] text-zinc-400 transition-colors hover:bg-white/[0.09] hover:text-zinc-200 min-[500px]:top-4 min-[800px]:right-5 min-[800px]:top-5"
+        className="absolute right-4 top-[max(1rem,var(--sait))] z-10 grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] bg-white/[0.05] text-zinc-400 transition-colors before:absolute before:-inset-1 before:content-[''] hover:bg-white/[0.09] hover:text-zinc-200 active:scale-[0.97] min-[500px]:top-4 min-[800px]:right-5 min-[800px]:top-5"
       >
         <X size={18} strokeWidth={2.25} aria-hidden />
       </button>
@@ -403,7 +431,7 @@ function DetailView({
           type="button"
           onClick={() => threadBack()}
           aria-label="Back"
-          className="absolute left-4 top-[max(1rem,var(--sait))] z-10 grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] bg-white/[0.05] text-zinc-400 transition-colors hover:bg-white/[0.09] hover:text-zinc-200 min-[500px]:top-4 min-[800px]:left-5 min-[800px]:top-5"
+          className="absolute left-4 top-[max(1rem,var(--sait))] z-10 grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] bg-white/[0.05] text-zinc-400 transition-colors before:absolute before:-inset-1 before:content-[''] hover:bg-white/[0.09] hover:text-zinc-200 active:scale-[0.97] min-[500px]:top-4 min-[800px]:left-5 min-[800px]:top-5"
         >
           <ChevronLeft size={18} strokeWidth={2.25} aria-hidden />
         </button>
@@ -450,17 +478,19 @@ function DetailView({
     bounds ? (
       <>
         <div
+          ref={scrimRef}
           className="fixed inset-0 z-40 animate-overlay-fade bg-black/50 backdrop-blur-[2px]"
-          onClick={onBack}
+          onClick={animateOut}
           aria-hidden
         />
         {content}
       </>
     ) : (
       <div
+        ref={scrimRef}
         className="fixed inset-0 z-50 flex items-center justify-center min-[500px]:animate-overlay-fade min-[500px]:bg-black/50 min-[500px]:backdrop-blur-[2px]"
         onClick={(e) => {
-          if (e.target === e.currentTarget) onBack();
+          if (e.target === e.currentTarget) animateOut();
         }}
       >
         {content}
@@ -487,7 +517,7 @@ function SheetRow({
     // a row tap closes (unmounts) the sheet, so a stranded :hover has nothing to sit on.
     <button
       type="button"
-      className="flex w-full cursor-pointer items-center gap-3 rounded-xl bg-transparent p-2.5 text-left transition-colors hover:bg-white/[0.06]"
+      className="flex w-full cursor-pointer items-center gap-3 rounded-xl bg-transparent p-2.5 text-left transition-colors hover:bg-white/[0.06] active:bg-white/[0.08]"
       onClick={() => onSelect(l)}
     >
       <span className="grid h-9.5 w-9.5 flex-none place-items-center rounded-[10px] bg-white/[0.06] text-zinc-300">
@@ -541,8 +571,9 @@ function UtilitySheet({
   const closing = useRef(false);
 
   // Animated dismiss: slide the sheet down + fade the scrim, then unmount. Every "close"
-  // gesture (scrim tap, Escape, swipe-flick) runs through here so the sheet never just
-  // vanishes. Idempotent — a second trigger mid-animation is ignored.
+  // gesture (scrim tap, Escape, swipe-flick, row select) runs through here so the sheet
+  // never just vanishes — on a row select the page fades in over the departing sheet.
+  // Idempotent — a second trigger mid-animation is ignored.
   const animateOut = useCallback((): void => {
     if (closing.current) return;
     closing.current = true;
@@ -664,7 +695,10 @@ function UtilitySheet({
               l={l}
               showBadge={showBadge}
               chatUnread={chatUnread}
-              onSelect={onSelect}
+              onSelect={(sel) => {
+                onSelect(sel);
+                animateOut();
+              }}
             />
           ))}
         </div>
@@ -692,7 +726,7 @@ function LinkBar({
   className?: string;
 }): ReactNode {
   const linkCls =
-    "inline-flex items-center gap-1.75 font-sans text-[12px] font-medium text-zinc-500 transition-colors";
+    "inline-flex items-center gap-1.75 font-sans text-[12px] font-medium text-zinc-500 transition-colors active:opacity-60";
   return (
     <div
       className={
@@ -787,10 +821,10 @@ export function useInfoLinks(
     setFromSheet(false);
     setActive(id);
   };
-  // From the mobile sheet: close the sheet under the detail, but remember to bring it back.
+  // From the mobile sheet: the sheet dismisses itself (animated, via its row-select
+  // handler) under the incoming detail — just remember to bring it back on close.
   const openFromSheet = (id: LinkId): void => {
     markSeen(id);
-    setMenuOpen(false);
     setFromSheet(true);
     setActive(id);
   };
@@ -812,11 +846,11 @@ export function useInfoLinks(
     if (l.href) goExternal(l.href);
     else if (l.page) open(l.page);
   };
+  // No setMenuOpen(false) here — the sheet plays its own animated exit and unmounts
+  // itself through onClose in both branches.
   const selectFromSheet = (l: LinkDef): void => {
-    if (l.href) {
-      goExternal(l.href);
-      setMenuOpen(false);
-    } else if (l.page) openFromSheet(l.page);
+    if (l.href) goExternal(l.href);
+    else if (l.page) openFromSheet(l.page);
   };
 
   // Dev-only "Refresh": clear today's progress server-side, then reload to replay from a clean

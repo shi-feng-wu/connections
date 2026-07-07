@@ -399,7 +399,7 @@ export function LedgerBody({
   const { board } = data;
   if (!board.length) {
     return (
-      <div className="px-2 py-7 text-center text-[13px] text-zinc-600">
+      <div className="px-2 py-7 text-center text-[13px] text-zinc-400">
         No games yet.
       </div>
     );
@@ -429,7 +429,7 @@ export function LedgerBody({
             />
           ))
         ) : (
-          <div className="px-2 py-6 text-center text-[13px] text-zinc-600">
+          <div className="px-2 py-6 text-center text-[13px] text-zinc-400">
             No players match.
           </div>
         )}

@@ -32,7 +32,6 @@
 
   /* Defining keyframes here exposes them as `animate-*` utilities. */
   --animate-pick-ring: pickRing 1.4s ease-in-out infinite;
-  --animate-livedot: livedot 1.6s ease-in-out infinite;
   --animate-dots: dots 1.4s steps(4, end) infinite;
   /* Live-roster motion (redesign "Roster Animation Concepts"). All ONE-SHOT — they play
      once when a row event lands and never loop (the old solve-flash was `infinite`, which
@@ -45,21 +44,16 @@
   --animate-row-in: rowIn 0.44s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   --animate-dot-drain: dotDrain 0.46s ease-out;
   --animate-overlay-fade: ovfade 0.16s ease;
-  --animate-sheet-rise: sheetrise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
   /* Info-links surfaces (redesign "Desktop/Mobile Connections"): the full-screen
      DetailView fades in as it eases up over the game (hero curve — the panel bg
      matches the app's black, so the rise+fade is what reads as the entrance); the
      mobile UtilitySheet rises from the bottom edge. */
   --animate-detail-in: detailin 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) both;
   --animate-sheet-up: sheetup 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
-  /* score hero easing into the header row at game end */
-  --animate-hero-in: heroIn 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
-  /* roster Live/Season/All-time tab swap — a quick, smaller heroIn so switching
-     tabs feels of a piece with the score hero (same glide), just snappier. */
+  /* Panel/content swaps (roster Live/Season/All-time tabs, chat pane drill-ins) — a
+     quick, small fade-up on the incoming panel, same glide curve as detail-in. */
   --animate-tab-in: tabIn 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) both;
-  /* Loading screen: category colors pulse in sequence, then the loaded page
-     fades in over the loader. */
-  --animate-qpulse: qpulse 1.5s ease-in-out infinite;
+  /* the loaded page fades in over the loader */
   --animate-fade-in: fadeIn 0.45s ease-out both;
   /* Midnight day-rollover veil: the centered "new puzzle" lockup eases up and unblurs
      as the overlay fades the old board out and the fresh one in. */
@@ -150,15 +144,6 @@
       transform: scale(1);
     }
   }
-  @keyframes livedot {
-    0%,
-    100% {
-      opacity: 0.35;
-    }
-    50% {
-      opacity: 1;
-    }
-  }
   @keyframes dots {
     0% {
       content: "";
@@ -184,16 +169,6 @@
       opacity: 1;
     }
   }
-  @keyframes heroIn {
-    from {
-      opacity: 0;
-      transform: translateY(6px);
-    }
-    to {
-      opacity: 1;
-      transform: none;
-    }
-  }
   @keyframes tabIn {
     from {
       opacity: 0;
@@ -202,16 +177,6 @@
     to {
       opacity: 1;
       transform: none;
-    }
-  }
-  @keyframes sheetrise {
-    from {
-      transform: translateY(16px) scale(0.99);
-      opacity: 0;
-    }
-    to {
-      transform: none;
-      opacity: 1;
     }
   }
   @keyframes detailin {
@@ -238,18 +203,6 @@
     }
     to {
       opacity: 1;
-    }
-  }
-  @keyframes qpulse {
-    0%,
-    70%,
-    100% {
-      opacity: 0.22;
-      transform: scale(1);
-    }
-    28% {
-      opacity: 1;
-      transform: scale(1.06);
     }
   }
   @keyframes dayrise {

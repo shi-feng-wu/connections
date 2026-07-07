@@ -45,7 +45,7 @@
 
 ### Changed
 
-- You no longer have to wait for a guess to finish animating before submitting the next guess.
+- You no longer have to wait for a guess to finish animating before guessing again.
 
 ## v1.12.0 — Jun 29, 2026
 

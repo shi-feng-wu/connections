@@ -39,7 +39,7 @@
 
 ### Added
 
-- When we reply to feedback, the bot also DMs you the response in Discord.
+- When we reply to feedback the bot will DM you the response in Discord.
 
 ## v1.12.1 — Jun 30, 2026
 

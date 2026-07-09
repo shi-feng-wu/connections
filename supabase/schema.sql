@@ -387,22 +387,39 @@ end $$;
 
 alter table public.recap_posts enable row level security;
 
--- Recap opt-out: one row per (scope, channel) a moderator silenced with /unsubscribe, so the
--- daily recap stops posting there. recap_channels() subtracts this set below, so a listed
--- channel drops out of the nightly run even though its live_cards row still exists. It re-arms
--- the moment the Activity is launched in that channel again — postCard (api/interactions.ts)
--- deletes the row when it (re)establishes the "who's playing" card — matching "off until
--- someone starts the activity here again". Written only by the service role (the /unsubscribe
--- handler and postCard); RLS with no policy denies the anon key entirely.
-create table if not exists public.recap_optouts (
+-- Posts opt-out: one row per (scope, channel) a moderator turned off with /disable-posts, so the
+-- bot goes silent there — NO live "who's playing" card AND no nightly recap. post-card checks this
+-- set and skips posting; recap_channels() subtracts it below so the nightly cron skips it too.
+-- STICKY: unlike the old recap-only opt-out, a launch/solve in the channel does NOT clear it — only
+-- /enable-posts in that channel does. Absence of a row = enabled (the default); playing still
+-- records scores, this only mutes the bot's posts. Written only by the service role (the
+-- /disable-posts + /enable-posts handlers); RLS with no policy denies the anon key entirely.
+create table if not exists public.post_optouts (
   scope_id      text        not null,
   channel_id    text        not null,
-  opted_out_by  text,                                   -- the user who ran /unsubscribe (audit)
+  opted_out_by  text,                                   -- the user who ran /disable-posts (audit)
   opted_out_at  timestamptz not null default now(),
   primary key (scope_id, channel_id)
 );
 
-alter table public.recap_optouts enable row level security;
+-- One-time migration from the pre-rename table (recap_optouts → post_optouts). Same columns, so the
+-- rows carry over verbatim; the CREATE above already made an (empty) post_optouts, so copy the old
+-- rows in and drop the old table. Guarded, so a fresh DB and a re-run both no-op. NOTE: these rows
+-- were recap-only under the old name; after the move they also suppress the live card (the new
+-- semantics) — intended, since they're channels a mod turned off and never re-armed.
+do $$
+begin
+  if exists (
+    select 1 from pg_tables where schemaname = 'public' and tablename = 'recap_optouts'
+  ) then
+    insert into public.post_optouts (scope_id, channel_id, opted_out_by, opted_out_at)
+      select scope_id, channel_id, opted_out_by, opted_out_at from public.recap_optouts
+      on conflict (scope_id, channel_id) do nothing;
+    drop table public.recap_optouts;
+  end if;
+end $$;
+
+alter table public.post_optouts enable row level security;
 
 -- One row per player for a single puzzle in one room, ranked richest-first
 -- (solved before unsolved, then score, fewer mistakes, faster). Backs the daily
@@ -447,9 +464,9 @@ grant execute on function public.day_results(text, date, text) to anon, authenti
 -- the launcher's interaction token — api/post-card postDmCard), but the recap is bot-only, so those
 -- rows are excluded here via `interaction_token is null` (bot-backed cards never set it). So a
 -- channel with an established habit still gets a recap ("nobody got it… new day") on a quiet day,
--- but only where the bot can actually post. g: scopes only. Channels a moderator silenced with
--- /unsubscribe (a recap_optouts row) are subtracted, so the nightly run skips them until the
--- Activity is launched there again (which clears the opt-out).
+-- but only where the bot can actually post. g: scopes only. Channels a moderator turned off with
+-- /disable-posts (a post_optouts row) are subtracted, so the nightly run skips them until
+-- /enable-posts is run there again (which clears the opt-out — a launch no longer does).
 drop function if exists public.recap_channels();
 create or replace function public.recap_channels()
 returns table (scope_id text, channel_id text)
@@ -461,7 +478,7 @@ as $$
   where l.scope_id like 'g:%' and l.channel_id is not null and l.message_id is not null
     and l.interaction_token is null -- bot-backed cards only; token-backed (bot-less) get no recap
     and not exists (
-      select 1 from public.recap_optouts o
+      select 1 from public.post_optouts o
       where o.scope_id = l.scope_id and o.channel_id = l.channel_id
     );
 $$;

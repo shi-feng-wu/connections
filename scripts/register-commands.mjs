@@ -44,6 +44,9 @@ const CHAT_DESCRIPTION = 'Launch the daily 16-word Connections puzzle';
 // Match the Entry Point command so the slash command appears in the same places.
 const CONTEXTS = [0, 1, 2];
 const INTEGRATION_TYPES = [0, 1];
+// Discord permission bit (1 << 4) — gates the moderator-only commands (/enable-posts, /disable-posts)
+// to members who can configure the channel.
+const MANAGE_CHANNELS = '16';
 const API = 'https://discord.com/api/v10';
 
 if (!APP_ID || !TOKEN) {
@@ -133,33 +136,45 @@ if (chat) {
 }
 
 // --- 3) enable-posts chat-input command -------------------------------------------
-// In a server without the bot, /enable-posts replies (privately) with a one-click "Add to
-// Server" button — the only way the daily recap + live card can post there. GUILD context only
-// (no DM): recaps are a server-channel thing, so the command is meaningless in a DM and shouldn't
-// show up there. integration_types stays [0,1] so it's still available in bot-less (user-install)
-// servers. The response is built in api/interactions.ts (routeInteraction).
+// In a server without the bot, /enable-posts replies (privately) with a one-click "Add to Server"
+// button. Where the bot IS installed, it clears any /disable-posts opt-out for the channel — turning
+// the live card + daily recap back on. GUILD context only (no DM): the bot only posts in server
+// channels. integration_types stays [0,1] so it's still available in bot-less (user-install) servers
+// for the add-bot pitch. Deliberately NOT default_member_permissions-gated: the command is left open
+// so anyone can reach the add-bot pitch (which does nothing privileged — the OAuth add needs Manage
+// Server anyway). The moderation part — clearing a /disable-posts opt-out — is gated IN CODE
+// (Manage Channels) in api/interactions.ts (enablePostsResponse), so re-enabling still mirrors the
+// permission /disable-posts requires, without hiding the add-bot pitch from non-admins.
 const ENABLE_POSTS = 'enable-posts';
-const ENABLE_POSTS_DESCRIPTION = 'Add the bot to this server to unlock the daily recap and live card';
+const ENABLE_POSTS_DESCRIPTION = 'Add the bot, or turn the daily recap and live card back on in this channel';
 const ENABLE_POSTS_CONTEXTS = [0]; // GUILD only — hidden in DMs
 const enable = commands.find((c) => c.type === CHAT_INPUT && c.name === ENABLE_POSTS);
 if (enable) {
-  // Already registered — but it may predate the GUILD-only change (it used to allow DM contexts).
-  // PATCH the contexts if they differ so re-running this script hides it from DMs.
-  const current = JSON.stringify((enable.contexts ?? []).slice().sort());
-  const want = JSON.stringify(ENABLE_POSTS_CONTEXTS.slice().sort());
-  if (current === want) {
-    console.log(`Chat command /${ENABLE_POSTS} already registered, GUILD-only (id ${enable.id}).`);
+  // Reconcile what may have drifted: contexts (it used to allow DMs), the description, and that it's
+  // NOT permission-gated (null — open to everyone; the re-enable branch is gated in code). PATCH if
+  // any differ so a re-run is a no-op once matched.
+  const contextsOk =
+    JSON.stringify((enable.contexts ?? []).slice().sort()) ===
+    JSON.stringify(ENABLE_POSTS_CONTEXTS.slice().sort());
+  const permsOk = (enable.default_member_permissions ?? null) === null;
+  const descOk = enable.description === ENABLE_POSTS_DESCRIPTION;
+  if (contextsOk && permsOk && descOk) {
+    console.log(`Chat command /${ENABLE_POSTS} already registered, GUILD-only + open (id ${enable.id}).`);
   } else {
     const patchRes = await fetch(`${API}/applications/${APP_ID}/commands/${enable.id}`, {
       method: 'PATCH',
       headers: auth,
-      body: JSON.stringify({ contexts: ENABLE_POSTS_CONTEXTS }),
+      body: JSON.stringify({
+        description: ENABLE_POSTS_DESCRIPTION,
+        contexts: ENABLE_POSTS_CONTEXTS,
+        default_member_permissions: null, // open — clears any prior gate; re-enable is gated in code
+      }),
     });
     if (!patchRes.ok) {
-      console.error(`Failed to update /${ENABLE_POSTS} contexts: ${patchRes.status} ${await patchRes.text()}`);
+      console.error(`Failed to update /${ENABLE_POSTS}: ${patchRes.status} ${await patchRes.text()}`);
       process.exit(1);
     }
-    console.log(`Updated /${ENABLE_POSTS} contexts ${enable.contexts ?? '[]'} -> ${JSON.stringify(ENABLE_POSTS_CONTEXTS)} (GUILD only, id ${enable.id}).`);
+    console.log(`Updated /${ENABLE_POSTS} (id ${enable.id}): GUILD-only, open (re-enable gated in code), description synced.`);
   }
 } else {
   const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
@@ -171,6 +186,8 @@ if (enable) {
       type: CHAT_INPUT,
       contexts: ENABLE_POSTS_CONTEXTS,
       integration_types: INTEGRATION_TYPES,
+      // No default_member_permissions: open to everyone. Re-enabling is gated in code (Manage
+      // Channels) so the add-bot pitch stays reachable by non-admins.
     }),
   });
   if (!createRes.ok) {
@@ -178,7 +195,7 @@ if (enable) {
     process.exit(1);
   }
   const cmd = await createRes.json();
-  console.log(`Registered chat command /${cmd.name} (id ${cmd.id}), GUILD only.`);
+  console.log(`Registered chat command /${cmd.name} (id ${cmd.id}), GUILD only, open.`);
 }
 
 // --- 4) share chat-input command --------------------------------------------------
@@ -243,37 +260,49 @@ if (donate) {
   console.log(`Registered chat command /${cmd.name} (id ${cmd.id}).`);
 }
 
-// --- 6) unsubscribe chat-input command --------------------------------------------
-// /unsubscribe silences the daily recap in the channel it's run in (a recap_optouts row that
-// recap_channels() subtracts; re-armed on the next Activity launch there — see api/interactions
-// + postCard). Unlike the others this is GUILD-INSTALL ONLY (integration_types [0]) and GUILD
-// context ([0]): the recap only posts where the bot is in the server, so the command stays hidden
-// from user-install/DM surfaces where there's nothing to turn off. default_member_permissions
-// "16" (Manage Channels, the 1<<4 bit) gates it to members who can configure the channel, so a
-// random member can't silence recaps others want. The response is built in api/interactions.ts.
-const UNSUBSCRIBE = 'unsubscribe';
-const UNSUBSCRIBE_DESCRIPTION = 'Stop the daily recap from posting in this channel';
-const MANAGE_CHANNELS = '16'; // Discord permission bit (1 << 4)
-const unsubscribe = commands.find((c) => c.type === CHAT_INPUT && c.name === UNSUBSCRIBE);
-if (unsubscribe) {
-  console.log(`Chat command /${UNSUBSCRIBE} already registered (id ${unsubscribe.id}).`);
+// --- 6) disable-posts chat-input command ------------------------------------------
+// /disable-posts turns the bot's posts off in the channel it's run in — BOTH the live "who's
+// playing" card AND the nightly recap (a post_optouts row that post-card checks and recap_channels()
+// subtracts). Sticky: only /enable-posts here turns it back on. GUILD-INSTALL ONLY (integration_types
+// [0]) + GUILD context ([0]) — the bot only posts where it's in the server — and Manage Channels
+// gated so a random member can't silence a channel others want. RENAMED from /unsubscribe: Discord
+// has no rename API, so if the old command is still around we PATCH its name in place by id (same
+// command id, new name — preserves any per-guild permission overrides). api/interactions.ts also
+// still accepts the old "unsubscribe" name for clients on a cached command list mid-rollout.
+const DISABLE_POSTS = 'disable-posts';
+const DISABLE_POSTS_DESCRIPTION = "Turn the bot's posts (live card + daily recap) off in this channel";
+const DISABLE_POSTS_BODY = {
+  description: DISABLE_POSTS_DESCRIPTION,
+  contexts: [0], // GUILD only — the bot only posts in server channels
+  integration_types: [0], // GUILD_INSTALL only — hidden where the bot isn't in the server
+  default_member_permissions: MANAGE_CHANNELS,
+};
+const disablePosts = commands.find((c) => c.type === CHAT_INPUT && c.name === DISABLE_POSTS);
+const legacyUnsub = commands.find((c) => c.type === CHAT_INPUT && c.name === 'unsubscribe');
+if (disablePosts) {
+  console.log(`Chat command /${DISABLE_POSTS} already registered (id ${disablePosts.id}).`);
+} else if (legacyUnsub) {
+  // Rename the existing /unsubscribe command to /disable-posts in place (PATCH by id).
+  const patchRes = await fetch(`${API}/applications/${APP_ID}/commands/${legacyUnsub.id}`, {
+    method: 'PATCH',
+    headers: auth,
+    body: JSON.stringify({ name: DISABLE_POSTS, ...DISABLE_POSTS_BODY }),
+  });
+  if (!patchRes.ok) {
+    console.error(`Failed to rename /unsubscribe -> /${DISABLE_POSTS}: ${patchRes.status} ${await patchRes.text()}`);
+    process.exit(1);
+  }
+  console.log(`Renamed /unsubscribe -> /${DISABLE_POSTS} in place (id ${legacyUnsub.id}).`);
 } else {
   const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
     method: 'POST',
     headers: auth,
-    body: JSON.stringify({
-      name: UNSUBSCRIBE,
-      description: UNSUBSCRIBE_DESCRIPTION,
-      type: CHAT_INPUT,
-      contexts: [0], // GUILD only — recaps are a server-channel thing
-      integration_types: [0], // GUILD_INSTALL only — hidden where the bot isn't in the server
-      default_member_permissions: MANAGE_CHANNELS,
-    }),
+    body: JSON.stringify({ name: DISABLE_POSTS, type: CHAT_INPUT, ...DISABLE_POSTS_BODY }),
   });
   if (!createRes.ok) {
-    console.error(`Failed to register /${UNSUBSCRIBE}: ${createRes.status} ${await createRes.text()}`);
+    console.error(`Failed to register /${DISABLE_POSTS}: ${createRes.status} ${await createRes.text()}`);
     process.exit(1);
   }
   const cmd = await createRes.json();
-  console.log(`Registered chat command /${cmd.name} (id ${cmd.id}).`);
+  console.log(`Registered chat command /${cmd.name} (id ${cmd.id}), GUILD only, Manage Channels gated.`);
 }

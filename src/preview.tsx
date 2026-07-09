@@ -28,13 +28,15 @@ import {
   donateMessage,
   enablePostsAddBot,
   enablePostsAlreadyEnabled,
+  enablePostsNeedPerms,
+  enablePostsReenabled,
   installNudgePayload,
   IS_COMPONENTS_V2,
   type MessageData,
   missingPermsNudgePayload,
   replyDm,
   shareCard,
-  unsubscribeMessage,
+  disablePostsMessage,
 } from "./discord-messages";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
 import { DemoBoard, DemoGame, DemoRoster, Landing } from "./landing";
@@ -1659,8 +1661,16 @@ const MESSAGES = (
       payload={enablePostsAddBot(PREVIEW_APP_ID)}
     />
     <DiscordMessage
-      label="/enable-posts · bot already added"
+      label="/enable-posts · bot already added, posts on"
       payload={enablePostsAlreadyEnabled()}
+    />
+    <DiscordMessage
+      label="/enable-posts · posts turned back on"
+      payload={enablePostsReenabled()}
+    />
+    <DiscordMessage
+      label="/enable-posts · non-mod, posts are off"
+      payload={enablePostsNeedPerms()}
     />
     <DiscordMessage
       label="Launch nudge · server without the bot"
@@ -1671,20 +1681,20 @@ const MESSAGES = (
       payload={missingPermsNudgePayload()}
     />
     <DiscordMessage
-      label="/unsubscribe · recaps turned off"
-      payload={unsubscribeMessage("done")}
+      label="/disable-posts · posts turned off"
+      payload={disablePostsMessage("done")}
     />
     <DiscordMessage
-      label="/unsubscribe · already off"
-      payload={unsubscribeMessage("already")}
+      label="/disable-posts · already off"
+      payload={disablePostsMessage("already")}
     />
     <DiscordMessage
-      label="/unsubscribe · not in a server"
-      payload={unsubscribeMessage("no-guild")}
+      label="/disable-posts · not in a server"
+      payload={disablePostsMessage("no-guild")}
     />
     <DiscordMessage
-      label="/unsubscribe · couldn’t update"
-      payload={unsubscribeMessage("error")}
+      label="/disable-posts · couldn’t update"
+      payload={disablePostsMessage("error")}
     />
     <DiscordMessage label="/donate" payload={donateMessage()} />
     <DiscordMessage label="/share · result grid" payload={SHARE_PAYLOAD} />

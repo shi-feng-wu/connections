@@ -1,5 +1,5 @@
 // Pure builders for the Discord messages the bot sends in response to interactions —
-// the ephemeral command replies (/enable-posts, /donate, /unsubscribe), the mid-launch
+// the ephemeral command replies (/enable-posts, /donate, /disable-posts), the mid-launch
 // install/permission nudges, and the /share result card. No node/server imports, so
 // BOTH api/interactions.ts (the live webhook) and src/preview.tsx (the offline visual
 // harness) build the EXACT same payloads — the preview is the real message, not a
@@ -18,7 +18,7 @@ import { Game, MAX_MISTAKES } from "./game.js";
 // Discord message flags.
 export const EPHEMERAL = 64; // "Only you can see this"
 export const IS_COMPONENTS_V2 = 1 << 15; // render via the component tree, not content/embeds
-// The interaction callback type that posts a message (used by routeInteraction + unsubscribeResult).
+// The interaction callback type that posts a message (used by routeInteraction + disablePostsResult).
 export const CHANNEL_MESSAGE_WITH_SOURCE = 4;
 
 // Components V2 component type numbers (the framed /share card + reply DM are built from these).
@@ -57,10 +57,25 @@ function linkButton(label: string, url: string, emoji?: string): unknown {
   return { type: 1, components: [button] };
 }
 
-// "/enable-posts" where the bot is already guild-installed — nothing to do, recaps are on;
-// if they're not showing, it's a channel-permission gap, so name what the bot needs.
+// "/enable-posts" where the bot is already guild-installed AND this channel wasn't disabled —
+// nothing to do, posts are on; if they're not showing, it's a channel-permission gap, so name
+// what the bot needs. Ephemeral: no state changed, so don't post a public confirmation.
 export function enablePostsAlreadyEnabled(): MessageData {
   return { content: COPY["enable-posts.already"], flags: EPHEMERAL };
+}
+
+// "/enable-posts" that actually cleared a /disable-posts opt-out — posts are back on. PUBLIC (no
+// ephemeral flag), mirroring the public /disable-posts confirmation, so the channel sees the live
+// card + recap were turned back on and by whom.
+export function enablePostsReenabled(): MessageData {
+  return { content: COPY["enable-posts.reenabled"] };
+}
+
+// "/enable-posts" run by a non-moderator where posts ARE off — re-enabling is the mirror of
+// /disable-posts, so it needs Manage Channels. Ephemeral: it's a "you can't do this" nudge, not a
+// channel post. (The command itself is open so anyone can still reach the add-bot pitch.)
+export function enablePostsNeedPerms(): MessageData {
+  return { content: COPY["enable-posts.need-perms"], flags: EPHEMERAL };
 }
 
 // "/enable-posts" in a server without the bot: the casual pitch + a one-click "Add to Server"
@@ -83,33 +98,33 @@ export function donateMessage(): MessageData {
   };
 }
 
-// The /unsubscribe reply data, by outcome. "done" is a PUBLIC channel post (no ephemeral
-// flag) so the channel sees the recap was turned off and how to undo/permanently mute it.
-// The rest stay ephemeral so re-runs and edge cases don't post noise: "already" (recaps
-// were already off and haven't been re-armed by a launch since), "no-guild" (a DM/non-guild
-// surface with no channel recap to silence), and "error" (a DB hiccup).
-export function unsubscribeMessage(
+// The /disable-posts reply data, by outcome. "done" is a PUBLIC channel post (no ephemeral flag)
+// so the channel sees that posts (live card + recap) were turned off and how to turn them back on.
+// The rest stay ephemeral so re-runs and edge cases don't post noise: "already" (posts were
+// already off — it's sticky, so nothing re-armed them), "no-guild" (a DM/non-guild surface with
+// nothing to silence), and "error" (a DB hiccup).
+export function disablePostsMessage(
   kind: "done" | "already" | "no-guild" | "error",
 ): MessageData {
   // "done" is a PUBLIC channel post (no ephemeral flag); the rest stay ephemeral.
-  if (kind === "done") return { content: COPY["unsubscribe.done"] };
+  if (kind === "done") return { content: COPY["disable-posts.done"] };
   const content =
     kind === "already"
-      ? COPY["unsubscribe.already"]
+      ? COPY["disable-posts.already"]
       : kind === "no-guild"
-        ? COPY["unsubscribe.no-guild"]
-        : COPY["unsubscribe.error"];
+        ? COPY["disable-posts.no-guild"]
+        : COPY["disable-posts.error"];
   return { content, flags: EPHEMERAL };
 }
 
-// The full /unsubscribe interaction response (the data wrapped in a message callback).
+// The full /disable-posts interaction response (the data wrapped in a message callback).
 // Pure so it's unit-testable without a request. Exported (api/interactions.ts re-exports it).
-export function unsubscribeResult(
+export function disablePostsResult(
   kind: "done" | "already" | "no-guild" | "error",
 ): object {
   return {
     type: CHANNEL_MESSAGE_WITH_SOURCE,
-    data: unsubscribeMessage(kind),
+    data: disablePostsMessage(kind),
   };
 }
 

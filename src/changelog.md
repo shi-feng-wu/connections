@@ -17,6 +17,16 @@
   at the very top. Group everything that ships together into one release.
 -->
 
+## v1.15.0 — Jul 9, 2026
+
+### Added
+
+- /enable-posts now turns the bot's posts back on in a channel where a moderator had turned them off.
+
+### Changed
+
+- /unsubscribe is now /disable-posts, and it turns off both the live who's playing card and the nightly recap in that channel. It stays off until someone runs /enable-posts there again, even if people keep playing. The old /unsubscribe name still works for now. Turning posts off, or back on, needs the Manage Channels permission.
+
 ## v1.14.2 — Jul 1, 2026
 
 ### Changed

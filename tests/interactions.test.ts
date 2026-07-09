@@ -1,7 +1,7 @@
 import { generateKeyPairSync, sign as edSign } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { Game, LEVELS, type Puzzle } from "../src/game";
-import { installNudgePayload, missingPermsNudgePayload, routeInteraction, shareCard, unsubscribeResult, verifyDiscordSig } from "../api/interactions";
+import { disablePostsResult, enablePostsResponse, installNudgePayload, memberCanManageChannels, missingPermsNudgePayload, routeInteraction, shareCard, verifyDiscordSig } from "../api/interactions";
 
 // api/interactions.ts: Discord signs every interaction (Ed25519); an unverified
 // request must be refused, and the recap's Play button must map to a launch.
@@ -62,14 +62,14 @@ describe("routeInteraction", () => {
     expect(r.type).not.toBe(12);
   });
 
-  it("/enable-posts offers a one-click Add-to-Server button in a bot-less server", () => {
-    const r = routeInteraction({
+  it("/enable-posts offers a one-click Add-to-Server button in a bot-less server", async () => {
+    const r = (await enablePostsResponse({
       type: 2,
       data: { name: "enable-posts" },
       application_id: "app123",
       guild_id: "guild123", // run in a server (just one the bot isn't installed in)
       authorizing_integration_owners: { "1": "user123" }, // user-install only
-    }) as { type: number; data: { flags?: number; content?: string; components?: { components: { style?: number; url?: string }[] }[] } };
+    })) as { type: number; data: { flags?: number; content?: string; components?: { components: { style?: number; url?: string }[] }[] } };
     expect(r.type).toBe(4); // CHANNEL_MESSAGE_WITH_SOURCE
     expect(r.data.flags).toBe(64); // ephemeral
     expect(r.data.content).toContain("Add the bot");
@@ -82,13 +82,16 @@ describe("routeInteraction", () => {
   // /enable-posts is registered GUILD-only (no DM context — see scripts/register-commands.mjs),
   // so there's no DM-flavoured response to test: it can't be invoked in a DM.
 
-  it("/enable-posts says recaps are already on when the bot is guild-installed", () => {
-    const r = routeInteraction({
+  it("/enable-posts says posts are already on when the bot is guild-installed and nothing was disabled", async () => {
+    // Guild-installed but no channel context (and no DB configured in tests) → the "already on"
+    // reassurance, ephemeral and buttonless. A real re-enable (clearing a /disable-posts opt-out)
+    // needs a live DB, so it's covered by the SQL/integration layers, not this pure-ish unit.
+    const r = (await enablePostsResponse({
       type: 2,
       data: { name: "enable-posts" },
       guild_id: "guild123",
       authorizing_integration_owners: { "0": "guild123" }, // guild install present
-    }) as { type: number; data: { components?: unknown[]; content?: string } };
+    })) as { type: number; data: { components?: unknown[]; content?: string } };
     expect(r.type).toBe(4);
     expect(r.data.components).toBeUndefined(); // no button
     expect(r.data.content).toContain("already");
@@ -214,22 +217,51 @@ describe("installNudgePayload", () => {
   });
 });
 
-// /unsubscribe replies: "done" is a PUBLIC channel post (the channel sees recaps were turned off
-// + how to permanently mute); "no-guild"/"error" stay ephemeral so they don't post noise.
-describe("unsubscribeResult", () => {
-  const data = (kind: "done" | "already" | "no-guild" | "error") =>
-    (unsubscribeResult(kind) as { type: number; data: { flags?: number; content?: string } });
+// The moderator gate for re-enabling posts: /enable-posts is an OPEN command (anyone can reach the
+// add-bot pitch), but clearing a /disable-posts opt-out requires Manage Channels — checked in code
+// from the interaction's member.permissions bitfield. Administrator (which implies all perms) counts;
+// anything else, or absent/garbage perms, fails closed.
+describe("memberCanManageChannels", () => {
+  const MANAGE_CHANNELS = (1n << 4n).toString(); // "16"
+  const ADMINISTRATOR = (1n << 3n).toString(); // "8"
+  const SEND_MESSAGES = (1n << 11n).toString(); // "2048" — a non-mod permission
 
-  it("confirms the opt-out publicly, with the auto re-arm and the permanent-mute tip", () => {
+  it("passes a member with Manage Channels", () => {
+    expect(memberCanManageChannels(MANAGE_CHANNELS)).toBe(true);
+  });
+  it("passes an Administrator (implies all perms)", () => {
+    expect(memberCanManageChannels(ADMINISTRATOR)).toBe(true);
+  });
+  it("passes a full permission bitfield (owner/admin computed set)", () => {
+    expect(memberCanManageChannels(((1n << 40n) - 1n).toString())).toBe(true);
+  });
+  it("fails a member with only ordinary permissions", () => {
+    expect(memberCanManageChannels(SEND_MESSAGES)).toBe(false);
+    expect(memberCanManageChannels("0")).toBe(false);
+  });
+  it("fails closed on absent or malformed perms", () => {
+    expect(memberCanManageChannels(undefined)).toBe(false);
+    expect(memberCanManageChannels("")).toBe(false);
+    expect(memberCanManageChannels("not-a-number")).toBe(false);
+  });
+});
+
+// /disable-posts replies: "done" is a PUBLIC channel post (the channel sees posts were turned off
+// + how to turn them back on); "already"/"no-guild"/"error" stay ephemeral so they don't post noise.
+describe("disablePostsResult", () => {
+  const data = (kind: "done" | "already" | "no-guild" | "error") =>
+    (disablePostsResult(kind) as { type: number; data: { flags?: number; content?: string } });
+
+  it("confirms the opt-out publicly and names the /enable-posts antidote", () => {
     const r = data("done");
     expect(r.type).toBe(4); // CHANNEL_MESSAGE_WITH_SOURCE
     expect(r.data.flags).toBeUndefined(); // public, not ephemeral
     expect(r.data.content).toContain("off for this channel");
-    expect(r.data.content).toContain("come back automatically"); // re-arms on the next launch
-    expect(r.data.content).toContain("View Channel"); // permanent-mute path
+    expect(r.data.content).toContain("/enable-posts"); // the (only) way back on — it's sticky
+    expect(r.data.content).not.toContain("come back automatically"); // no auto re-arm anymore
   });
 
-  it("tells a re-runner recaps are already off — ephemerally, so it doesn't re-post", () => {
+  it("tells a re-runner posts are already off — ephemerally, so it doesn't re-post", () => {
     const r = data("already");
     expect(r.data.flags).toBe(64); // ephemeral — no duplicate public confirmation
     expect(r.data.content).toContain("already off");
@@ -244,7 +276,7 @@ describe("unsubscribeResult", () => {
   it("is an ephemeral apology on a DB error", () => {
     const r = data("error");
     expect(r.data.flags).toBe(64);
-    expect(r.data.content).toContain("`/unsubscribe` again");
+    expect(r.data.content).toContain("`/disable-posts` again");
   });
 });
 

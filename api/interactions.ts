@@ -3,15 +3,17 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createPublicKey, verify as edVerify } from "node:crypto";
 import {
   CHANNEL_MESSAGE_WITH_SOURCE,
+  disablePostsResult,
   donateMessage,
   enablePostsAddBot,
   enablePostsAlreadyEnabled,
+  enablePostsNeedPerms,
+  enablePostsReenabled,
   EPHEMERAL,
   installNudgePayload,
   IS_COMPONENTS_V2,
   missingPermsNudgePayload,
   shareCard,
-  unsubscribeResult,
 } from "../src/discord-messages.js";
 import { COPY } from "../src/discord-copy.js";
 import { fill } from "../src/copy-util.js";
@@ -23,8 +25,9 @@ import { PLAY_CUSTOM_ID } from "./_recap.js";
 // This is the latency-critical function: Discord enforces a ~3s deadline on the launch ACK, and the
 // first request after a deploy is cold. So it is kept DELIBERATELY TINY — it imports no canvas
 // (@napi-rs/canvas) and no card plumbing. The "who's playing" render lives in /api/post-card, which
-// this function triggers (fire-and-forget) AFTER the ACK. /share and /unsubscribe still answer here
-// synchronously and lazy-import the Supabase SDK (_admin/_nyt) so the launch ACK never pays for it.
+// this function triggers (fire-and-forget) AFTER the ACK. /share, /enable-posts, and /disable-posts
+// still answer here synchronously and lazy-import the Supabase SDK (_admin/_nyt) so the launch ACK
+// never pays for it.
 
 // Discord interactions webhook. Discord POSTs here for: the typed /connections command,
 // the App-Launcher Entry Point command, the card/recap "Play now!" button, and a PING.
@@ -66,21 +69,25 @@ const SHARE_COMMAND = "share";
 // app footer. Connections is free and ad-free; donations cover the server costs. KEEP the URL
 // in sync with the Ko-fi link in src/infolinks.tsx.
 const DONATE_COMMAND = "donate";
-// The "/unsubscribe" command: a moderator silences the daily recap in the channel it's run in.
-// It writes a recap_optouts row that recap_channels() subtracts, so the nightly cron skips this
-// channel — until someone launches the Activity here again, which clears the row (see post-card).
-// Registered guild-install only + Manage Channels gated (scripts/register-commands.mjs), so it
-// only appears where the bot can post recaps and only for members who can configure the channel.
-const UNSUBSCRIBE_COMMAND = "unsubscribe";
+// The "/disable-posts" command: a moderator turns the bot's posts off in the channel it's run in —
+// BOTH the live "who's playing" card AND the nightly recap. It writes a post_optouts row that
+// post-card checks (skips posting) and recap_channels() subtracts (skips the cron). Sticky: playing
+// or solving here does NOT turn posts back on — only /enable-posts in this channel does. Registered
+// guild-install only + Manage Channels gated (scripts/register-commands.mjs), so it only appears
+// where the bot can post and only for members who can configure the channel.
+const DISABLE_POSTS_COMMAND = "disable-posts";
+// The pre-rename name. Global command renames propagate to clients over ~an hour, so a cached
+// command list can still fire "/unsubscribe" mid-rollout — keep accepting it as an alias.
+const DISABLE_POSTS_ALIAS = "unsubscribe";
 
 // The message payload builders + their flags/constants live in src/discord-messages.ts
 // (node-free, shared with the preview harness). Re-exported below so existing importers
 // (tests, callers) keep their import path.
 export {
+  disablePostsResult,
   installNudgePayload,
   missingPermsNudgePayload,
   shareCard,
-  unsubscribeResult,
 };
 
 // 32-byte raw Ed25519 public key -> a KeyObject, via the fixed SPKI DER prefix.
@@ -145,10 +152,22 @@ function isShareCommand(body: Interaction): boolean {
   );
 }
 
-// The "/unsubscribe" slash command — silences the daily recap in this channel (a DB write).
-function isUnsubscribeCommand(body: Interaction): boolean {
+// The "/disable-posts" slash command — turns the bot's posts off in this channel (a DB write).
+// Accepts the old "/unsubscribe" name too, for clients still on a cached command list mid-rename.
+function isDisablePostsCommand(body: Interaction): boolean {
+  const name = body.data?.name;
   return (
-    body.type === APPLICATION_COMMAND && body.data?.name === UNSUBSCRIBE_COMMAND
+    body.type === APPLICATION_COMMAND &&
+    (name === DISABLE_POSTS_COMMAND || name === DISABLE_POSTS_ALIAS)
+  );
+}
+
+// The "/enable-posts" slash command — where the bot isn't installed, a private "Add to Server"
+// pitch; where it IS, it clears any /disable-posts opt-out for this channel (a DB write).
+function isEnablePostsCommand(body: Interaction): boolean {
+  return (
+    body.type === APPLICATION_COMMAND &&
+    body.data?.name === ENABLE_POSTS_COMMAND
   );
 }
 
@@ -165,25 +184,8 @@ export function routeInteraction(body: Interaction): object {
   ) {
     return { type: LAUNCH_ACTIVITY };
   }
-  // "/enable-posts": help the user add the bot so recaps + the live card can post in this server.
-  if (
-    body.type === APPLICATION_COMMAND &&
-    body.data?.name === ENABLE_POSTS_COMMAND
-  ) {
-    const appId = body.application_id ?? process.env.VITE_DISCORD_CLIENT_ID ?? "";
-    // The command is registered GUILD-only (no DM context — see scripts/register-commands.mjs),
-    // so it always runs in a server; no DM-flavoured copy needed.
-    // Positively guild-installed ("0" present) → the bot is already here. Otherwise (user-install
-    // only, or unknown) show the button — so we never wrongly tell a bot-less server it's all set.
-    const owners = body.authorizing_integration_owners;
-    if (owners && "0" in owners) {
-      return {
-        type: CHANNEL_MESSAGE_WITH_SOURCE,
-        data: enablePostsAlreadyEnabled(),
-      };
-    }
-    return { type: CHANNEL_MESSAGE_WITH_SOURCE, data: enablePostsAddBot(appId) };
-  }
+  // "/enable-posts" is handled off the pure router (it may clear a /disable-posts opt-out, a DB
+  // write) — see enablePostsResponse in the main handler.
   // "/donate": a private reply with the Ko-fi link button (the footer's "Help cover the
   // server costs" link). Ephemeral — it's a personal nudge, not a channel post.
   if (
@@ -211,12 +213,26 @@ type LaunchInteraction = Interaction & {
   guild_id?: string;
   channel_id?: string;
   channel?: { id?: string };
-  member?: { user?: DiscordUserLite };
+  member?: { user?: DiscordUserLite; permissions?: string };
   user?: DiscordUserLite;
   message?: { id?: string };
   authorizing_integration_owners?: Record<string, string>;
   app_permissions?: string;
 };
+
+// Manage Channels (1<<4) — the moderator bar for re-enabling posts, the mirror of the Discord-side
+// default_member_permissions gate on /disable-posts. Discord hands us the invoking member's computed
+// channel permissions on the interaction (Administrator, 1<<3, implies all of them, so a single mask
+// covers admins/owner too). Absent or malformed perms read as "not a mod" — fail closed.
+const MANAGE_CHANNELS_MASK = (1n << 4n) | (1n << 3n);
+export function memberCanManageChannels(permissions: string | undefined): boolean {
+  if (!permissions) return false;
+  try {
+    return (BigInt(permissions) & MANAGE_CHANNELS_MASK) !== 0n;
+  } catch {
+    return false;
+  }
+}
 
 // Build the /share interaction response from the player's own stored guesses. A public message
 // (CHANNEL_MESSAGE_WITH_SOURCE, no EPHEMERAL flag) on success — Discord posts it on the app's
@@ -296,12 +312,13 @@ async function shareResponse(body: LaunchInteraction): Promise<object> {
   };
 }
 
-// Handle /unsubscribe: record a recap opt-out for the channel it was run in, so the daily cron
-// skips it (recap_channels subtracts recap_optouts). Re-arms on the next launch here — post-card
-// clears the row when it (re)establishes the card. Guild channels only: recaps don't post in DMs
-// or user-install surfaces, so there's nothing to silence there. The Manage-Channels gate is
-// enforced by Discord (default_member_permissions on the command), so this just does the write.
-async function unsubscribeResponse(body: LaunchInteraction): Promise<object> {
+// Handle /disable-posts: record a post opt-out for the channel it was run in, so the bot goes
+// silent there — post-card skips the live card (it checks post_optouts) and the daily cron skips
+// the recap (recap_channels subtracts post_optouts). Sticky: nothing re-arms it except
+// /enable-posts in this channel. Guild channels only: the bot only posts in server channels, so
+// there's nothing to silence in a DM/user-install surface. The Manage-Channels gate is enforced by
+// Discord (default_member_permissions on the command), so this just does the write + card teardown.
+async function disablePostsResponse(body: LaunchInteraction): Promise<object> {
   const guildId = typeof body.guild_id === "string" ? body.guild_id : null;
   const channelId =
     typeof body.channel_id === "string"
@@ -311,37 +328,148 @@ async function unsubscribeResponse(body: LaunchInteraction): Promise<object> {
         : null;
   const scope = canonicalScope(guildId, channelId);
   if (!scope || !scope.startsWith("g:") || !channelId) {
-    return unsubscribeResult("no-guild");
+    return disablePostsResult("no-guild");
   }
 
   const { admin } = await import("./_admin.js");
   const db = admin();
-  if (!db) return unsubscribeResult("error");
+  if (!db) return disablePostsResult("error");
 
   const u = body.member?.user ?? body.user;
-  // Plain insert (not upsert): a unique violation (23505) means this channel was ALREADY opted
-  // out and hasn't been re-armed by a launch since — so report "already off" rather than re-post
-  // the public confirmation. A launch in the meantime deletes the row (post-card), so a genuine
-  // re-subscribe-then-unsubscribe inserts cleanly and reads "done" again.
-  const { error } = await db.from("recap_optouts").insert({
+  // Plain insert (not upsert): a unique violation (23505) means this channel was ALREADY off — it's
+  // sticky, so nothing re-armed it — so report "already off" rather than re-post the public
+  // confirmation. Either way we tear the card down below (idempotent), which also heals a channel
+  // still carrying a pre-rename recap-only opt-out that never suppressed the live card.
+  const { error } = await db.from("post_optouts").insert({
     scope_id: scope,
     channel_id: channelId,
     opted_out_by: u?.id ?? null,
     opted_out_at: new Date().toISOString(),
   });
+  let kind: "done" | "already";
   if (error) {
     if (error.code === "23505") {
-      console.log("[unsubscribe] already opted out", { scope, channel: channelId });
-      return unsubscribeResult("already");
+      console.log("[disable-posts] already off", { scope, channel: channelId });
+      kind = "already";
+    } else {
+      console.error("[disable-posts] insert error (schema migrated?)", error.message);
+      return disablePostsResult("error");
     }
-    console.error(
-      "[unsubscribe] insert error (schema migrated?)",
-      error.message,
-    );
-    return unsubscribeResult("error");
+  } else {
+    console.log("[disable-posts] posts off", { scope, channel: channelId, by: u?.id });
+    kind = "done";
   }
-  console.log("[unsubscribe] opted out", { scope, channel: channelId, by: u?.id });
-  return unsubscribeResult("done");
+
+  // Silence the live card now, so disabling is immediate rather than "starting tomorrow": null
+  // today's card message_id (every edit path — refresh-card/join/finalize — bails without one) and
+  // best-effort delete the posted message (the bot deleting its own message needs no extra perms).
+  // Best-effort throughout — the null is the load-bearing guarantee; a failed delete just leaves the
+  // frozen card until it ages out.
+  try {
+    const { todayET } = await import("./_nyt.js");
+    const date = todayET();
+    const { data: liveRow } = await db
+      .from("live_cards")
+      .select("message_id")
+      .eq("scope_id", scope)
+      .eq("puzzle_date", date)
+      .eq("channel_id", channelId)
+      .maybeSingle();
+    await db
+      .from("live_cards")
+      .update({ message_id: null })
+      .eq("scope_id", scope)
+      .eq("puzzle_date", date)
+      .eq("channel_id", channelId);
+    const messageId = (liveRow?.message_id as string | null | undefined) ?? null;
+    const botToken = process.env.DISCORD_BOT_TOKEN ?? "";
+    if (messageId && botToken) {
+      const r = await fetch(
+        `https://discord.com/api/v10/channels/${channelId}/messages/${messageId}`,
+        { method: "DELETE", headers: { Authorization: `Bot ${botToken}` } },
+      );
+      if (!r.ok && r.status !== 404)
+        console.warn("[disable-posts] card delete failed", { status: r.status });
+    }
+  } catch (e) {
+    console.warn("[disable-posts] card teardown failed", e instanceof Error ? e.message : e);
+  }
+
+  return disablePostsResult(kind);
+}
+
+// Handle /enable-posts. Where the bot ISN'T guild-installed, the private "Add to Server" pitch (the
+// only way posts can happen there at all). Where it IS, clear any /disable-posts opt-out for this
+// channel so the live card + recap post again. Publicly confirms a real re-enable; stays ephemeral
+// when there was nothing to turn on. Re-enabling is a moderation action (the mirror of
+// /disable-posts), so it carries the same Manage-Channels gate, enforced by Discord.
+export async function enablePostsResponse(body: LaunchInteraction): Promise<object> {
+  const appId = body.application_id ?? process.env.VITE_DISCORD_CLIENT_ID ?? "";
+  // Positively guild-installed ("0" present) → the bot is already here. Otherwise (user-install
+  // only, or unknown) show the button — so we never wrongly tell a bot-less server it's all set.
+  const owners = body.authorizing_integration_owners;
+  if (!(owners && "0" in owners)) {
+    return { type: CHANNEL_MESSAGE_WITH_SOURCE, data: enablePostsAddBot(appId) };
+  }
+
+  const guildId = typeof body.guild_id === "string" ? body.guild_id : null;
+  const channelId =
+    typeof body.channel_id === "string"
+      ? body.channel_id
+      : typeof body.channel?.id === "string"
+        ? body.channel.id
+        : null;
+  const scope = canonicalScope(guildId, channelId);
+  // Installed but no usable channel context (shouldn't happen for a guild command) — just reassure.
+  if (!scope || !scope.startsWith("g:") || !channelId) {
+    return { type: CHANNEL_MESSAGE_WITH_SOURCE, data: enablePostsAlreadyEnabled() };
+  }
+
+  const { admin } = await import("./_admin.js");
+  const db = admin();
+  if (!db) return { type: CHANNEL_MESSAGE_WITH_SOURCE, data: enablePostsAlreadyEnabled() };
+
+  // Re-enabling (clearing a /disable-posts opt-out) is a moderation action — the mirror of
+  // /disable-posts — so it needs Manage Channels. The command itself is left open (no Discord gate)
+  // so anyone can still reach the add-bot pitch above in a bot-less server; only this clear-branch is
+  // gated, in code. A non-mod who runs it where posts are actually off is told a mod is needed; where
+  // nothing's off, just reassured they're on (no privileged action, so no need to gate that).
+  if (!memberCanManageChannels(body.member?.permissions)) {
+    const { data: existing } = await db
+      .from("post_optouts")
+      .select("scope_id")
+      .eq("scope_id", scope)
+      .eq("channel_id", channelId)
+      .maybeSingle();
+    console.log("[enable-posts] non-mod", { scope, channel: channelId, disabled: !!existing });
+    return {
+      type: CHANNEL_MESSAGE_WITH_SOURCE,
+      data: existing ? enablePostsNeedPerms() : enablePostsAlreadyEnabled(),
+    };
+  }
+
+  // Delete + returning: a returned row means a /disable-posts opt-out was actually cleared (→ public
+  // "back on"); an empty result means posts were already on (→ ephemeral, no state changed).
+  const { data: cleared, error } = await db
+    .from("post_optouts")
+    .delete()
+    .eq("scope_id", scope)
+    .eq("channel_id", channelId)
+    .select("scope_id");
+  if (error) {
+    console.error("[enable-posts] clear opt-out error", error.message);
+    // Couldn't tell — reassure rather than claim a re-enable that may not have happened.
+    return { type: CHANNEL_MESSAGE_WITH_SOURCE, data: enablePostsAlreadyEnabled() };
+  }
+  const reenabled = Array.isArray(cleared) && cleared.length > 0;
+  console.log(reenabled ? "[enable-posts] re-enabled" : "[enable-posts] already on", {
+    scope,
+    channel: channelId,
+  });
+  return {
+    type: CHANNEL_MESSAGE_WITH_SOURCE,
+    data: reenabled ? enablePostsReenabled() : enablePostsAlreadyEnabled(),
+  };
 }
 
 // Where /api/post-card lives so we can self-call it (shared base resolver — see api/_internal.ts).
@@ -417,16 +545,28 @@ export default async function handler(
     return;
   }
 
-  // "/unsubscribe" writes a recap opt-out (a DB write), so like /share it's handled off the pure
-  // router. One indexed upsert, comfortably inside the 3s deadline; a throw degrades to an
-  // ephemeral apology rather than a dead "did not respond".
-  if (isUnsubscribeCommand(body)) {
+  // "/disable-posts" and "/enable-posts" write to the DB (a post opt-out, and clearing it), so like
+  // /share they're handled off the pure router. Each is a couple of indexed writes, comfortably
+  // inside the 3s deadline; a throw degrades to an ephemeral apology rather than a dead "did not
+  // respond".
+  if (isDisablePostsCommand(body)) {
     let response: object;
     try {
-      response = await unsubscribeResponse(body);
+      response = await disablePostsResponse(body);
     } catch (e) {
-      console.error("[unsubscribe] threw", e instanceof Error ? e.message : e);
-      response = unsubscribeResult("error");
+      console.error("[disable-posts] threw", e instanceof Error ? e.message : e);
+      response = disablePostsResult("error");
+    }
+    res.status(200).json(response);
+    return;
+  }
+  if (isEnablePostsCommand(body)) {
+    let response: object;
+    try {
+      response = await enablePostsResponse(body);
+    } catch (e) {
+      console.error("[enable-posts] threw", e instanceof Error ? e.message : e);
+      response = { type: CHANNEL_MESSAGE_WITH_SOURCE, data: enablePostsAlreadyEnabled() };
     }
     res.status(200).json(response);
     return;

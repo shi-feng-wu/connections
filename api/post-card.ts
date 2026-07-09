@@ -392,6 +392,22 @@ async function postCard(body: LaunchInteraction): Promise<void> {
     return;
   }
 
+  // A channel a moderator turned off with /disable-posts stays off — no live card AND no recap —
+  // until /enable-posts is run there again (post_optouts, checked here + subtracted by
+  // recap_channels()). Sticky: a launch/solve here does NOT re-arm it. The Activity still opens and
+  // scores still record; we only skip the bot's public post. Bail before the render so a disabled
+  // channel costs nothing.
+  const { data: optout } = await db
+    .from("post_optouts")
+    .select("scope_id")
+    .eq("scope_id", scope)
+    .eq("channel_id", channelId)
+    .maybeSingle();
+  if (optout) {
+    console.log("[card] skip: posts disabled for channel", { scope, channel: channelId });
+    return;
+  }
+
   const date = todayET();
   const { data: card, error: selErr } = await db
     .from("live_cards")
@@ -579,13 +595,6 @@ async function postCard(body: LaunchInteraction): Promise<void> {
       "[card] live_cards upsert error (schema migrated?)",
       upErr.message,
     );
-
-  // Launching here re-arms recaps: clear any /unsubscribe opt-out for this channel.
-  const { error: optErr } = await db
-    .from("recap_optouts")
-    .delete()
-    .match({ scope_id: scope, channel_id: channelForRow });
-  if (optErr) console.warn("[card] recap_optouts clear failed", optErr.message);
 }
 
 // Send an ephemeral followup to the launcher at most once per (scope, player) per

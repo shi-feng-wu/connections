@@ -3,9 +3,9 @@ import { PGlite } from "@electric-sql/pglite";
 import { beforeAll, describe, expect, it } from "vitest";
 
 // recap_channels() is the daily-recap target set: every (guild, channel) in live_cards that has
-// actually posted a card (message_id not null), MINUS channels a moderator silenced with
-// /unsubscribe (a recap_optouts row). Runs the real function from supabase/schema.sql against
-// Postgres-in-WASM (PGlite) over minimal live_cards + recap_optouts tables.
+// actually posted a card (message_id not null), MINUS channels a moderator turned off with
+// /disable-posts (a post_optouts row). Runs the real function from supabase/schema.sql against
+// Postgres-in-WASM (PGlite) over minimal live_cards + post_optouts tables.
 
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 const fnBlock = schema.match(
@@ -16,7 +16,7 @@ let db: PGlite;
 
 beforeAll(async () => {
   db = await PGlite.create();
-  // Minimal shape of the two tables recap_channels reads (live_cards) and subtracts (recap_optouts).
+  // Minimal shape of the two tables recap_channels reads (live_cards) and subtracts (post_optouts).
   await db.exec(`
     create table public.live_cards (
       scope_id   text not null,
@@ -26,7 +26,7 @@ beforeAll(async () => {
       interaction_token text,
       primary key (scope_id, puzzle_date, channel_id)
     );
-    create table public.recap_optouts (
+    create table public.post_optouts (
       scope_id   text not null,
       channel_id text not null,
       opted_out_by text,
@@ -65,12 +65,12 @@ describe("recap_channels", () => {
     expect(await channels()).toEqual(["g:1/chA", "g:1/chB"]);
   });
 
-  it("drops a channel once it has a recap_optouts row (/unsubscribe), and re-lists it when cleared", async () => {
-    await db.exec(`insert into public.recap_optouts (scope_id, channel_id) values ('g:1', 'chA')`);
-    expect(await channels()).toEqual(["g:1/chB"]); // chA silenced — cron skips it
+  it("drops a channel once it has a post_optouts row (/disable-posts), and re-lists it when cleared", async () => {
+    await db.exec(`insert into public.post_optouts (scope_id, channel_id) values ('g:1', 'chA')`);
+    expect(await channels()).toEqual(["g:1/chB"]); // chA turned off — cron skips it
 
-    // A later launch in chA clears the opt-out (postCard) → it's a recap target again.
-    await db.exec(`delete from public.recap_optouts where scope_id = 'g:1' and channel_id = 'chA'`);
+    // /enable-posts in chA clears the opt-out (a launch no longer does — it's sticky) → recap target again.
+    await db.exec(`delete from public.post_optouts where scope_id = 'g:1' and channel_id = 'chA'`);
     expect(await channels()).toEqual(["g:1/chA", "g:1/chB"]);
   });
 });

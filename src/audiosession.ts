@@ -1,28 +1,31 @@
 // Keep the user's other audio (Spotify, podcasts) playing while the Activity is open, on mobile.
 //
 // Symptom: opening the Activity on Discord mobile pauses the user's background audio, and RE-pauses
-// every time the Activity returns to the foreground. Our shipped bundle has zero audio (verified),
-// so nothing here plays sound — the interruption comes from a non-mixable iOS audio session that the
-// host holds while our WebView is foreground.
+// every time the Activity returns to the foreground. Our bundle plays no sound (verified) — the
+// interruption comes from a non-mixable iOS audio session the host holds while our WebView is foreground.
 //
-// First attempt (v1): just set `navigator.audioSession.type = 'ambient'`. It did NOTHING, and here's
-// why: `type` only declares which category to use WHEN OUR PAGE ACTIVATES A SESSION. A page that
-// plays no audio never activates one, so the declaration governs a session that never exists — inert.
+// The only page-reachable lever is the W3C Audio Session API (`navigator.audioSession.type`). Setting it
+// to `'ambient'` asks WebKit to make our audio mix instead of interrupt. On-device beacons proved: the
+// API EXISTS on iOS (default `auto`) and is ABSENT on Android/desktop web. But a passive `type='ambient'`
+// set read back as `auto` — which is ambiguous, because `type` is an ENUM attribute: assigning a value
+// the WebKit build doesn't recognize throws a TypeError. Earlier code swallowed that error, so we never
+// learned whether `'ambient'` is even a member of this build's enum.
 //
-// This version (v2): actually HOLD a mixable session. We set `type='ambient'` and then play a silent,
-// unmuted, zero-gain WebAudio source so WebKit instantiates a real *ambient* (mixable) AVAudioSession
-// for our page — and we re-hold it on every foreground, since the host re-grabs its non-mixable
-// session on each refocus. If WebKit's page session governs the process category, ours (ambient) wins
-// and the user's music is no longer interrupted.
+// This version PROBES first: it tries a control value (`'playback'`, supported on every build) and
+// `'ambient'`, capturing each outcome (stuck / TypeError / NotAllowedError / …). That single beacon is
+// decisive:
+//   • `'ambient'` throws TypeError  → this WebKit build's enum lacks the only mixable type → dead end.
+//   • both throw / stay auto        → the setter is gated in our cross-origin iframe → dead end.
+//   • `'ambient'` is settable       → worth actually HOLDING a session (below) to see if it mixes.
 //
-// SAFETY GATE (important): an unmuted source whose `ambient` request is NOT honored would fall back to
-// the non-mixable `playback` category and make the interruption WORSE. So we only ever start audio
-// when (a) `navigator.audioSession` exists AND (b) setting `type='ambient'` reads back as 'ambient'.
-// On any WebView without honored support we do nothing at all. Audio activation also needs a user
-// gesture on iOS, so the hold is unlocked on the first pointerdown/touchstart, then re-held on refocus.
+// Only when `'ambient'` is settable do we activate a session: set `type='ambient'` synchronously in the
+// first user gesture right before `resume()`, play a silent zero-gain source so WebKit instantiates the
+// session, then re-read the type. SELF-TEARDOWN: if it didn't come up `ambient`, suspend immediately —
+// a *running* AudioContext holds the session regardless of gain, so we must not sustain a non-mixable one
+// (that would newly interrupt iOS users who currently mix fine). We never touch audio on Android/web.
 //
-// If an ambient session is provably held (beacon: state active, ctx running) and music STILL pauses,
-// that is the definitive proof the non-mixable session is native-app-owned and unreachable in-page.
+// The post-activation beacon (`type`/`state`/`ctx.state`) is the final signal: `ambient`+`active` and
+// music keeps playing = we won; anything else = the session is native-owned and no in-page code moves it.
 
 type AudioSessionType =
   | 'auto'
@@ -34,8 +37,7 @@ type AudioSessionType =
 
 interface AudioSessionLike {
   type: AudioSessionType;
-  // W3C readonly attribute: "active" | "inactive" | "interrupted".
-  readonly state?: string;
+  readonly state?: string; // "active" | "inactive" | "interrupted"
 }
 
 function audioSession(): AudioSessionLike | undefined {
@@ -49,56 +51,129 @@ function audioContextCtor(): typeof AudioContext | undefined {
   );
 }
 
-// Declare our session mixable. Safe on a dormant (audio-free) session — it's a pure declaration, no
-// sound. Returns whether 'ambient' was actually honored (read back), which gates the audio hold.
-function setAmbient(): boolean {
+// --- probe + diagnostics, reported to the launch beacon via audioSessionDiag() ---
+let apiPresent = false;
+let probeStr = 'n'; // enum-probe result for the beacon
+let ambientSettable = false; // did assigning 'ambient' NOT throw?
+let postType: string | null = null; // audioSession.type after we activate a real session
+let postState: string | null = null; // audioSession.state after activation
+let ctxState: string | null = null; // AudioContext.state after resume()
+let setErr: string | null = null; // exception name from the gesture-time ambient set
+
+// Try to assign a type; report "ok(<readback>)" or the thrown error's name. Does not restore.
+function trySet(v: AudioSessionType): string {
   const s = audioSession();
-  if (!s) return false;
+  if (!s) return '-';
   try {
-    s.type = 'ambient';
-  } catch {
-    /* setter can throw on a locked/unsupported session */
+    s.type = v;
+    return `ok(${s.type})`;
+  } catch (e) {
+    return (e as { name?: string })?.name ?? 'err';
   }
-  return s.type === 'ambient';
 }
 
-// --- diagnostics, reported to the launch beacon via audioSessionDiag() ---
-let supported = false;
-let defaultType: string | null = null; // type before we touched anything
-let appliedType: string | null = null; // type after a passive set — did 'ambient' stick?
-let sessionState: string | null = null; // "active" | "interrupted" | ...
-let holdState: string | null = null; // AudioContext.state after the hold attempt
-let holdError: string | null = null; // exception name if the hold threw
+// Probe support BEFORE activating anything. 'playback' is the control (every build supports it); if it
+// sticks and 'ambient' throws, we've proven 'ambient' isn't in this build's enum — no active session needed.
+function runProbe(): void {
+  const s = audioSession();
+  apiPresent = !!s;
+  if (!s) {
+    probeStr = 'n';
+    return;
+  }
+  const def = s.type;
+  const pb = trySet('playback');
+  const am = trySet('ambient');
+  ambientSettable = am.startsWith('ok');
+  try {
+    s.type = 'auto'; // restore to the default so the probe leaves no lasting category
+  } catch {
+    /* ignore */
+  }
+  probeStr = `${def}|pb=${pb}|am=${am}`;
+}
 
 let ctx: AudioContext | null = null;
+let held = false;
 
-// Hold a silent, unmuted, zero-gain ambient session. No-op unless the API exists AND 'ambient' is
-// honored (see SAFETY GATE above). Must be reachable from a user gesture the first time; subsequent
-// calls (on refocus) can resume() without a fresh gesture once it's been unlocked.
-function ensureAmbientHold(): void {
-  if (!('audioSession' in navigator)) return; // API absent — in-page opt-out impossible; do not risk audio
-  if (!setAmbient()) return; // 'ambient' not honored — bail so we never fall back to 'playback'
+// Activate a silent ambient hold — ONLY if the probe showed 'ambient' is settable (else we'd risk a
+// non-mixable hold that interrupts users who currently mix fine). Must run inside a user gesture.
+function activateHold(): void {
+  if (!ambientSettable) return;
+  const s = audioSession();
+  if (!s) return;
+  try {
+    s.type = 'ambient'; // set synchronously in the gesture, right before resume() — when the category binds
+  } catch (e) {
+    setErr = (e as { name?: string })?.name ?? 'err';
+  }
   try {
     const Ctor = audioContextCtor();
     if (!Ctor) return;
     if (!ctx) {
       ctx = new Ctor();
-      const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       gain.gain.value = 0; // inaudible — holds the session without producing any sound
+      const osc = ctx.createOscillator();
       osc.connect(gain).connect(ctx.destination);
       osc.start();
     }
-    void ctx.resume(); // needs a gesture the first time; re-holds the session on later foregrounds
-    holdState = ctx.state;
+    try {
+      s.type = 'ambient';
+    } catch {
+      /* re-assert post-construct */
+    }
+    ctx.resume().then(
+      () => {
+        try {
+          s.type = 'ambient';
+        } catch {
+          /* re-assert post-activation */
+        }
+        postType = s.type ?? null;
+        postState = typeof s.state === 'string' ? s.state : null;
+        ctxState = ctx?.state ?? null;
+        held = true;
+        // Self-teardown: a running context holds the session regardless of gain, so if it didn't come up
+        // ambient, don't sustain a non-mixable session that would interrupt a mixing-fine user.
+        if (s.type !== 'ambient' && ctx) {
+          try {
+            void ctx.suspend();
+          } catch {
+            /* ignore */
+          }
+        }
+        beaconHold();
+      },
+      (e) => {
+        setErr = (e as { name?: string })?.name ?? 'err';
+        ctxState = ctx?.state ?? null;
+        beaconHold();
+      },
+    );
   } catch (e) {
-    holdError = String((e as { name?: string })?.name ?? e).slice(0, 24);
+    setErr = (e as { name?: string })?.name ?? 'err';
+    beaconHold();
   }
-  beaconHold();
 }
 
-// One-shot beacon of the hold outcome (after the first gesture), so we can see on-device whether the
-// ambient session actually activated — the datapoint that says whether the pause is native-owned.
+// Re-hold on every foreground (the host re-grabs its non-mixable session on each refocus). Only resumes
+// an already-unlocked context; the first activation must come from a gesture via activateHold().
+function reHold(): void {
+  if (!ambientSettable || !ctx) return;
+  const s = audioSession();
+  if (s) {
+    try {
+      s.type = 'ambient';
+    } catch {
+      /* best-effort */
+    }
+  }
+  void ctx.resume();
+}
+
+// One-shot beacon of the post-activation outcome, so we can read on-device whether the ambient hold
+// actually took — the datapoint that says whether the pause is native-owned.
 let beaconed = false;
 function beaconHold(): void {
   if (beaconed) return;
@@ -124,51 +199,36 @@ let wired = false;
 
 /**
  * Keep the Activity's audio session mixable so it doesn't pause the user's music/podcasts. Idempotent.
- * Captures the pre-gesture diagnostic immediately, then holds a silent ambient session unlocked on the
- * first user gesture and re-held on every foreground.
+ * Probes Audio Session API support immediately (for the mounted beacon), then — only if 'ambient' is
+ * settable — holds a silent ambient session unlocked on the first user gesture and re-held on refocus.
  */
 export function keepAudioMixable(): void {
   if (wired) return;
   wired = true;
 
-  // Pre-gesture snapshot: does the API exist, what's the default, does a passive 'ambient' set stick,
-  // and what's the session state. Answers "which world are we in" even before any audio can activate.
-  try {
-    const s = audioSession();
-    supported = !!s;
-    defaultType = s ? s.type : null;
-  } catch {
-    /* leaves supported=false */
-  }
-  appliedType = setAmbient() ? 'ambient' : (audioSession()?.type ?? null);
-  try {
-    const s = audioSession();
-    sessionState = s && typeof s.state === 'string' ? s.state : null;
-  } catch {
-    /* ignore */
-  }
+  runProbe(); // decisive support check; surfaced in the mounted beacon (no gesture needed)
 
-  // Unlock the hold on the first user gesture (iOS blocks audio activation otherwise), and re-hold on
-  // every path back to the foreground — the host re-grabs its non-mixable session on each refocus.
-  window.addEventListener('pointerdown', ensureAmbientHold);
-  window.addEventListener('touchstart', ensureAmbientHold);
+  window.addEventListener('pointerdown', activateHold);
+  window.addEventListener('touchstart', activateHold);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') ensureAmbientHold();
+    if (document.visibilityState === 'visible') reHold();
   });
-  window.addEventListener('focus', ensureAmbientHold);
-  window.addEventListener('pageshow', ensureAmbientHold);
+  window.addEventListener('focus', reHold);
+  window.addEventListener('pageshow', reHold);
 }
 
 /**
- * Compact diagnostic for the launch beacon. `"n"` = the Audio Session API is absent in this WebView
- * (in-page opt-out impossible). Otherwise `"<default>><applied>:<state>|h=<ctxState>"` — whether a
- * passive `ambient` set stuck, the session state, and (once a gesture fires) whether the silent hold
- * reached `running`. Distinguishes API-missing vs set-rejected vs held-but-still-interrupted.
+ * Compact diagnostic for the launch beacon. `"n"` = Audio Session API absent (Android/web). Otherwise
+ * `"<default>|pb=<...>|am=<...>"` from the probe — e.g. `"auto|pb=ok(playback)|am=TypeError"` means
+ * `'ambient'` isn't in this build's enum (dead end). Once the hold runs, appends
+ * `" post=<type>/<state>/<ctx>"` — `post=ambient/active/running` = we won.
  */
 export function audioSessionDiag(): string {
-  if (!supported) return 'n';
-  return (
-    `${defaultType ?? '?'}>${appliedType ?? '?'}:${sessionState ?? '?'}` +
-    `|h=${holdState ?? '-'}${holdError ? '!' + holdError : ''}`
-  );
+  if (!apiPresent) return 'n';
+  const post = held
+    ? ` post=${postType ?? '?'}/${postState ?? '?'}/${ctxState ?? '?'}`
+    : setErr
+      ? ` e=${setErr}`
+      : '';
+  return probeStr + post;
 }

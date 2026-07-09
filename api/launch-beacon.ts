@@ -48,7 +48,7 @@ export default function handler(req: VercelRequest, res: VercelResponse): void {
   // else "<defaultType>><appliedType>:<state>" — whether our forced `ambient` stuck and if the
   // session reads as interrupted. Diagnoses why the music-pause opt-out did/didn't take on-device.
   const as = q.get("as");
-  if (as) data.as = as.slice(0, 40);
+  if (as) data.as = as.slice(0, 160);
   const failed = q.get("res");
   if (failed) data.res = failed.slice(0, 300); // the failed resource URL (boot-error only)
   // Age (s) of the activity instance at boot, decoded client-side from the instance_id

@@ -3,15 +3,9 @@ import { createRoot } from 'react-dom/client';
 import { Analytics } from '@vercel/analytics/react';
 import './index.css';
 import { App } from './App';
-import { keepAudioMixable, audioSessionDiag } from './audiosession';
 
 const params = new URLSearchParams(location.search);
 const isEmbedded = params.has('frame_id');
-
-// Declare our audio session `ambient` (mixable) so opening the Activity doesn't pause the user's
-// Spotify/podcasts on mobile — and keep re-asserting it on refocus. See src/audiosession.ts. Runs
-// first thing so the session is reclassified as early as possible; a no-op where the API is absent.
-keepAudioMixable();
 
 // Inside a Discord Activity the sandbox blocks direct connections to external hosts: every
 // request must go through Discord's *.discordsays.com proxy. patchUrlMappings rewrites fetch/XHR
@@ -58,9 +52,6 @@ try {
     `&guild=${encodeURIComponent(params.get('guild_id') ?? '')}` +
     `&instance=${encodeURIComponent(params.get('instance_id') ?? '')}` +
     `&plat=${plat}` +
-    // audio-session support + the session type observed before we forced `ambient` — triages a
-    // persistent music-pause as "API missing" (n) vs "webview default was non-mixable" (e.g. playback).
-    `&as=${encodeURIComponent(audioSessionDiag())}` +
     `&b=${encodeURIComponent(window.__cxBuild ?? '')}`;
   navigator.sendBeacon?.(
     `/api/launch-beacon?stage=mounted&embedded=${isEmbedded ? 1 : 0}&t=${Math.round(performance.now())}${ctx}`,

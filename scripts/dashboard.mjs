@@ -95,18 +95,28 @@ async function fetchBotInstalls() {
   const token = process.env.DISCORD_BOT_TOKEN ?? '';
   if (!token) return null;
   const headers = { Authorization: `Bot ${token}` };
+  const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
   try {
     const ids = new Set();
+    const memberByGuild = new Map(); // guild id -> approximate_member_count (from with_counts=true)
     let after = '';
     for (;;) {
-      const url = `https://discord.com/api/v10/users/@me/guilds?limit=200${after ? `&after=${after}` : ''}`;
-      const r = await fetch(url, { headers });
+      // with_counts=true adds approximate_member_count per guild → total member reach below
+      const url = `https://discord.com/api/v10/users/@me/guilds?limit=200&with_counts=true${after ? `&after=${after}` : ''}`;
+      let r;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        r = await fetch(url, { headers });
+        if (r.status !== 429) break;
+        const body = await r.json().catch(() => ({ retry_after: 2 }));
+        await sleep((body.retry_after ?? 2) * 1000 + 300); // respect Discord's global rate limit
+      }
       if (!r.ok) return null;
       const page = await r.json();
       if (!Array.isArray(page) || page.length === 0) break;
       for (const g of page) {
         ids.add(g.id);
         if (g.name) guildNameById.set(g.id, g.name);
+        if (typeof g.approximate_member_count === 'number') memberByGuild.set(g.id, g.approximate_member_count);
       }
       if (page.length < 200) break;
       after = page[page.length - 1].id;
@@ -126,8 +136,10 @@ async function fetchBotInstalls() {
         }),
       );
     }
+    const memberReach = [...memberByGuild.values()].reduce((a, b) => a + b, 0);
+    const largest = memberByGuild.size ? Math.max(...memberByGuild.values()) : 0;
     const joins = [...ids].map((id) => joinedAtByGuild.get(id)).filter(Boolean);
-    return { count: ids.size, joins };
+    return { count: ids.size, joins, memberReach, largest };
   } catch {
     return null;
   }
@@ -147,12 +159,13 @@ async function loadStats() {
   const allDates = [...dateSet].sort();
   const latestDate = allDates.length ? allDates[allDates.length - 1] : null;
 
-  const [{ data: presence }, cards, { count: puzzlesCached }, installs] = await Promise.all([
+  const [{ data: presence }, cards, { count: puzzlesCached }, { count: recapPosts }, installs] = await Promise.all([
     latestDate
       ? db.from('presence').select('user_id, last_seen').eq('puzzle_date', latestDate)
       : Promise.resolve({ data: [] }),
     fetchAllCards(),
     db.from('puzzles').select('*', { count: 'exact', head: true }),
+    db.from('recap_posts').select('*', { count: 'exact', head: true }),
     fetchBotInstalls(),
   ]);
 
@@ -160,8 +173,10 @@ async function loadStats() {
   const players = new Set();
   const scopes = new Set();
   let solved = 0;
+  let perfect = 0;
   let mistakesSum = 0;
   let scoreSum = 0;
+  const solveDurations = []; // ms, solved games only — for fastest/median
 
   const byDate = new Map(); // date -> { players:Set, wins, scopes:Set }
   const byScope = new Map(); // scope -> { games, players:Set, wins, first, last }
@@ -173,7 +188,11 @@ async function loadStats() {
   for (const r of rows) {
     players.add(r.user_id);
     if (r.scope_id) scopes.add(r.scope_id);
-    if (r.solved) solved++;
+    if (r.solved) {
+      solved++;
+      if ((r.mistakes ?? 0) === 0) perfect++;
+      if (r.duration_ms && r.duration_ms > 3000) solveDurations.push(r.duration_ms);
+    }
     mistakesSum += r.mistakes ?? 0;
     scoreSum += r.score ?? 0;
 
@@ -217,6 +236,11 @@ async function loadStats() {
       u.mistakes += r.mistakes ?? 0;
     }
   }
+
+  // solve-time stats (solved games only; the >3s guard drops resumed/instant-finish noise)
+  solveDurations.sort((a, b) => a - b);
+  const fastestMs = solveDurations[0] ?? 0;
+  const medianMs = solveDurations.length ? solveDurations[Math.floor(solveDurations.length / 2)] : 0;
 
   // new players / new servers per day, from first-appearance maps
   const newUsersByDate = new Map();
@@ -377,6 +401,8 @@ async function loadStats() {
       servers: [...scopes].filter((s) => s.startsWith('g:')).length,
       rooms: scopes.size,
       botInstalls: installs?.count ?? null,
+      memberReach: installs?.memberReach ?? null,
+      largestServer: installs?.largest ?? null,
       cardServers,
       newPlayers7,
       wau: wau.size,
@@ -385,6 +411,13 @@ async function loadStats() {
       avgMistakes: rows.length ? mistakesSum / rows.length : 0,
       avgScore: rows.length ? scoreSum / rows.length : 0,
       puzzlesCached: puzzlesCached ?? 0,
+      totalPoints: scoreSum,
+      perfectGames: perfect,
+      perfectPct: rows.length ? perfect / rows.length : 0,
+      cardsPosted: cards.length,
+      recapPosts: recapPosts ?? 0,
+      fastestMs,
+      medianMs,
     },
     latest: {
       date: latestDate,
@@ -418,6 +451,12 @@ const one = (n) => (Math.round((n ?? 0) * 10) / 10).toFixed(1);
 const compact = (n) => {
   n = Math.round(n);
   return n >= 1000 ? (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + 'k' : String(n);
+};
+const big = (n) => {
+  n = Math.round(n);
+  if (n >= 1e6) return (n / 1e6).toFixed(n % 1e6 === 0 ? 0 : 1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(n % 1e3 === 0 ? 0 : 1) + 'k';
+  return String(n);
 };
 const MON = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function shortDate(iso) {
@@ -765,6 +804,22 @@ function renderPage(s) {
   ${kpi('Games played', num(t.games))}
   ${kpi('Peak day', num(t.peak.players), t.peak.date ? `players · ${esc(shortDate(t.peak.date))}` : '—')}
   ${kpi('Solve rate', pct(t.solveRate), `avg ${one(t.avgMistakes)} mistakes`)}
+</div>
+
+<div class="grid kpis">
+  ${kpi(
+    'Member reach',
+    t.memberReach == null ? '—' : big(t.memberReach),
+    t.memberReach == null
+      ? 'needs DISCORD_BOT_TOKEN'
+      : `across ${num(t.botInstalls ?? 0)} bot servers · largest ${big(t.largestServer)}`,
+    C.yellow
+  )}
+  ${kpi('Points scored', big(t.totalPoints), 'across every game', C.green)}
+  ${kpi('Perfect games', num(t.perfectGames), `${pct(t.perfectPct)} solved flawless`, C.blue)}
+  ${kpi('Cards rendered', num(t.cardsPosted), 'server-side PNGs posted', C.purple)}
+  ${kpi('Recaps posted', num(t.recapPosts), 'daily bot messages')}
+  ${kpi('Solve time', dur(t.medianMs), `median · fastest ${dur(t.fastestMs)}`)}
 </div>
 
 <div class="panel">

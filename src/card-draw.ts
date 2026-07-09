@@ -37,7 +37,14 @@ export type CardOpts = { puzzleNo?: number; puzzleDate?: string };
 // the card reads as a distinct framed panel in the channel. (Opaque, not transparent,
 // so the light text stays legible regardless of the viewer's Discord theme.)
 const BG = "#09090b"; // zinc-950
-const CARD_R = 18; // rounded card corners (corners outside it stay transparent)
+// Rounded card corners (corners outside it stay transparent). Kept generous on purpose:
+// Discord re-clips the inline attachment to its own rounded media container whose radius is
+// a fixed number of *DP*, so on a high-density phone (2–3x) that radius maps to ~24–36 *image*
+// pixels — larger than a tight corner would be. If CARD_R is smaller than that, Discord's mask
+// bites past our own corner and shaves the rounded part of the border off (the straight edges
+// survive, the corner turn doesn't). 30 clears an 8dp@3x clip with headroom, and it's closer to
+// the concentric ideal (PAD_X 30 + PANEL_R 11 ≈ 41) than the old 18 anyway.
+const CARD_R = 30;
 const PANEL = "rgba(24,24,27,0.6)"; // zinc-900/60 — composited over BG
 const PANEL_BORDER = "#232327";
 const TITLE = "#efefe6"; // warm off-white wordmark
@@ -65,7 +72,16 @@ const CAT_COLOR = LEVELS.map((l) => l.color); // yellow, green, blue, purple
 // state at a glance: emerald for a solve, a dimmed zinc-700 for a loss, zinc-600
 // while still playing.
 const CARD_BORDER = ZINC_700; // #3f3f46 — frame around the whole card (recap too)
-const CARD_BORDER_W = 2; // stroke weight (1px reads too faint at the rounded corners)
+// Stroke weight, but tied to card size. The frame is baked in *image* pixels, yet Discord
+// displays every card scaled to fit the message column — and the scale depends on the card's
+// own width, so a fixed stroke lands on a different on-screen thickness per card. A wide 4-up
+// roster (812px) is shrunk far more than a solo card (462px), so a flat 2px reads as ~0.8px on
+// the roster vs ~1.5px on the solo — the busy cards look thin. Scaling the stroke with width
+// makes them all resolve to the same weight on screen. CARD_BORDER_W is the stroke at the
+// narrowest card (~CARD_BORDER_REF_W); wider cards scale up proportionally.
+const CARD_BORDER_W = 2;
+const CARD_BORDER_REF_W = 462; // solo-card width — the narrowest a card gets
+const cardBorderW = (W: number): number => (CARD_BORDER_W * W) / CARD_BORDER_REF_W;
 const TILE_BG = "rgba(24,24,27,0.55)"; // zinc-900/55
 const TILE_BAR_EMPTY_BORDER = "#34343a"; // unsolved slot border (a touch lighter than the recap's)
 const TILE_BAR_LOST_BG = "#161618"; // unsolved slot for a player who's out of guesses
@@ -330,9 +346,10 @@ function strokeCardBorder(
   height: number,
 ): void {
   ctx.strokeStyle = CARD_BORDER;
-  ctx.lineWidth = CARD_BORDER_W;
-  const inset = CARD_BORDER_W / 2;
-  roundRect(ctx, inset, inset, W - CARD_BORDER_W, height - CARD_BORDER_W, CARD_R - inset);
+  const bw = cardBorderW(W);
+  ctx.lineWidth = bw;
+  const inset = bw / 2;
+  roundRect(ctx, inset, inset, W - bw, height - bw, CARD_R - inset);
   ctx.stroke();
 }
 

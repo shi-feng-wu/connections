@@ -586,6 +586,11 @@ async function postCard(body: LaunchInteraction): Promise<void> {
       interaction_token: null,
       token_at: null,
       finalized_at: null,
+      // Record whether the bot can actually POST in this channel (Discord's app_permissions, computed
+      // above). The nightly recap posts as a NEW bot message and needs this; a command launch's live
+      // card rode the interaction webhook (no bot perms), so without this a channel the bot can't
+      // post in still looks like a recap target and 403s silently. recap_channels() filters on it.
+      bot_can_post: canPost,
       updated_at: nowIso,
     },
     { onConflict: "scope_id,puzzle_date,channel_id" },

@@ -385,6 +385,19 @@ begin
   end if;
 end $$;
 
+-- Outcome record. Historically a claim row was inserted BEFORE the Discord POST and kept even on a
+-- 4xx, so a silent failure (e.g. 403 the bot can't post here) was byte-identical to a delivery — the
+-- ledger read 100% success while ~1 in 5 channels got nothing. postOne now stamps the result, so a
+-- failure is queryable (http_status/discord_code/error) and a delivery is proven (message_id).
+-- attempted_at is when the POST was last tried, used to recover claims orphaned by a killed run (a
+-- row still 'claimed' well past attempted_at is re-attempted by a later/twin run — a CAS re-claim).
+alter table public.recap_posts add column if not exists status       text;        -- 'claimed' | 'posted' | 'failed'
+alter table public.recap_posts add column if not exists http_status  int;         -- Discord POST HTTP status
+alter table public.recap_posts add column if not exists discord_code int;         -- Discord JSON error code (e.g. 50001 Missing Access)
+alter table public.recap_posts add column if not exists error        text;        -- truncated Discord error body
+alter table public.recap_posts add column if not exists message_id   text;        -- the posted recap message (proof of delivery)
+alter table public.recap_posts add column if not exists attempted_at timestamptz; -- when the POST was last attempted (stale-claim recovery)
+
 alter table public.recap_posts enable row level security;
 
 -- Posts opt-out: one row per (scope, channel) a moderator turned off with /disable-posts, so the
@@ -464,9 +477,27 @@ grant execute on function public.day_results(text, date, text) to anon, authenti
 -- the launcher's interaction token — api/post-card postDmCard), but the recap is bot-only, so those
 -- rows are excluded here via `interaction_token is null` (bot-backed cards never set it). So a
 -- channel with an established habit still gets a recap ("nobody got it… new day") on a quiet day,
--- but only where the bot can actually post. g: scopes only. Channels a moderator turned off with
--- /disable-posts (a post_optouts row) are subtracted, so the nightly run skips them until
--- /enable-posts is run there again (which clears the opt-out — a launch no longer does).
+-- but only where the bot can actually post. g: scopes only. Channels the bot can't post in are
+-- excluded via bot_can_post (a command launch posts the live card through the interaction webhook,
+-- which needs NO bot channel perms, so message_id/interaction_token alone don't prove the bot can
+-- post its own recap message there — that was silently 403ing ~1 in 5 channels nightly). Channels a
+-- moderator turned off with /disable-posts (a post_optouts row) are subtracted, so the nightly run
+-- skips them until /enable-posts is run there again (which clears the opt-out — a launch no longer does).
+--
+-- bot_can_post: the bot's launch-time verdict on whether it can POST in this channel (Discord's
+-- app_permissions = View + Send + Attach), stamped by post-card on every launch. recap_channels()
+-- excludes rows where this is explicitly FALSE, so a channel the bot can't actually post in — e.g. a
+-- command launch went through the interaction WEBHOOK (needs no bot channel perms) and marked the row
+-- bot-backed anyway — is no longer a silent nightly 403. NULL = unknown (pre-migration rows, or never
+-- re-launched since) → treated as postable (fail-open) until the next launch refreshes it. (Thread
+-- false-negatives are possible: botCanPostInChannel checks SEND_MESSAGES, not the in-thread bit — but
+-- that already matches what post-card assumes for button launches; refine in later hardening.) Added
+-- HERE, before the function that reads it: it's a brand-new column, so on an existing DB it must exist
+-- by the time recap_channels() is (re)created (the other columns it reads already do). live_cards is
+-- created further below, but on the live DB it already exists — same incremental assumption this
+-- function has always relied on (it reads live_cards + interaction_token, both defined after it).
+alter table public.live_cards add column if not exists bot_can_post boolean;
+
 drop function if exists public.recap_channels();
 create or replace function public.recap_channels()
 returns table (scope_id text, channel_id text)
@@ -477,6 +508,7 @@ as $$
   from public.live_cards l
   where l.scope_id like 'g:%' and l.channel_id is not null and l.message_id is not null
     and l.interaction_token is null -- bot-backed cards only; token-backed (bot-less) get no recap
+    and l.bot_can_post is distinct from false -- exclude channels the bot definitively can't post in (NULL = unknown → included)
     and not exists (
       select 1 from public.post_optouts o
       where o.scope_id = l.scope_id and o.channel_id = l.channel_id
@@ -671,6 +703,9 @@ alter table public.live_cards add column if not exists token_at          timesta
 -- Null = not yet finalized; set once so the cron flips each card exactly once. Guild cards don't use
 -- it (their caption flips on roster-finish, inline in api/refresh-card).
 alter table public.live_cards add column if not exists finalized_at timestamptz;
+
+-- bot_can_post is added earlier, just above recap_channels() (the function that reads it), so the
+-- brand-new column exists before that function is (re)created on an existing DB. See the note there.
 
 -- Per-channel cards: channel_id joins the key so each channel gets its own "who's playing"
 -- card per day (matching the Wordle Activity), instead of one card per guild living in the

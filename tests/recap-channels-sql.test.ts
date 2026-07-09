@@ -24,6 +24,7 @@ beforeAll(async () => {
       channel_id text not null,
       message_id text,
       interaction_token text,
+      bot_can_post boolean,
       primary key (scope_id, puzzle_date, channel_id)
     );
     create table public.post_optouts (
@@ -71,6 +72,18 @@ describe("recap_channels", () => {
 
     // /enable-posts in chA clears the opt-out (a launch no longer does — it's sticky) → recap target again.
     await db.exec(`delete from public.post_optouts where scope_id = 'g:1' and channel_id = 'chA'`);
+    expect(await channels()).toEqual(["g:1/chA", "g:1/chB"]);
+  });
+
+  it("excludes a channel the bot can't post in (bot_can_post = false); NULL/true stay in", async () => {
+    // NULL bot_can_post (the seed rows) is fail-open — both channels list. Marking chB not-postable
+    // (a command launch made it a target via the webhook, but the bot can't post its own recap there)
+    // drops it; an explicit true keeps chA.
+    await db.exec(`update public.live_cards set bot_can_post = false where scope_id = 'g:1' and channel_id = 'chB'`);
+    await db.exec(`update public.live_cards set bot_can_post = true  where scope_id = 'g:1' and channel_id = 'chA'`);
+    expect(await channels()).toEqual(["g:1/chA"]); // chB excluded, chA kept
+
+    await db.exec(`update public.live_cards set bot_can_post = null`); // restore fail-open seed state
     expect(await channels()).toEqual(["g:1/chA", "g:1/chB"]);
   });
 });

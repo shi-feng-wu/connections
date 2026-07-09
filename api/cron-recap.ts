@@ -32,10 +32,16 @@ import { rankMap, rankDelta } from '../src/rank-delta.js';
 // midnight run clears every channel in one invocation (a 60s cap was killing it mid-run once the
 // channel count outgrew what 60s could post, spilling the remainder to the 05:00 twin at 1am ET).
 //
-// A channel the bot was removed from (or a deleted channel) just 403s/404s at post time and
-// is skipped for that day. A per-(scope, date, channel) ledger row is claimed before posting,
-// so a retried or doubled cron run can't repost — and any partial run (kill, 429) is safe:
-// whatever stays unclaimed is picked up by the 05:00 twin run or tomorrow.
+// A channel the bot can't post in is now excluded up front (recap_channels filters on live_cards.
+// bot_can_post, the launch-time app_permissions verdict), so the old silent nightly 403 — a command
+// launch posts the live card via the interaction webhook, needing no bot channel perms, which made a
+// channel a recap target the bot couldn't actually post its own message in — is designed out. Any
+// that still 4xx (perms revoked between launch and midnight, deleted channel) are RECORDED on the
+// ledger row (status/http_status/discord_code), not silently kept as a phantom "posted". The row is
+// a state machine: 'claimed' (in flight) → 'posted' (message_id stored, never repost) or 'failed' (a
+// permanent 4xx, don't loop); a transient 429/5xx deletes the row so a later run retries. A run
+// killed mid-flight leaves rows stuck 'claimed'; a later run / the 05:00 twin re-attempts any still
+// 'claimed' past STALE_CLAIM_MS (an atomic CAS), so kill-orphans are recovered instead of lost.
 //
 // Recaps are guild-only (c: scopes are skipped). The pg_cron job sends `Authorization:
 // Bearer $CRON_SECRET` (the secret lives in Supabase Vault); we fail closed without it so
@@ -49,6 +55,10 @@ const SEASON_LIMIT = 5;
 // See the note above postOne. The real ceiling is maxDuration in vercel.json, raised to 300s so
 // the midnight run finishes every channel rather than spilling the overflow to the 05:00 twin.
 const CONCURRENCY = 12;
+// A recap_posts row still in status 'claimed' this long after its last attempt was orphaned by a
+// killed run (a hard 300s kill runs no cleanup), so a later run / the 05:00 twin re-attempts it. Must
+// be well above a healthy run's duration (~90s) so a live in-flight claim is never stolen mid-post.
+const STALE_CLAIM_MS = 15 * 60 * 1000;
 
 type ScopeRow = { scope_id: string | null; channel_id: string | null };
 type Outcome = 'posted' | 'skipped' | 'failed';
@@ -66,7 +76,17 @@ async function fetchBotGuildIds(botToken: string): Promise<Set<string> | null> {
     for (;;) {
       const url = `https://discord.com/api/v10/users/@me/guilds?limit=200${after ? `&after=${after}` : ''}`;
       const r = await fetch(url, { headers: { Authorization: `Bot ${botToken}` } });
-      if (!r.ok) return null;
+      if (!r.ok) {
+        // Log WHY — this has been failing nightly and silently, dropping the guild filter (the run
+        // then falls open to "attempt all channels"). 429 = paginating too fast; 401 = a bad token
+        // (handler()'s preflight aborts on that). Without this line the cause was invisible.
+        console.error('[recap] fetchBotGuildIds failed', {
+          status: r.status,
+          body: (await r.text().catch(() => '')).slice(0, 200),
+          collected: ids.size,
+        });
+        return null;
+      }
       const page = (await r.json()) as { id: string }[];
       if (!Array.isArray(page) || page.length === 0) break;
       for (const g of page) ids.add(g.id);
@@ -74,7 +94,8 @@ async function fetchBotGuildIds(botToken: string): Promise<Set<string> | null> {
       after = page[page.length - 1].id;
     }
     return ids;
-  } catch {
+  } catch (e) {
+    console.error('[recap] fetchBotGuildIds threw', e instanceof Error ? e.message : e);
     return null;
   }
 }
@@ -104,6 +125,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
   if (!botToken) {
     res.status(503).json({ error: 'bot token unconfigured' });
+    return;
+  }
+
+  // Preflight the token before touching any channel. A rejected token (401/403) makes EVERY recap
+  // POST fail — and a per-channel 4xx is recorded as a permanent failure (kept row), so a bad token
+  // would silently "fail" the whole night while the ledger fills with failure rows. Abort loudly
+  // instead. Any OTHER result (a transient 5xx, a network blip) is ignored so a Discord hiccup can't
+  // suppress the run.
+  const who = await fetch('https://discord.com/api/v10/users/@me', {
+    headers: { Authorization: `Bot ${botToken}` },
+  }).catch(() => null);
+  if (who && (who.status === 401 || who.status === 403)) {
+    console.error('[recap] FATAL: bot token rejected — aborting run', { status: who.status });
+    res.status(503).json({ error: 'bot token rejected', status: who.status });
     return;
   }
 
@@ -182,20 +217,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     /* title falls back to the date alone; mini-boards to the count */
   }
 
-  // One channel's recap, end to end: claim the ledger slot, build the card, post it, and
-  // report the outcome. Self-contained so the pool below can run many at once. A transient
-  // failure (429 / 5xx / thrown) releases the ledger claim so a later run retries; a permanent
-  // failure (403 can't post, 404 gone, malformed) keeps the claim so we don't loop on it.
+  // One channel's recap, end to end: claim the ledger slot, build the card, post it, and record the
+  // outcome on the row. Self-contained so the pool below can run many at once. A transient failure
+  // (429 / 5xx / thrown) releases the claim so a later run retries; a permanent failure (403 can't
+  // post, 404 gone, malformed) keeps the row and stamps status='failed' + the Discord code, so it
+  // doesn't loop AND the miss is visible instead of masquerading as a delivery.
   const postOne = async ({ scope, channel }: { scope: string; channel: string }): Promise<Outcome> => {
-    // Test re-runs (force): clear any prior claim for this (scope, date, channel) so it re-posts.
-    if (force) await db.from('recap_posts').delete().match({ scope_id: scope, puzzle_date: date, channel_id: channel });
-    // Claim the (scope, date, channel) slot before posting; a unique violation means a prior
-    // run already handled this channel.
-    const claim = await db.from('recap_posts').insert({ scope_id: scope, puzzle_date: date, channel_id: channel });
-    if (claim.error) return claim.error.code === '23505' ? 'skipped' : 'failed';
+    const key = { scope_id: scope, puzzle_date: date, channel_id: channel };
+    const nowIso = new Date().toISOString();
+    // Test re-runs (force): clear any prior row for this (scope, date, channel) so it re-posts.
+    if (force) await db.from('recap_posts').delete().match(key);
 
-    const release = () =>
-      db.from('recap_posts').delete().match({ scope_id: scope, puzzle_date: date, channel_id: channel });
+    // Claim the slot. The row is the idempotency lock: 'claimed' = in flight, 'posted' = delivered
+    // (never repost), 'failed' = a permanent 4xx for this date (don't loop), absent = released after a
+    // transient failure (retryable). A fresh insert wins the claim.
+    const claim = await db.from('recap_posts').insert({ ...key, status: 'claimed', attempted_at: nowIso });
+    if (claim.error) {
+      if (claim.error.code !== '23505') return 'failed';
+      // Row already exists. Take it over ONLY if it's a stale 'claimed' row orphaned by a killed run —
+      // an atomic CAS: re-stamp attempted_at where status is still 'claimed' AND the prior attempt is
+      // old. If nothing matches (it's 'posted'/'failed', or a fresh in-flight claim), leave it alone.
+      const cutoff = new Date(Date.now() - STALE_CLAIM_MS).toISOString();
+      const { data: taken } = await db
+        .from('recap_posts')
+        .update({ attempted_at: nowIso })
+        .match(key)
+        .eq('status', 'claimed')
+        .lt('attempted_at', cutoff)
+        .select('scope_id');
+      if (!taken || taken.length === 0) return 'skipped';
+      console.log('[recap] recovered stale claim', { scope, channel });
+      // Recovered → fall through and (re)post it.
+    }
+
+    // Stamp the outcome on the claimed row: a delivery is proven (message_id), a failure is queryable.
+    const record = (fields: Record<string, unknown>) => db.from('recap_posts').update(fields).match(key);
+    const release = () => db.from('recap_posts').delete().match(key);
 
     try {
       const guildId = scope.startsWith('g:') ? scope.slice(2) : '';
@@ -294,13 +351,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       const r = await sendCard(url, recapPayload(text), png, 'POST', 'recap.png', {
         Authorization: `Bot ${botToken}`,
       });
-      if (r.ok) return 'posted';
-      // Transient (rate limit / Discord outage): release the slot so the next daily run
-      // retries. Permanent (403/404/malformed): keep the claim so we don't loop.
-      if (r.status === 429 || r.status >= 500) await release();
+      if (r.ok) {
+        // Store the message id as proof of delivery (was discarded before, so a kept claim was
+        // indistinguishable from a silent failure).
+        const messageId = ((await r.json().catch(() => ({}))) as { id?: string }).id ?? null;
+        await record({ status: 'posted', http_status: r.status, message_id: messageId, discord_code: null, error: null });
+        return 'posted';
+      }
+      // Parse Discord's error envelope { code, message } so the reason is queryable (e.g. 50001
+      // Missing Access = the bot can't post here — the dominant silent-failure cause).
+      const bodyText = await r.text().catch(() => '');
+      let discordCode: number | null = null;
+      try { discordCode = (JSON.parse(bodyText) as { code?: number }).code ?? null; } catch { /* non-JSON body */ }
+      if (r.status === 429 || r.status >= 500) {
+        // Transient (rate limit / Discord outage): release the slot so the next daily run retries.
+        await release();
+        return 'failed';
+      }
+      // Permanent 4xx (perms, gone, malformed): keep the row so we don't loop, but RECORD the failure
+      // so it's visible in the ledger instead of masquerading as a delivery.
+      await record({ status: 'failed', http_status: r.status, discord_code: discordCode, error: bodyText.slice(0, 500) });
+      console.warn('[recap] post failed', { scope, channel, status: r.status, code: discordCode });
       return 'failed';
-    } catch {
+    } catch (e) {
       await release();
+      console.warn('[recap] post threw', { scope, channel, err: e instanceof Error ? e.message : String(e) });
       return 'failed';
     }
   };

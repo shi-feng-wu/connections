@@ -16,14 +16,19 @@
 --
 -- SCHEDULE — pg_cron evaluates in UTC and does NOT follow DST, but the Connections reset is
 -- fixed at midnight ET, whose UTC time shifts with DST: 04:00 UTC in summer (EDT), 05:00 UTC
--- in winter (EST). So we register TWO jobs, at 04:00 and 05:00 UTC, ~1h apart. In every
--- season at least one fires at/after the true midnight ET — by which point today's puzzle is
--- published and yesterday's day is complete, so the handler's todayET()/yesterdayET() and its
--- puzzle-warm are correct. The redundant run is harmless: api/cron-recap.ts claims a
--- recap_posts ledger row before posting (no double-post) and the puzzle fetch is cache-backed
--- (no double NYT call). This replaces the old single-row job that needed a manual seasonal
--- bump and skipped a day at the spring-forward transition. Re-running this file is safe —
--- cron.schedule upserts by job name.
+-- in winter (EST). So we register TWO windows, at 04:00 and 05:00 UTC, ~1h apart. In every
+-- season at least one covers the true midnight ET — by which point today's puzzle is published
+-- and yesterday's day is complete, so the handler's todayET()/yesterdayET() and its puzzle-warm
+-- are correct. The redundant window is harmless: api/cron-recap.ts claims a recap_posts ledger
+-- row before posting (no double-post) and the puzzle fetch is cache-backed (no double NYT call).
+--
+-- EACH WINDOW FIRES EVERY MINUTE FOR 30 MINUTES ('0-29 4 * * *' / '0-29 5 * * *'), not once.
+-- api/cron-recap.ts is now a QUEUE DRAINER: each tick renders+posts one bounded BATCH_LIMIT slice
+-- of the still-pending channels (recap_pending) and returns, so ~1500 channels drain across ~10
+-- ticks WITHOUT any single invocation OOM-ing on ~1000 canvas renders (the bug that silently
+-- starved the older-guild tail of recap_channels() for weeks). A tick that returns 0 pending is a
+-- cheap no-op; a tick that crashes just leaves its remainder for the next minute. Re-running this
+-- file is safe — cron.schedule upserts by job name.
 
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
@@ -34,7 +39,7 @@ select cron.unschedule(jobid) from cron.job where jobname = 'daily-recap';
 
 select cron.schedule(
   'daily-recap-a',
-  '0 4 * * *',
+  '0-29 4 * * *',
   $$
   select net.http_post(
     url     => 'https://YOUR-DEPLOYMENT.vercel.app/api/cron-recap',
@@ -51,7 +56,7 @@ select cron.schedule(
 
 select cron.schedule(
   'daily-recap-b',
-  '0 5 * * *',
+  '0-29 5 * * *',
   $$
   select net.http_post(
     url     => 'https://YOUR-DEPLOYMENT.vercel.app/api/cron-recap',

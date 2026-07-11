@@ -504,18 +504,70 @@ returns table (scope_id text, channel_id text)
 language sql
 stable
 as $$
-  select distinct l.scope_id, l.channel_id
-  from public.live_cards l
-  where l.scope_id like 'g:%' and l.channel_id is not null and l.message_id is not null
-    and l.interaction_token is null -- bot-backed cards only; token-backed (bot-less) get no recap
-    and l.bot_can_post is distinct from false -- exclude channels the bot definitively can't post in (NULL = unknown → included)
-    and not exists (
-      select 1 from public.post_optouts o
-      where o.scope_id = l.scope_id and o.channel_id = l.channel_id
-    );
+  -- Deterministic, cohort-neutral order (defense-in-depth). The set is unordered by nature, and a
+  -- bare scan sorts 19-digit (newer) guild ids ahead of ALL 18-digit (older) ones — so any caller
+  -- that truncated would always starve the older-guild tail. md5 mixes the order so no cohort is
+  -- systematically last. recap_pending() below is the real fairness gate; this just avoids surprises.
+  -- (The DISTINCT lives in the subquery so the outer ORDER BY can sort by md5 — SELECT DISTINCT
+  -- forbids ordering by an expression that isn't in its own select list.)
+  select t.scope_id, t.channel_id
+  from (
+    select distinct l.scope_id, l.channel_id
+    from public.live_cards l
+    where l.scope_id like 'g:%' and l.channel_id is not null and l.message_id is not null
+      and l.interaction_token is null -- bot-backed cards only; token-backed (bot-less) get no recap
+      and l.bot_can_post is distinct from false -- exclude channels the bot definitively can't post in (NULL = unknown → included)
+      and not exists (
+        select 1 from public.post_optouts o
+        where o.scope_id = l.scope_id and o.channel_id = l.channel_id
+      )
+  ) t
+  order by md5(t.scope_id || t.channel_id);
 $$;
 
 grant execute on function public.recap_channels() to anon, authenticated;
+
+-- Supports recap_pending()'s per-(scope,channel) lookups: the "already terminal for this date?"
+-- existence check and the "when was this channel last served?" max(puzzle_date) used for fairness
+-- ordering. The recap_posts PK is (scope_id, puzzle_date, channel_id), which can't answer a
+-- (scope_id, channel_id) probe without scanning every date for the scope; this index makes both O(1)-ish.
+create index if not exists recap_posts_served_idx
+  on public.recap_posts (scope_id, channel_id, status, puzzle_date desc);
+
+-- The nightly recap's WORK QUEUE. Returns the next slice of channels that still need a recap for
+-- p_date — i.e. recap_channels() minus any (scope, channel) already terminal ('posted'/'failed')
+-- for that date — ordered so the neediest go first: never-served channels (max posted date = NULL)
+-- lead, then least-recently-served. cron-recap.ts processes one bounded LIMIT batch per invocation
+-- and returns; successive per-minute ticks drain the whole set because terminal rows drop out of
+-- this result. This is what fixes the tail-truncation OOM: no single invocation ever renders more
+-- than p_limit cards, and a crashed tick just leaves its remainder for the next tick to pick up.
+drop function if exists public.recap_pending(date, int);
+create or replace function public.recap_pending(p_date date, p_limit int)
+returns table (scope_id text, channel_id text)
+language sql
+stable
+as $$
+  select rc.scope_id, rc.channel_id
+  from public.recap_channels() rc
+  where not exists (
+    select 1 from public.recap_posts rp
+    where rp.scope_id = rc.scope_id and rp.channel_id = rc.channel_id
+      and rp.puzzle_date = p_date
+      and (
+        rp.status in ('posted', 'failed')                                            -- terminal for this date
+        or (rp.status = 'claimed' and rp.attempted_at > now() - interval '15 minutes') -- fresh in-flight claim
+      )                                                                              -- (stale claims stay pending → recovered)
+  )
+  order by
+    (select max(rp2.puzzle_date)
+       from public.recap_posts rp2
+       where rp2.scope_id = rc.scope_id and rp2.channel_id = rc.channel_id
+         and rp2.status = 'posted') asc nulls first, -- never-served / least-recently-served first
+    md5(rc.scope_id || rc.channel_id)                 -- stable tiebreak within a served-date cohort
+  limit p_limit;
+$$;
+
+grant execute on function public.recap_pending(date, int) to anon, authenticated;
 
 -- Room-level header stats for the daily recap, as of a date: the room's current
 -- solve streak (consecutive most-recent days at least one player solved), its longest

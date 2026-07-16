@@ -234,12 +234,19 @@ as $$
            count(*) filter (where s.solved)::int      as wins,
            round(avg(s.mistakes)::numeric, 1)::float8 as avg_mistakes,
            min(mj.joined)                             as joined
-    from public.scores s
-    left join mj on mj.user_id = s.user_id
+    -- Driven from mj (inner join), not a left join + null-check over ALL of scores: mj is
+    -- already scope_id-indexed and small, so joining scores TO it lets the planner use
+    -- scores_user_idx (user_id, puzzle_date) per member instead of a full-table seq scan on
+    -- every call (this was firing 3.5M+ seq scans / 168B tuple reads against a 117k-row and
+    -- growing table). Semantically identical to the old left-join-then-filter shape — a scores
+    -- row only ever qualified when its user_id was already in mj, so nothing an inner join
+    -- could drop was ever kept by the left join either.
+    from mj
+    join public.scores s on s.user_id = mj.user_id
     where (p_since is null or s.puzzle_date >= p_since)
       and (p_until is null or s.puzzle_date <= p_until)
       and case when p_scope like 'g:%'
-        then mj.user_id is not null and s.puzzle_date >= mj.joined
+        then s.puzzle_date >= mj.joined
         else s.scope_id = p_scope and (p_channel is null or s.channel_id = p_channel)
       end
     group by s.user_id
@@ -291,11 +298,14 @@ as $$
            count(*)::int                              as plays,
            count(*) filter (where s.solved)::int      as wins,
            round(avg(s.mistakes)::numeric, 1)::float8 as avg_mistakes
-    from public.scores s
-    left join mj on mj.user_id = s.user_id
+    -- See room_board: driven from mj (inner join) instead of a left join + null-check over
+    -- ALL of scores, so scores_user_idx (user_id, puzzle_date) does the work per member
+    -- instead of a full-table seq scan on every "your standing" fetch.
+    from mj
+    join public.scores s on s.user_id = mj.user_id
     where (p_since is null or s.puzzle_date >= p_since)
       and case when p_scope like 'g:%'
-        then mj.user_id is not null and s.puzzle_date >= mj.joined
+        then s.puzzle_date >= mj.joined
         else s.scope_id = p_scope and (p_channel is null or s.channel_id = p_channel)
       end
     group by s.user_id
@@ -458,11 +468,13 @@ as $$
   )
   select s.user_id, s.name, s.avatar, s.score, s.mistakes,
          s.solved, s.groups_solved, s.duration_ms
-  from public.scores s
-  left join mj on mj.user_id = s.user_id
+  -- See room_board: mj-driven inner join instead of a left join + null-check over ALL of
+  -- scores, so this doesn't full-scan the table once per channel per recap run.
+  from mj
+  join public.scores s on s.user_id = mj.user_id
   where s.puzzle_date = p_date
     and case when p_scope like 'g:%'
-      then mj.user_id is not null and s.puzzle_date >= mj.joined
+      then s.puzzle_date >= mj.joined
       else s.scope_id = p_scope and (p_channel is null or s.channel_id = p_channel)
     end
   order by s.solved desc, s.score desc, s.mistakes asc, s.duration_ms asc nulls last;
@@ -597,12 +609,14 @@ as $$
     -- "room day" = any MEMBER solved that day, counted only from that member's join date
     -- (point-in-time: a new member can't retroactively heal a day before they joined).
     select s.puzzle_date as d, bool_or(s.solved) as solved
-    from public.scores s
-    left join mj on mj.user_id = s.user_id
+    -- See room_board: mj-driven inner join instead of a left join + null-check over ALL of
+    -- scores, so this doesn't full-scan the table on every recap-stats call.
+    from mj
+    join public.scores s on s.user_id = mj.user_id
     where s.puzzle_date is not null
       and (p_date is null or s.puzzle_date <= p_date)
       and case when p_scope like 'g:%'
-        then mj.user_id is not null and s.puzzle_date >= mj.joined
+        then s.puzzle_date >= mj.joined
         else s.scope_id = p_scope and (p_channel is null or s.channel_id = p_channel)
       end
     group by s.puzzle_date

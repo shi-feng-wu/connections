@@ -10,7 +10,10 @@
 --
 --   select vault.create_secret('<your CRON_SECRET value>', 'cron_secret');
 --
--- Replace YOUR-DEPLOYMENT below with your real Vercel host before running.
+-- The endpoint URL below is the production host (disconnections.app). It is NOT a placeholder —
+-- do not swap in a *.vercel.app deploy alias by hand: cron.schedule UPSERTS by job name, so running
+-- this with a wrong/placeholder URL silently overwrites the working job and the recap fires into a
+-- 404 every night with zero errors surfaced. (That exact footgun bit us once.)
 --
 -- (To rotate later: select vault.update_secret(id, '<new value>') — find id in vault.secrets.)
 --
@@ -42,7 +45,7 @@ select cron.schedule(
   '0-29 4 * * *',
   $$
   select net.http_post(
-    url     => 'https://YOUR-DEPLOYMENT.vercel.app/api/cron-recap',
+    url     => 'https://disconnections.app/api/cron-recap',
     headers => jsonb_build_object(
       'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'cron_secret'),
       'Content-Type',  'application/json'
@@ -59,7 +62,7 @@ select cron.schedule(
   '0-29 5 * * *',
   $$
   select net.http_post(
-    url     => 'https://YOUR-DEPLOYMENT.vercel.app/api/cron-recap',
+    url     => 'https://disconnections.app/api/cron-recap',
     headers => jsonb_build_object(
       'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'cron_secret'),
       'Content-Type',  'application/json'

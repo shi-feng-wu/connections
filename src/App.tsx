@@ -402,6 +402,9 @@ export function App({
   const accessTokenRef = useRef<string | null>(null);
   const authTicketRef = useRef<string | null>(null);
   const sessionRef = useRef<string | null>(null);
+  // Flips once the handshake reaches "hs-done" — lets the death-window heartbeat trace
+  // (below) stop once there's no more death window to catch. See its effect for why.
+  const handshakeDoneRef = useRef(false);
   const didInit = useRef(false);
   const loadSeq = useRef(0);
   // Serial chain for background guess commits (see commitGuess): each commit runs
@@ -1124,6 +1127,7 @@ export function App({
       });
 
       mark("hs-done");
+      handshakeDoneRef.current = true; // no more death window to catch — see the heartbeat effect
       setHandshakeFail(null);
       clearHsRetry(); // a completed handshake ends any reload-recovery episode
       return true;
@@ -1385,12 +1389,20 @@ export function App({
   // Death-window instrumentation for the open-then-dies launch failure (100% repro on the
   // dev's desktop DM launches; the document dies without pagehide, so only signals sent
   // BEFORE death can name the killer). Heartbeats pin the moment the document stops
-  // existing; visibility flips and JS errors catch anything that precedes it. Roughly ten
-  // tiny 204s per launch — dial back once the failure is understood.
+  // existing; visibility flips and JS errors catch anything that precedes it.
+  //
+  // Every heartbeat past hs-done is pure noise — there's no more death window to catch once
+  // the handshake has actually completed — but they were firing unconditionally on every
+  // single launch (success or not), which was ~90% of all /api/launch-beacon traffic
+  // (175k/day against ~11k real launches). Gated on handshakeDoneRef so a healthy launch
+  // stops emitting the moment it's healthy, while a genuinely stuck launch (the case this
+  // exists for) still gets the full trace, unchanged.
   useEffect(() => {
     if (!isEmbedded) return;
     const timers = [1, 2, 3, 5, 8, 15, 30].map((s) =>
-      setTimeout(() => mark(`hb-${s}s`), s * 1000),
+      setTimeout(() => {
+        if (!handshakeDoneRef.current) mark(`hb-${s}s`);
+      }, s * 1000),
     );
     let errBudget = 5; // cap error beacons so a throw loop can't flood the funnel
     const onVis = (): void => mark(`vis-${document.visibilityState}`);

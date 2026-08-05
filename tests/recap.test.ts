@@ -29,11 +29,11 @@ describe("recapText", () => {
     expect(
       recapText({ streak: 0, solved: false, played: true, brokenStreak: 12, puzzleNo: 642 }),
     ).toBe(
-      "**12-day streak broken!** Yesterday's Connections #642 stumped everyone… but today is a new day 🌞",
+      "**12-day streak broken!** Yesterday's Disconnections #642 stumped everyone… but today is a new day 🌞",
     );
     expect(
       recapText({ streak: 0, solved: false, played: true, brokenStreak: 0, puzzleNo: 642 }),
-    ).toBe("Yesterday's Connections #642 stumped everyone… but today is a new day 🌞");
+    ).toBe("Yesterday's Disconnections #642 stumped everyone… but today is a new day 🌞");
   });
 
   // Cases 3 & 5 — no finishers at all: "nobody played", named prefix if a streak ended.
@@ -41,16 +41,16 @@ describe("recapText", () => {
     expect(
       recapText({ streak: 0, solved: false, played: false, brokenStreak: 3, puzzleNo: 642 }),
     ).toBe(
-      "**3-day streak broken!** Nobody played yesterday's Connections #642… but today is a new day 🌞",
+      "**3-day streak broken!** Nobody played yesterday's Disconnections #642… but today is a new day 🌞",
     );
     expect(
       recapText({ streak: 0, solved: false, played: false, brokenStreak: 0, puzzleNo: 642 }),
-    ).toBe("Nobody played yesterday's Connections #642… but today is a new day 🌞");
+    ).toBe("Nobody played yesterday's Disconnections #642… but today is a new day 🌞");
   });
 
   it("falls back to a generic puzzle name when the number is unknown", () => {
     expect(recapText({ streak: 0, solved: false, played: false })).toBe(
-      "Nobody played yesterday's Connections… but today is a new day 🌞",
+      "Nobody played yesterday's Disconnections… but today is a new day 🌞",
     );
   });
 });

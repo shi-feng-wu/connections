@@ -9,7 +9,7 @@ import { MAX_MISTAKES, type Game } from "./game";
 // The large image. Discord fetches this server-side to proxy it, so it must be the
 // real public host (the in-Activity origin is the *.discordsays.com proxy, which
 // Discord's servers can't reach — so we can't derive it from location.origin here).
-// Set VITE_RP_ICON_URL to your deployment's /connections-icon.png, or to an uploaded
+// The app ships no logo file, so set VITE_RP_ICON_URL to an uploaded image URL or an
 // Art Asset key from the Developer Portal (Rich Presence -> Art Assets). Unset, the
 // card simply renders without a large image.
 const ICON_URL = import.meta.env.VITE_RP_ICON_URL as string | undefined;
@@ -83,7 +83,7 @@ export function buildActivity(p: PresenceInput) {
     activity.timestamps = { start: Math.floor(p.joinedAt / 1000) };
   }
   if (ICON_URL) {
-    activity.assets = { large_image: ICON_URL, large_text: "NYT Connections" };
+    activity.assets = { large_image: ICON_URL, large_text: "Disconnections" };
   }
   return activity;
 }

@@ -638,7 +638,7 @@ const CARD_BUSY: CardPlayer[] = [
 ];
 const CARD_SOLO: CardPlayer[] = [CARD_ROOM[2]]; // Theo, mid-game
 
-// The daily recap posted on the Connections reset: yesterday's results beside the
+// The daily recap posted on the Disconnections reset: yesterday's results beside the
 // month's season standings (mirrors the design mock + scripts/card-preview.mts).
 const CARD_RECAP: RecapData = {
   puzzleNo: 1169,
@@ -903,7 +903,7 @@ function Simulate() {
     setRunning(true);
     for (const g of puzzle.groups) {
       const before = tilesLeft();
-      btn("Deselect all")?.click();
+      btn("Clear picks")?.click();
       select(g.members);
       await submitGuess();
       await until(() => tilesLeft() <= before - 4); // group accepted + removed
@@ -920,7 +920,7 @@ function Simulate() {
     // a different column each round keeps the four guesses distinct.
     for (let i = 0; i < MAX_MISTAKES; i++) {
       const before = mistakesLeft();
-      btn("Deselect all")?.click();
+      btn("Clear picks")?.click();
       select(cols.map((c) => c[i]));
       await submitGuess();
       await until(() => mistakesLeft() < before); // mistake registered
@@ -936,7 +936,7 @@ function Simulate() {
     if (running) return;
     setRunning(true);
     for (const g of puzzle.groups) {
-      btn("Deselect all")?.click();
+      btn("Clear picks")?.click();
       select(g.members);
       await submitGuess();
       await delay(240);
@@ -1539,12 +1539,12 @@ const REEL = (
 // ——— Discord App-Directory still art (16:9, 1024×576), rendered to PNG ———
 // Same brand system as the game: dark stage, the four category colors, off-white
 // tiles, the Newsreader (font-display) wordmark.
-const C4 = ["#f9df6d", "#a0c35a", "#b0c4ef", "#ba81c5"];
+const C4 = ["#e0a93e", "#6f9d3f", "#6c8fe8", "#8f5bb5"];
 function ArtTile({ label, s }: { label: string; s: CSSProperties }) {
   return (
     <div
       style={s}
-      className="absolute flex items-center justify-center rounded-[14px] bg-[#efefe6] font-sans text-[16px] font-extrabold uppercase tracking-tight text-[#121212] shadow-[0_22px_48px_rgba(0,0,0,0.55)]"
+      className="absolute flex items-center justify-center rounded-[14px] bg-[#e8eaee] font-sans text-[16px] font-extrabold uppercase tracking-tight text-[#121212] shadow-[0_22px_48px_rgba(0,0,0,0.55)]"
     >
       {label}
     </div>
@@ -1559,25 +1559,20 @@ function ArtBar({ color, s }: { color: string; s: CSSProperties }) {
   );
 }
 
-// Cover Art — Wordle-style: minimal, centered, one tight lockup. The brick logo, a
+// Cover Art — Wordle-style: minimal, centered, one tight lockup. The D lettermark, a
 // tall condensed slab-serif wordmark, a small muted tagline, on flat neutral grey. NOTE:
 // the exported docs/activity-cover.png bakes the type in licensed NYTKarnak Condensed —
 // the EXACT Wordle wordmark face (confirmed via the live page: NYTKarnak Condensed,
 // weight 700), a condensed slab serif. NOT Cheltenham (bracketed old-style) and NOT the
 // wide regular Karnak (reads blocky/short). The dev stand-in below is font-display
 // (Newsreader), so this preview only approximates the bake; keep sizes/spacing in sync.
-// Just the brick logo + condensed slab wordmark, nudged down (pt-[132px]) so the pair sits
+// Just the lettermark + condensed slab wordmark, nudged down (pt-[132px]) so the pair sits
 // roughly centered on the flat neutral grey. The bake uses NYTKarnak Condensed 700;
 // font-display (Newsreader) is the dev stand-in here.
 const COVER = (
   <div className="flex h-dvh w-full flex-col items-center justify-start bg-[#d8d8d6] pt-[132px] text-black">
-    <img
-      src="/connections-icon.png"
-      alt=""
-      className="mb-[22px] h-[140px] w-[140px] object-contain"
-    />
     <h1 className="font-display text-[188px] font-bold leading-[0.84] tracking-[-0.015em]">
-      Connections
+      Disconnections
     </h1>
   </div>
 );
@@ -1589,10 +1584,10 @@ const BG = (
       className="pointer-events-none absolute inset-0"
       style={{
         background:
-          "radial-gradient(680px 460px at 0% 0%, rgba(249,223,109,0.12), transparent 55%)," +
-          "radial-gradient(680px 460px at 100% 0%, rgba(160,195,90,0.12), transparent 55%)," +
-          "radial-gradient(680px 460px at 0% 100%, rgba(176,196,239,0.12), transparent 55%)," +
-          "radial-gradient(680px 460px at 100% 100%, rgba(186,129,197,0.14), transparent 55%)",
+          "radial-gradient(680px 460px at 0% 0%, rgba(224,169,62,0.12), transparent 55%)," +
+          "radial-gradient(680px 460px at 100% 0%, rgba(111,157,63,0.12), transparent 55%)," +
+          "radial-gradient(680px 460px at 0% 100%, rgba(108,143,232,0.12), transparent 55%)," +
+          "radial-gradient(680px 460px at 100% 100%, rgba(143,91,181,0.14), transparent 55%)",
       }}
     />
     {/* TL */}
@@ -1737,8 +1732,8 @@ const reload = (): void => void setTimeout(() => location.reload(), 0);
 function PageHeader() {
   return (
     <header className="w-full max-w-[1240px] px-6">
-      <h1 className="font-display text-[28px] font-bold leading-none tracking-[-0.01em] text-[#efefe6]">
-        Connections <span className="text-zinc-500">· UI preview</span>
+      <h1 className="font-display text-[28px] font-bold leading-none tracking-[-0.01em] text-[#e8eaee]">
+        Disconnections <span className="text-zinc-500">· UI preview</span>
       </h1>
       <p className="mt-2.5 max-w-[72ch] text-[13px] leading-relaxed text-zinc-500">
         Every surface below renders from mock data — no Discord, no Supabase, no
@@ -1903,7 +1898,7 @@ const CANNED = [
 
 // The dev the player sees answering in the playground — a real avatar rides each reply (the live
 // app resolves this from the responding dev's Discord identity), so the demo shows their pic, not
-// the Connections brand mark.
+// the Disconnections brand mark.
 const DEMO_DEV = { name: "Sam · dev", avatar: "https://cdn.discordapp.com/embed/avatars/3.png" };
 
 function ChatDemo() {

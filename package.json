@@ -1,8 +1,8 @@
 {
-  "name": "connections-activity",
+  "name": "disconnections-activity",
   "private": true,
   "version": "1.0.0",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "type": "module",
   "packageManager": "pnpm@10.28.1",
   "pnpm": {

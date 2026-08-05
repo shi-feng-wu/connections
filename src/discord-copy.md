@@ -14,7 +14,7 @@
 
 ## donate
 
-Connections is ad-free. Donations help cover the server costs. Any amount helps, thank you!
+Disconnections is ad-free. Donations help cover the server costs. Any amount helps, thank you!
 
 ## enable-posts.add-bot
 
@@ -42,7 +42,7 @@ Add the bot to extend how long it can edit the who’s playing card, plus a nigh
 ## missing-perms
 
 I’m in this server but can’t post in this channel, so the card and recap won’t show up here.
-Give the Connections bot these permissions on this channel: View Channel, Send Messages, Attach Files.
+Give the Disconnections bot these permissions on this channel: View Channel, Send Messages, Attach Files.
 -# Usually it’s a private channel the bot’s role isn’t in. Check the channel’s Permissions.
 
 ## disable-posts.done
@@ -72,7 +72,7 @@ Sharing’s down right now. Try again in a bit.
 
 ## share.not-played
 
-You haven’t played today’s Connections yet. Run `/connections`, then `/share` your grid.
+You haven’t played today’s Disconnections yet. Run `/disconnections`, then `/share` your grid.
 
 ## share.load-failed
 
@@ -100,7 +100,7 @@ You wrote
 
 ## reply-dm.footer
 
-Open Connections to reply
+Open Disconnections to reply
 
 ## unsupported
 

@@ -11,7 +11,7 @@ import { REPLY_COLOR } from '../src/discord-messages.js';
 
 const MAX_LEN = 2000; // Discord embed description limit
 export const CATEGORIES = ['Bug', 'Idea', 'Other'];
-const COLOR: Record<string, number> = { Bug: 0xe06c75, Idea: 0xf9df6d, Other: 0xb0c4ef };
+const COLOR: Record<string, number> = { Bug: 0xe06c75, Idea: 0xe0a93e, Other: 0x6c8fe8 };
 const EMOJI: Record<string, string> = { Bug: '🐛', Idea: '💡', Other: '💬' };
 // Replies get their own hue (REPLY_COLOR, shared with the player DM) + arrow so the webhook
 // channel reads as a conversation, not a pile of inbound notes.
@@ -50,7 +50,7 @@ export async function postFeedbackWebhook(post: FeedbackPost): Promise<boolean> 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        username: 'Connections feedback',
+        username: 'Disconnections feedback',
         // Never let a note ping anyone (@everyone, roles, users).
         allowed_mentions: { parse: [] },
         embeds: [

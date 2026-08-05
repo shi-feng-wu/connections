@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { admin } from './_admin.js';
 import { bearerToken } from './_discord.js';
-import { isValidDate } from './_nyt.js';
+import { isValidDate } from './_puzzles.js';
 import { isLocalDev, signSession, verifyAuth } from './_session.js';
 
 // Opens (or resumes) a player's day. Two jobs:

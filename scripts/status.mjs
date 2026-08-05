@@ -1,10 +1,10 @@
 // Keeps the bot showing a custom status — the speech-bubble line with no "Playing"
-// prefix — that always reads "/connections", nudging people toward the launch command.
+// prefix — that always reads "/disconnections", nudging people toward the launch command.
 //
 // WHY THIS IS A LONG-LIVED PROCESS: a bot's custom status is part of its presence, and
 // Discord ONLY lets you set presence over the Gateway (a persistent WebSocket) — there
 // is no REST/set-once endpoint, and the status clears within seconds of the connection
-// dropping. So "always /connections" means a process that stays connected. The rest of
+// dropping. So "always /disconnections" means a process that stays connected. The rest of
 // this app is serverless (Vercel can't hold a socket open), which is why this lives on
 // its own.
 //
@@ -28,7 +28,7 @@ if (typeof globalThis.WebSocket !== 'function') {
 
 // Hardcoded custom status. type 4 = Custom: Discord renders `state` with the speech
 // bubble and no verb prefix (`name` is required but ignored for this type).
-const STATUS_TEXT = '/connections';
+const STATUS_TEXT = '/disconnections';
 const presence = {
   activities: [{ name: 'Custom Status', type: 4, state: STATUS_TEXT }],
   status: 'online',
@@ -80,7 +80,7 @@ function identify() {
   send(OP.IDENTIFY, {
     token: TOKEN,
     intents: 0, // we send presence and consume nothing; no privileged intents needed
-    properties: { os: process.platform, browser: 'connections', device: 'connections' },
+    properties: { os: process.platform, browser: 'disconnections', device: 'disconnections' },
     presence,
   });
 }
@@ -161,5 +161,5 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   });
 }
 
-console.log('Connecting to Discord gateway to set custom status "/connections" …');
+console.log('Connecting to Discord gateway to set custom status "/disconnections" …');
 connect();

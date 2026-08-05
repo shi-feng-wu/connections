@@ -45,7 +45,7 @@ const CHIPS = ["Bug", "Idea", "Other"];
 // player is always "me" on their own side; dev messages fall back to the app's brand mark only for
 // legacy rows that predate stored avatars.
 type Participants = { user: ChatIdentity; dev: ChatIdentity };
-const SUPPORT: ChatIdentity = { name: "Connections", avatar: "/connections-icon.png" };
+const SUPPORT: ChatIdentity = { name: "Disconnections", avatar: null };
 // Fall back to a friendly name so the monogram never blanks before identity resolves.
 function meIdent(me?: ChatIdentity): ChatIdentity {
   return { name: me?.name ?? "You", avatar: me?.avatar ?? null };
@@ -437,7 +437,7 @@ function Row({
           >
             {preview}
           </span>
-          {unread && <span className="h-2 w-2 flex-none rounded-full bg-[#a0c35a]" aria-label="Unread" />}
+          {unread && <span className="h-2 w-2 flex-none rounded-full bg-[#8fb356]" aria-label="Unread" />}
         </span>
       </span>
     </HoverButton>
@@ -501,7 +501,7 @@ function ThreadShell({
           <Eyebrow>{category ?? "Message"}</Eyebrow>
         </div>
         {subject && (
-          <h2 className="m-0 font-display text-[20px] font-bold leading-[1.15] tracking-[-0.01em] text-[#efefe6]">
+          <h2 className="m-0 font-display text-[20px] font-bold leading-[1.15] tracking-[-0.01em] text-[#e8eaee]">
             {subject}
           </h2>
         )}
@@ -743,7 +743,7 @@ function LocalForm(): ReactNode {
         <span className="grid h-14 w-14 place-items-center rounded-full bg-emerald-400/[0.13] text-emerald-400">
           <Check size={26} strokeWidth={2.25} aria-hidden />
         </span>
-        <div className="font-display text-[21px] font-bold text-[#efefe6]">Thanks, got it!</div>
+        <div className="font-display text-[21px] font-bold text-[#e8eaee]">Thanks, got it!</div>
         <p className="m-0 max-w-[280px] text-[14px] leading-[1.55] text-zinc-400">
           It comes straight to us, and we read every one.
         </p>

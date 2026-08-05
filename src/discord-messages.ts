@@ -157,7 +157,7 @@ function formatShareDuration(ms?: number | null): string {
 }
 
 // The /share result as a Components V2 card — a plain bordered Container (Wordle's framed box, no
-// accent stripe) holding a Wordle-style plain title line ("Connections #N x/4", x = groups solved
+// accent stripe) holding a Wordle-style plain title line ("Disconnections #N x/4", x = groups solved
 // out of four) above the colour-square grid (one row per guess, from Game.shareGrid), then a
 // divider and a small subtext stat line. Returns the message `components` array (one container);
 // the response pairs it with the IS_COMPONENTS_V2 flag — a V2 message carries NO content/embeds.
@@ -179,7 +179,7 @@ export function shareCard(
 
   // Plain text, like Wordle's "Wordle 1828 4/6" — no bold/heading. groupsSolved excludes a loss's
   // forced back-fill, so a win is 4/4 and a loss is however many groups were actually deduced.
-  const title = ["Connections", opts.puzzleNo ? `#${opts.puzzleNo}` : null, `${game.groupsSolved}/4`]
+  const title = ["Disconnections", opts.puzzleNo ? `#${opts.puzzleNo}` : null, `${game.groupsSolved}/4`]
     .filter(Boolean)
     .join(" ");
   // Title, grid, and stats are separate blocks so spacers sit between them: equal line-less gaps

@@ -47,7 +47,7 @@ const PLAY_URL = "disconnections.app";
 function buildShareText(game: Game): string {
   const mistakes = MAX_MISTAKES - game.mistakesLeft;
   const dots = "⚪".repeat(game.mistakesLeft) + "⚫".repeat(mistakes);
-  const title = `Connections #${game.puzzle.id} ${game.groupsSolved}/4`;
+  const title = `Disconnections #${game.puzzle.id} ${game.groupsSolved}/4`;
   const stats = [dots, fmtClock(game.durationMs), `${game.score.toLocaleString()} pts`].join(" · ");
   return `${title}\n${game.shareGrid()}\n${stats}\n${PLAY_URL}`;
 }
@@ -155,7 +155,7 @@ function BreakRow({
         className={
           "tabular-nums leading-none " +
           (total
-            ? "font-display text-[20px] font-bold tracking-[-0.01em] text-[#efefe6]"
+            ? "font-display text-[20px] font-bold tracking-[-0.01em] text-[#e8eaee]"
             : "text-[13.5px] font-bold " +
               (neg ? "text-zinc-400" : "text-emerald-400"))
         }
@@ -304,7 +304,7 @@ function EndSummary({
         {/* LEFT — mistake dots */}
         <span
           className="inline-flex flex-none items-center gap-1.75"
-          aria-label="Mistakes remaining"
+          aria-label="Guesses left"
         >
           {Array.from({ length: MAX_MISTAKES }, (_, i) => (
             <span
@@ -326,7 +326,7 @@ function EndSummary({
           <span
             aria-hidden
             className={
-              "pointer-events-none absolute z-20 whitespace-nowrap rounded-full bg-[#efefe6] px-3.5 py-2 text-[11px] font-bold uppercase leading-none tracking-[0.08em] text-[#121212] shadow-[0_3px_12px_rgba(0,0,0,0.45)] transition-all duration-200 ease-[cubic-bezier(.34,1.56,.64,1)] max-[420px]:px-3 max-[420px]:text-[10px] max-[420px]:tracking-[0.04em] " +
+              "pointer-events-none absolute z-20 whitespace-nowrap rounded-full bg-[#e8eaee] px-3.5 py-2 text-[11px] font-bold uppercase leading-none tracking-[0.08em] text-[#121212] shadow-[0_3px_12px_rgba(0,0,0,0.45)] transition-all duration-200 ease-[cubic-bezier(.34,1.56,.64,1)] max-[420px]:px-3 max-[420px]:text-[10px] max-[420px]:tracking-[0.04em] " +
               (copied ? "scale-100 opacity-100" : "scale-90 opacity-0")
             }
           >
@@ -377,7 +377,7 @@ function EndSummary({
                 >
                   {label}
                 </span>
-                <span className="font-display text-[26px] font-bold leading-none tracking-[-0.02em] text-[#efefe6]">
+                <span className="font-display text-[26px] font-bold leading-none tracking-[-0.02em] text-[#e8eaee]">
                   +{game.score.toLocaleString()}
                 </span>
               </div>
@@ -595,8 +595,8 @@ function MemberFaces({ members, images }: { members: string[]; images?: Record<s
 // the press-pop, never a sticky hover. Press feedback is the WAAPI scale in
 // onTileClick, so the press still works for both touch and mouse.
 const TILE_HOVER = " opacity-90";
-const TILE_DEFAULT = " bg-[#efefe6] text-[#121212] active:bg-[#e3e3d9]";
-const TILE_SELECTED = " bg-[#5a594e] text-white";
+const TILE_DEFAULT = " bg-[#e8eaee] text-[#121212] active:bg-[#dde0e6]";
+const TILE_SELECTED = " bg-[#4a4f5a] text-white";
 // Pill buttons. Hover is opacity-only (mouse-only via <HoverButton>, since CSS
 // :hover sticks after a tap on touch/hybrid Discord). :active press feedback stays
 // in className since :active clears reliably on touchend.
@@ -1100,7 +1100,7 @@ export function Board({
   ): Promise<void> {
     const tiles = words.map(tileByWord).filter(Boolean) as HTMLElement[];
     // only the near-miss gets called out; a plain wrong guess just shakes.
-    if (oneAway) flashHint("One away…");
+    if (oneAway) flashHint("So close, one off…");
     await Promise.all(
       tiles.map(
         (t) =>
@@ -1459,8 +1459,8 @@ export function Board({
       <div className="flex items-center gap-3 max-[359px]:gap-2">
         <span
           className="inline-flex flex-none items-center gap-1.75"
-          aria-label="Mistakes remaining"
-          title="Mistakes remaining"
+          aria-label="Guesses left"
+          title="Guesses left"
         >
           {Array.from({ length: MAX_MISTAKES }, (_, i) => (
             <span
@@ -1477,7 +1477,7 @@ export function Board({
           <div
             ref={hintChipRef}
             aria-hidden
-            className="pointer-events-none absolute z-10 whitespace-nowrap rounded-full bg-[#efefe6] px-3.5 py-2 text-[11px] font-bold uppercase leading-none tracking-[0.08em] text-[#121212] opacity-0 shadow-[0_3px_12px_rgba(0,0,0,0.45)] max-[420px]:px-3 max-[420px]:text-[10px] max-[420px]:tracking-[0.04em]"
+            className="pointer-events-none absolute z-10 whitespace-nowrap rounded-full bg-[#e8eaee] px-3.5 py-2 text-[11px] font-bold uppercase leading-none tracking-[0.08em] text-[#121212] opacity-0 shadow-[0_3px_12px_rgba(0,0,0,0.45)] max-[420px]:px-3 max-[420px]:text-[10px] max-[420px]:tracking-[0.04em]"
           >
             {hint ?? lastHint.current}
           </div>
@@ -1515,11 +1515,11 @@ export function Board({
             hover="opacity-80"
             onClick={clearSelection}
             disabled={selected.current.size === 0}
-            aria-label="Deselect all"
-            title="Deselect all"
+            aria-label="Clear picks"
+            title="Clear picks"
           >
             <Eraser size={18} strokeWidth={2.5} aria-hidden />
-            <span className="sr-only">Deselect all</span>
+            <span className="sr-only">Clear picks</span>
           </HoverButton>
           <HoverButton
             // Below 360px the four controls + a text Submit overflow, so Submit

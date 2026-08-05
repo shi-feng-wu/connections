@@ -1,10 +1,9 @@
 import { LEVELS, MAX_MISTAKES, type Game } from "./game";
 import { readSpoilerSeen } from "./board";
-import logoUrl from "./assets/connections-nyt.png";
 
 // Compact board shown when the activity is collapsed to Discord's picture-in-picture
 // layout (ACTIVITY_LAYOUT_MODE_UPDATE → PIP). A left-rail design: the chrome lives in a
-// left rail — logo, serif "Connections" wordmark, a "No. 642 · June 2" serif meta line,
+// left rail — D lettermark, serif wordmark, a "No. 642 · June 2" serif meta line,
 // and (pinned to the bottom) the "Mistakes remaining" dots + "Groups found" track — and
 // the board fills the full height on the right as a square mini of the desktop board (a
 // colored bar per solved category, cream tiles for the words still in play, selected
@@ -36,8 +35,8 @@ export function PipThumbnail({
   if (!game) {
     return (
       <div className={frame} style={frameStyle}>
-        <div className="font-display text-[7cqw] font-bold tracking-tight text-[#efefe6]">
-          Connections
+        <div className="font-display text-[7cqw] font-bold tracking-tight text-[#e8eaee]">
+          Disconnections
         </div>
       </div>
     );
@@ -81,14 +80,9 @@ export function PipThumbnail({
         {/* left rail: identity up top, status pinned to the bottom */}
         <div className="flex min-w-0 flex-1 flex-col justify-between py-[0.46875cqw]">
           <div className="flex flex-col gap-[2.03125cqw]">
-            <img
-              src={logoUrl}
-              alt=""
-              className="block h-[5.78125cqw] w-[5.78125cqw] rounded-[1.40625cqw]"
-            />
             <div className="flex flex-col items-start gap-[1.40625cqw]">
-              <h1 className="m-0 font-display text-[4.375cqw] font-bold leading-[0.92] tracking-[-0.025em] text-[#efefe6]">
-                Connections
+              <h1 className="m-0 font-display text-[4.375cqw] font-bold leading-[0.92] tracking-[-0.025em] text-[#e8eaee]">
+                Disconnections
               </h1>
               {/* one consistent serif meta line: No. 642 · June 2 */}
               <div className="flex items-baseline gap-[0.9375cqw]">
@@ -107,7 +101,7 @@ export function PipThumbnail({
             {/* mistakes remaining */}
             <div>
               <p className="m-0 mb-[1.25cqw] font-sans text-[1.328125cqw] font-semibold uppercase leading-none tracking-[0.04em] text-zinc-500">
-                Mistakes remaining
+                Guesses left
               </p>
               <div className="flex gap-[1.09375cqw]">
                 {Array.from({ length: MAX_MISTAKES }, (_, i) => (
@@ -182,8 +176,8 @@ export function PipThumbnail({
                   className={
                     "flex aspect-square items-center justify-center overflow-hidden rounded-[1.09375cqw] px-[0.3125cqw] text-center font-sans text-[1.953125cqw] font-extrabold uppercase tracking-[0.01em] " +
                     (game.selected.has(w)
-                      ? "bg-[#5a594e] text-white"
-                      : "bg-[#efefe6] text-[#121212]")
+                      ? "bg-[#4a4f5a] text-white"
+                      : "bg-[#e8eaee] text-[#121212]")
                   }
                 >
                   <span className="block max-w-full truncate leading-none">{w}</span>

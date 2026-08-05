@@ -7,7 +7,7 @@ import { admin } from './_admin.js';
 import { bearerToken } from './_discord.js';
 import { triggerCardRefresh } from './_internal.js';
 import { cardNeedsRefresh } from './_livecard.js';
-import { fetchPuzzle, isValidDate, todayET } from './_nyt.js';
+import { fetchPuzzle, isValidDate, todayET } from './_puzzles.js';
 import { broadcastRoom } from './_realtime.js';
 import { MAX_GUESSES, scoreRow, upsertScore } from './_scoring.js';
 import { isLocalDev, verifyAuth } from './_session.js';

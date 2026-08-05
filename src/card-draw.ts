@@ -47,7 +47,7 @@ const BG = "#09090b"; // zinc-950
 const CARD_R = 30;
 const PANEL = "rgba(24,24,27,0.6)"; // zinc-900/60 — composited over BG
 const PANEL_BORDER = "#232327";
-const TITLE = "#efefe6"; // warm off-white wordmark
+const TITLE = "#e8eaee"; // cool off-white wordmark
 const ZINC_600 = "#52525b";
 const ZINC_500 = "#71717a";
 const ZINC_400 = "#a1a1aa";
@@ -129,7 +129,7 @@ const PAD_X = 30;
 const PAD_BOTTOM = 30; // matches PAD_X (sides) and NP_PAD_TOP — uniform inset all around
 
 // The "who's playing" card shares the recap's brand header (a four-color mark + "Now
-// playing" eyebrow over the "Connections" wordmark and a "Puzzle # · date" subline,
+// playing" eyebrow over the "Disconnections" wordmark and a "Puzzle # · date" subline,
 // with the Playing / Solved counts anchored right and a full-width rule beneath). The
 // header metrics live with the recap (RC_* constants); tiles start below its rule.
 const HEADER_GAP = 48; // min gap between the header's left block and its right stats
@@ -778,7 +778,7 @@ function rankColor(i: number): string {
 }
 
 // ---- shared brand header (recap + "who's playing" card) ----
-// A four-color brand mark + uppercase eyebrow over the serif "Connections" wordmark
+// A four-color brand mark + uppercase eyebrow over the serif "Disconnections" wordmark
 // and a sans subline, with up to two right-anchored stats (big number + optional unit,
 // uppercase label, an emerald accent for one) split by a hairline divider, then a
 // full-width rule. drawRecap and drawRoster both render this so the two cards' heads
@@ -787,7 +787,7 @@ type BrandStat = { num: string; unit: string; label: string; accent: boolean };
 // When set, the eyebrow line shows the room ("Server · #channel") instead of the static
 // label string — used by the recap. channel is the bare name (no leading '#').
 type Room = { server: string; channel: string | null };
-// titleSuffix joins the wordmark in the same serif (the recap's "Connections Recap").
+// titleSuffix joins the wordmark in the same serif (the recap's "Disconnections Recap").
 type BrandHeaderOpts = {
   eyebrow: string;
   subline: string;
@@ -899,7 +899,7 @@ function brandHeaderLeftWidth(
   ctx.letterSpacing = "0px";
   ctx.font = `700 ${RC_TITLE_SIZE}px Newsreader`;
   ctx.letterSpacing = "-0.76px";
-  const titleW = ctx.measureText("Connections").width;
+  const titleW = ctx.measureText("Disconnections").width;
   ctx.letterSpacing = "0px";
   ctx.font = `500 ${RC_SUB_SIZE}px "Libre Franklin"`;
   const subW = ctx.measureText(subline).width;
@@ -980,10 +980,10 @@ function drawBrandHeader(
   ctx.fillStyle = TITLE;
   ctx.font = `700 ${RC_TITLE_SIZE}px Newsreader`;
   ctx.letterSpacing = "-0.76px"; // -0.02em
-  // titleSuffix joins the wordmark in the same serif (the recap's "Connections Recap").
+  // titleSuffix joins the wordmark in the same serif (the recap's "Disconnections Recap").
   const wordmark = opts.titleSuffix
-    ? `Connections ${opts.titleSuffix}`
-    : "Connections";
+    ? `Disconnections ${opts.titleSuffix}`
+    : "Disconnections";
   ctx.fillText(wordmark, leftX, RC_TITLE_BASE);
   ctx.letterSpacing = "0px";
 
@@ -1183,7 +1183,7 @@ export async function drawRecap(
       room: data.guildName
         ? { server: data.guildName, channel: data.channelName ?? null }
         : null,
-      // The wordmark reads "Connections recap" — "recap" as a smaller, dimmer serif descriptor.
+      // The wordmark reads "Disconnections recap" — "recap" as a smaller, dimmer serif descriptor.
       titleSuffix: "Recap",
       subline: recapSubline(data),
       stats: recapStats(data),

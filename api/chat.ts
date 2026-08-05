@@ -3,7 +3,7 @@ import { admin } from './_admin.js';
 import { bearerToken, fetchDiscordUser, type DiscordUser } from './_discord.js';
 import { sendReplyDM } from './_dm.js';
 import { isCategory, postFeedbackWebhook } from './_feedback.js';
-import { todayET } from './_nyt.js';
+import { todayET } from './_puzzles.js';
 import { broadcastRoom } from './_realtime.js';
 import { isLocalDev, verifyAuth } from './_session.js';
 

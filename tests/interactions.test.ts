@@ -53,7 +53,11 @@ describe("routeInteraction", () => {
     expect(r.type).not.toBe(12);
   });
 
-  it("launches the Activity for the /connections slash command", () => {
+  it("launches the Activity for the /disconnections slash command", () => {
+    expect(routeInteraction({ type: 2, data: { name: "disconnections" } })).toEqual({ type: 12 });
+  });
+
+  it("also launches the Activity for the /connections alias", () => {
     expect(routeInteraction({ type: 2, data: { name: "connections" } })).toEqual({ type: 12 });
   });
 
@@ -118,7 +122,7 @@ type Container = { type: number; components: { type: number; content?: string }[
 const card = (g: Game, opts?: Parameters<typeof shareCard>[1]) => shareCard(g, opts)[0] as Container;
 // The TextDisplay blocks inside the container: a plain title, the grid, and the subtext stats —
 // each its own block (with spacers between) so Wordle-style spacing sits between them.
-const title = (c: Container) => c.components.find((b) => b.content?.startsWith("Connections"))?.content ?? "";
+const title = (c: Container) => c.components.find((b) => b.content?.startsWith("Disconnections"))?.content ?? "";
 const grid = (c: Container) => c.components.find((b) => /🟨|🟩|🟦|🟪/.test(b.content ?? ""))?.content ?? "";
 const statline = (c: Container) => c.components.filter((b) => b.content?.startsWith("-#")).at(-1)?.content ?? "";
 
@@ -142,7 +146,7 @@ describe("shareCard", () => {
   it("puts a plain Wordle-style title and the grid in a bordered container, as separate blocks", () => {
     const c = card(play([["A0", "B0", "C0", "A1"], ...solveAll]), { puzzleNo: puzzle.id }); // one wrong, then a sweep
     expect(c.type).toBe(17); // CONTAINER
-    expect(title(c)).toBe("Connections #1106 4/4"); // plain text, groups-solved fraction (a win → 4/4)
+    expect(title(c)).toBe("Disconnections #1106 4/4"); // plain text, groups-solved fraction (a win → 4/4)
     const rows = grid(c).split("\n");
     // The mixed first guess colours each word by its own group; the four solves are mono rows.
     expect(rows[0]).toBe(LEVELS[0].emoji.repeat(3) + LEVELS[1].emoji);
@@ -183,7 +187,7 @@ describe("shareCard", () => {
 
   it("drops the '#number' from the title when unknown (keeps the x/4), and drops a zero duration", () => {
     const c = card(play(solveAll), { durationMs: 0 });
-    expect(title(c)).toBe("Connections 4/4"); // no "#1106", still the fraction
+    expect(title(c)).toBe("Disconnections 4/4"); // no "#1106", still the fraction
     expect(statline(c)).not.toMatch(/\d+s|\d+:\d\d/); // no time token
   });
 });

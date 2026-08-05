@@ -268,18 +268,14 @@ export function DiscordMessage({
         }}
       >
         <div style={{ display: "flex", gap: 14 }}>
-          <img
-            src="/connections-icon.png"
-            alt=""
-            width={40}
-            height={40}
-            // alignSelf keeps the flex row from stretching the avatar into a tall ellipse.
-            style={{ borderRadius: "50%", flexShrink: 0, objectFit: "cover", alignSelf: "flex-start" }}
+          {/* bot avatar stand-in: plain disc until the real mark exists (no logo shipped) */}
+          <div
+            style={{ width: 40, height: 40, borderRadius: "50%", flexShrink: 0, background: "#26272f", alignSelf: "flex-start" }}
           />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ color: C.name, fontWeight: 600, fontSize: 15 }}>
-                Connections
+                Disconnections
               </span>
               <span
                 style={{

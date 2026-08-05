@@ -7,6 +7,11 @@ dist/
 # personal tooling config (MCP server pins a specific Supabase project)
 .mcp.json
 .claude/
+scripts/.dashboard-*.json
+scripts/.dashboard-vendor/
 
 # puzzle-gen corpus: raw/derived NYT Connections content, never commit
-puzzlegen/
+editorial/
+
+# private business planning — never commit
+MONETIZATION.md

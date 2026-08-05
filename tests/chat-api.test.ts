@@ -147,7 +147,7 @@ vi.mock("../api/_dm.js", () => ({
     return true;
   },
 }));
-vi.mock("../api/_nyt.js", () => ({ todayET: () => "2026-06-26" }));
+vi.mock("../api/_puzzles.js", () => ({ todayET: () => "2026-06-26" }));
 // Record the relay pokes (contentless u:<uid> pushes) so we can assert who gets woken and that no
 // message content rides them.
 const pokes: { scope: string; event: string; payload: any }[] = [];

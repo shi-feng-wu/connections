@@ -5,7 +5,7 @@ import { admin } from "./_admin.js";
 import { renderRecap } from "./_card.js";
 import { fetchChannelName, fetchGuildName } from "./_discord.js";
 import { sendCard } from "./_livecard.js";
-import { fetchPuzzle, todayET, yesterdayET } from "./_nyt.js";
+import { fetchPuzzle, todayET, yesterdayET } from './_puzzles.js';
 import { query } from "./_query.js";
 import {
   type DayRow,

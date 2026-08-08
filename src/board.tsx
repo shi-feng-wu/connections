@@ -47,7 +47,7 @@ const PLAY_URL = "disconnections.app";
 function buildShareText(game: Game): string {
   const mistakes = MAX_MISTAKES - game.mistakesLeft;
   const dots = "⚪".repeat(game.mistakesLeft) + "⚫".repeat(mistakes);
-  const title = `Connections #${game.puzzle.id} ${game.groupsSolved}/4`;
+  const title = `Disconnections #${game.puzzle.id} ${game.groupsSolved}/4`;
   const stats = [dots, fmtClock(game.durationMs), `${game.score.toLocaleString()} pts`].join(" · ");
   return `${title}\n${game.shareGrid()}\n${stats}\n${PLAY_URL}`;
 }
@@ -155,7 +155,7 @@ function BreakRow({
         className={
           "tabular-nums leading-none " +
           (total
-            ? "font-display text-[20px] font-bold tracking-[-0.01em] text-[#efefe6]"
+            ? "font-display text-[20px] font-bold tracking-[-0.01em] text-[#e8eaee]"
             : "text-[13.5px] font-bold " +
               (neg ? "text-zinc-400" : "text-emerald-400"))
         }
@@ -304,7 +304,7 @@ function EndSummary({
         {/* LEFT — mistake dots */}
         <span
           className="inline-flex flex-none items-center gap-1.75"
-          aria-label="Mistakes remaining"
+          aria-label="Guesses left"
         >
           {Array.from({ length: MAX_MISTAKES }, (_, i) => (
             <span
@@ -326,7 +326,7 @@ function EndSummary({
           <span
             aria-hidden
             className={
-              "pointer-events-none absolute z-20 whitespace-nowrap rounded-full bg-[#efefe6] px-3.5 py-2 text-[11px] font-bold uppercase leading-none tracking-[0.08em] text-[#121212] shadow-[0_3px_12px_rgba(0,0,0,0.45)] transition-all duration-200 ease-[cubic-bezier(.34,1.56,.64,1)] max-[420px]:px-3 max-[420px]:text-[10px] max-[420px]:tracking-[0.04em] " +
+              "pointer-events-none absolute z-20 whitespace-nowrap rounded-full bg-[#e8eaee] px-3.5 py-2 text-[11px] font-bold uppercase leading-none tracking-[0.08em] text-[#121212] shadow-[0_3px_12px_rgba(0,0,0,0.45)] transition-all duration-200 ease-[cubic-bezier(.34,1.56,.64,1)] max-[420px]:px-3 max-[420px]:text-[10px] max-[420px]:tracking-[0.04em] " +
               (copied ? "scale-100 opacity-100" : "scale-90 opacity-0")
             }
           >
@@ -377,7 +377,7 @@ function EndSummary({
                 >
                   {label}
                 </span>
-                <span className="font-display text-[26px] font-bold leading-none tracking-[-0.02em] text-[#efefe6]">
+                <span className="font-display text-[26px] font-bold leading-none tracking-[-0.02em] text-[#e8eaee]">
                   +{game.score.toLocaleString()}
                 </span>
               </div>
@@ -588,15 +588,23 @@ function MemberFaces({ members, images }: { members: string[]; images?: Record<s
     </span>
   );
 }
-// Hover is a subtle opacity dim (per the redesign — no lift/scale), and it rides on
-// JS pointer events (mouse-only), NOT CSS :hover — a tap on a touch/hybrid device
-// sets :hover and never clears it, which would strand the tile dimmed. Driving it
+// Tile hover is an inset wash: ONE text-free rect (rendered inside the grid, see
+// the hlRef effect in Board) that rides exactly ON the hovered tile's rect and
+// glides from tile to tile as the mouse moves. It tints the cream face toward the
+// selected slate (rgba(74,79,90,.14)), and inverts to a cool light wash
+// (rgba(214,224,242,.11)) on selected tiles, so hover reads as the tile itself
+// responding rather than a box arriving. It rides on JS pointer events
+// (mouse-only), NOT CSS :hover — a tap on a touch/hybrid device
+// sets :hover and never clears it, which would strand the highlight. Driving it
 // from pointerenter/leave filtered to pointerType==="mouse" means touch gets only
 // the press-pop, never a sticky hover. Press feedback is the WAAPI scale in
 // onTileClick, so the press still works for both touch and mouse.
-const TILE_HOVER = " opacity-90";
-const TILE_DEFAULT = " bg-[#efefe6] text-[#121212] active:bg-[#e3e3d9]";
-const TILE_SELECTED = " bg-[#5a594e] text-white";
+// Why a separate rect and not a per-tile style: animating a tile's own opacity
+// promotes/demotes its text to a compositor layer each hover, which re-rasterizes
+// glyphs and flickered the page on some GPU/zoom setups. The wash is text-free
+// and composited alone, so it can move all it likes without repainting a glyph.
+const TILE_DEFAULT = " bg-[#e8eaee] text-[#121212] active:bg-[#dde0e6]";
+const TILE_SELECTED = " bg-[#4a4f5a] text-white";
 // Pill buttons. Hover is opacity-only (mouse-only via <HoverButton>, since CSS
 // :hover sticks after a tap on touch/hybrid Discord). :active press feedback stays
 // in className since :active clears reliably on touchend.
@@ -925,6 +933,78 @@ export function Board({
     boardRef.current?.querySelector<HTMLElement>(
       `[data-flip="${CSS.escape(w)}"]`,
     ) ?? null;
+  // The gliding hover wash (see the note above TILE_DEFAULT). One rect,
+  // positioned imperatively so a hover change never re-renders the grid: entering
+  // from nowhere SNAPS it under the cursor (transition on opacity only) and fades
+  // it in; moving between tiles GLIDES it (transform/size, 120ms tight ease-out);
+  // leaving fades it out where it sits. It carries no data-flip, so the FLIP
+  // choreography never sees it.
+  // While a tile is hovered, an rAF loop keeps re-reading its LIVE rect rather
+  // than positioning once: tiles move and resize under a stationary pointer
+  // (shuffle FLIP, a solve reflowing the grid, a window resize or breakpoint
+  // swap), and a one-shot write left the halo stranded at a stale spot and size
+  // (the "empty box floating off the board" bug). The loop also fades the halo
+  // the moment the hovered word is gone from the DOM instead of orphaning it.
+  const hlRef = useRef<HTMLDivElement>(null);
+  const hlPlaced = useRef(false);
+  const hlLast = useRef("");
+  useLayoutEffect(() => {
+    const hl = hlRef.current;
+    if (!hl) return;
+    if (!hover) {
+      // Grace period: a mouse crossing the gap between tiles clears hover for a
+      // few ms, and fading/snapping then would break the glide into the next
+      // tile. Fade out only if the pointer is genuinely off the tiles; landing
+      // on the next tile inside the window cancels this and glides instead.
+      const t = setTimeout(() => {
+        hl.style.opacity = "0";
+        hlPlaced.current = false;
+        hlLast.current = ""; // re-hovering the same tile must re-write
+      }, 120);
+      return () => clearTimeout(t);
+    }
+    let raf = 0;
+    const track = (): void => {
+      const grid = gridRef.current;
+      const tile = tileByWord(hover);
+      if (!grid || !tile) {
+        // hovered word left the grid (solved away / layout remount) — never
+        // strand the halo where it sat.
+        hl.style.opacity = "0";
+        hlPlaced.current = false;
+        hlLast.current = "";
+        return;
+      }
+      const g = grid.getBoundingClientRect();
+      const r = tile.getBoundingClientRect();
+      // getBoundingClientRect is RENDERED pixels, but the halo's inline
+      // transform/size apply in the grid's LOCAL space — and the app scales the
+      // board (an ancestor transform), so rendered deltas written verbatim land
+      // scale× too far and too big (the stray-box bug, invisible in the
+      // unscaled preview harness). Divide by the grid's own rendered/layout
+      // ratio to convert back; it is 1 wherever no ancestor scales.
+      const scale = grid.offsetWidth > 0 ? g.width / grid.offsetWidth : 1;
+      const sel = selected.current.has(hover) || locked.current.has(hover);
+      const geo = `${r.left - g.left}|${r.top - g.top}|${r.width}|${r.height}|${scale}|${sel}`;
+      if (geo !== hlLast.current) {
+        hlLast.current = geo;
+        hl.style.transitionProperty = hlPlaced.current
+          ? "transform, width, height, opacity"
+          : "opacity";
+        hl.style.background = sel
+          ? "rgba(214,224,242,0.11)"
+          : "rgba(74,79,90,0.14)";
+        hl.style.transform = `translate(${(r.left - g.left) / scale}px, ${(r.top - g.top) / scale}px)`;
+        hl.style.width = `${r.width / scale}px`;
+        hl.style.height = `${r.height / scale}px`;
+        hl.style.opacity = "1";
+        hlPlaced.current = true;
+      }
+      raf = requestAnimationFrame(track);
+    };
+    track();
+    return () => cancelAnimationFrame(raf);
+  }, [hover]);
 
   function onTileClick(e: ReactMouseEvent<HTMLButtonElement>, w: string): void {
     // No busy gate: the board stays live during an animation so the next guess can
@@ -1100,7 +1180,7 @@ export function Board({
   ): Promise<void> {
     const tiles = words.map(tileByWord).filter(Boolean) as HTMLElement[];
     // only the near-miss gets called out; a plain wrong guess just shakes.
-    if (oneAway) flashHint("One away…");
+    if (oneAway) flashHint("So close, one off…");
     await Promise.all(
       tiles.map(
         (t) =>
@@ -1383,12 +1463,26 @@ export function Board({
           })}
         </div>
         {showGrid && (
-          <div className="grid grid-cols-4 gap-2" ref={gridRef}>
+          <div
+            className="relative grid grid-cols-4 gap-2"
+            ref={gridRef}
+            // Backstop for a grid that re-renders UNDER a stationary pointer (a
+            // breakpoint swap replaces the hovered tile without ever firing its
+            // pointerleave, leaving `hover` stuck and the halo lit forever).
+            onPointerLeave={(e) => {
+              if (e.pointerType === "mouse") setHover(null);
+            }}
+          >
+            <div
+              ref={hlRef}
+              aria-hidden
+              className="pointer-events-none absolute left-0 top-0 z-10 rounded-lg bg-[rgba(74,79,90,0.14)] opacity-0 duration-[120ms] ease-[cubic-bezier(.2,.85,.3,1)]"
+              style={{ transitionProperty: "opacity" }}
+            />
             {remaining.current.map((w) => {
               // `locked` words have left the live selection but are still gathering/
               // fading out, so they keep the selected look until they're gone.
               const sel = selected.current.has(w) || locked.current.has(w);
-              const lifted = hover === w;
               const palette = sel ? TILE_SELECTED : TILE_DEFAULT;
               // A revealed hint paints its word's whole tile in the group colour;
               // once selected, the tile takes the normal dark face and the word
@@ -1406,7 +1500,7 @@ export function Board({
                 <button
                   key={w}
                   data-flip={w}
-                  className={TILE + palette + (lifted ? TILE_HOVER : "")}
+                  className={TILE + palette}
                   style={hintStyle}
                   onClick={(e) => onTileClick(e, w)}
                   // mouse-only so a touch tap never strands the tile dimmed
@@ -1459,8 +1553,8 @@ export function Board({
       <div className="flex items-center gap-3 max-[359px]:gap-2">
         <span
           className="inline-flex flex-none items-center gap-1.75"
-          aria-label="Mistakes remaining"
-          title="Mistakes remaining"
+          aria-label="Guesses left"
+          title="Guesses left"
         >
           {Array.from({ length: MAX_MISTAKES }, (_, i) => (
             <span
@@ -1477,7 +1571,7 @@ export function Board({
           <div
             ref={hintChipRef}
             aria-hidden
-            className="pointer-events-none absolute z-10 whitespace-nowrap rounded-full bg-[#efefe6] px-3.5 py-2 text-[11px] font-bold uppercase leading-none tracking-[0.08em] text-[#121212] opacity-0 shadow-[0_3px_12px_rgba(0,0,0,0.45)] max-[420px]:px-3 max-[420px]:text-[10px] max-[420px]:tracking-[0.04em]"
+            className="pointer-events-none absolute z-10 whitespace-nowrap rounded-full bg-[#e8eaee] px-3.5 py-2 text-[11px] font-bold uppercase leading-none tracking-[0.08em] text-[#121212] opacity-0 shadow-[0_3px_12px_rgba(0,0,0,0.45)] max-[420px]:px-3 max-[420px]:text-[10px] max-[420px]:tracking-[0.04em]"
           >
             {hint ?? lastHint.current}
           </div>
@@ -1515,11 +1609,11 @@ export function Board({
             hover="opacity-80"
             onClick={clearSelection}
             disabled={selected.current.size === 0}
-            aria-label="Deselect all"
-            title="Deselect all"
+            aria-label="Clear picks"
+            title="Clear picks"
           >
             <Eraser size={18} strokeWidth={2.5} aria-hidden />
-            <span className="sr-only">Deselect all</span>
+            <span className="sr-only">Clear picks</span>
           </HoverButton>
           <HoverButton
             // Below 360px the four controls + a text Submit overflow, so Submit

@@ -8,17 +8,21 @@ import changelogRaw from "./changelog.md?raw";
 
 // A SemVer release, grouped into Keep-a-Changelog sections (Added / Changed / Fixed / …).
 export type Section = { label: string; items: string[] };
-export type Release = { v: string; d: string; isNew?: boolean; sections: Section[] };
+export type Release = { v: string; d: string; isNew?: boolean; note?: string[]; sections: Section[] };
 
 // Parse the markdown source. Format, newest first:
 //   ## <version> — <date>
+//   (optional plain paragraphs — a letter from the dev, one line per paragraph)
 //   ### <Category>
 //   - one item per line
 // A "## " header opens a release (version = first non-space token, date = the rest after
-// the dash). A "### " line opens a category section within the current release; each
-// following "- "/"* " line is an item appended to the open section. Items before any
-// section (or in malformed input) fall into an implicit untitled section so nothing is
-// dropped. Everything else (the top comment, blank lines) is ignored. The first release
+// the dash). Plain non-blank lines between the header and the first section are NOTE
+// paragraphs (one line = one paragraph — don't hard-wrap), rendered as prose above the
+// bullets; the v2.0.0 switch letter is the reason this exists. A "### " line opens a
+// category section within the current release; each following "- "/"* " line is an item
+// appended to the open section. Items before any section (or in malformed input) fall
+// into an implicit untitled section so nothing is dropped. Everything else (the top
+// comment, blank lines, plain text after sections began) is ignored. The first release
 // parsed is flagged isNew.
 const HEADER = /^##\s+(\S+)\s+[—–-]\s+(.+?)\s*$/;
 const SECTION = /^###\s+(.+?)\s*$/;
@@ -45,6 +49,12 @@ export function parseChangelog(raw: string): Release[] {
       let sec = rel.sections[rel.sections.length - 1];
       if (!sec) rel.sections.push((sec = { label: "", items: [] }));
       sec.items.push(item[1]);
+      continue;
+    }
+    // Plain text before the first section: a note paragraph (see format comment).
+    const text = line.trim();
+    if (text && rel.sections.length === 0 && !text.startsWith("<!--")) {
+      (rel.note ??= []).push(text);
     }
   }
   return releases;

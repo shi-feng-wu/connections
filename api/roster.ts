@@ -3,7 +3,7 @@ import { Game, MAX_MISTAKES, type Puzzle } from '../src/game.js';
 import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import type { CardPlayer } from './_card.js';
-import { fetchPuzzle, todayET } from './_nyt.js';
+import { fetchPuzzle, todayET } from './_puzzles.js';
 import { query } from './_query.js';
 
 // Persistent "who's played this room today" roster for the live panel. Returns every player
@@ -180,7 +180,7 @@ type RosterBundle = {
 
 // One bundle per (scope view, day), shared across a warm instance for a short TTL. Fluid
 // compute serves many concurrent requests from one instance with shared module state (the
-// same trick as the puzzle cache in _nyt.ts), so room-mates whose polls land inside the
+// same trick as the puzzle cache in _puzzles.ts), so room-mates whose polls land inside the
 // window share one DB trip. The read is now write-free (p_uid is null below — no per-poll
 // last_seen heartbeat; the online ring is driven by Discord's ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE,
 // not by a presence row). 10s keeps worst-case roster staleness under one 15s poll interval.
@@ -248,7 +248,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const narrowTo = wantChannel && channelId && guildId ? channelId : null;
 
   const now = Date.now();
-  // Independent of the bundle, and usually free (read-through cached in _nyt.ts).
+  // Independent of the bundle, and usually free (read-through cached in _puzzles.ts).
   const puzzleP = fetchPuzzle(date).catch(() => null);
 
   // In-memory layer behind the CDN: absorbs the CDN's per-window revalidation and any misses

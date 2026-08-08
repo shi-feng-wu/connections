@@ -1,6 +1,5 @@
 import { Menu } from "lucide-react";
 import { useEffect, useRef, useState, type RefObject } from "react";
-import iconUrl from "./assets/connections-nyt.png";
 import { Board, type BoardSnapshot } from "./board";
 import type { ChatBundle } from "./chat";
 import { LEVELS, type Game, type Puzzle } from "./game";
@@ -94,6 +93,7 @@ export function LoadingScreen({
   blocked = false,
   onRetry,
   onRetryHandshake,
+  wedged = false,
   date,
   number,
   tip = false,
@@ -105,6 +105,10 @@ export function LoadingScreen({
   // failure): the plain handshake re-run for transient failures, or the in-place document
   // reload for a READY timeout. Absent → the screen just shows the "open in Discord" copy.
   onRetryHandshake?: () => void;
+  // The reload retry ALSO died at READY: the Discord client on this device is wedged, and no
+  // in-frame action can clear that state (quit+reopen proven insufficient too). Swap the
+  // channel copy for an honest "not you, try later / another device" note.
+  wedged?: boolean;
   date?: string;
   number?: number;
   // show the /enable-posts tip — App passes true only in a guild that positively
@@ -112,7 +116,24 @@ export function LoadingScreen({
   tip?: boolean;
 }) {
   const inner = blocked ? (
-    onRetryHandshake ? (
+    onRetryHandshake && wedged ? (
+      <>
+        <div className="text-balance text-sm font-medium text-zinc-300">
+          Something went wrong.
+        </div>
+        <div className="text-pretty text-xs text-zinc-500">
+          Try again later.
+        </div>
+        <HoverButton
+          type="button"
+          onClick={onRetryHandshake}
+          hover="opacity-85"
+          className="mt-1 cursor-pointer rounded-full border border-zinc-100 bg-zinc-100 px-5.5 py-2.5 text-sm font-semibold text-zinc-900 transition-opacity duration-150 ease-out"
+        >
+          Try again
+        </HoverButton>
+      </>
+    ) : onRetryHandshake ? (
       <>
         <div className="text-balance text-sm font-medium text-zinc-300">
           Couldn’t start the activity.
@@ -136,8 +157,8 @@ export function LoadingScreen({
           Open in Discord to play.
         </div>
         <div className="text-pretty text-xs text-zinc-500">
-          Connections runs as a Discord Activity — launch it from a server or
-          call.
+          Disconnections runs as a Discord Activity — launch it from a server
+          or call.
         </div>
       </>
     )
@@ -177,7 +198,7 @@ export function LoadingScreen({
           screen's animate-fade-in. */}
       {tip && (
         <div className="mt-12 flex flex-col items-center gap-[7px] text-center">
-          <span className="font-sans text-[10px] font-bold tracking-[0.22em] text-[#a0c35a] uppercase">
+          <span className="font-sans text-[10px] font-bold tracking-[0.22em] text-[#8fb356] uppercase">
             Tip
           </span>
           <p className="max-w-[300px] text-pretty font-sans text-[12.5px] leading-[1.7] text-zinc-400">
@@ -258,7 +279,7 @@ export function DayTurnover({
 }
 
 // Brand masthead for the desktop players-rail header (per the "Desktop Connections"
-// redesign): the kept brick logo · the "Connections" serif wordmark on the left, and a
+// redesign): the D lettermark · the "Connections" serif wordmark on the left, and a
 // right-aligned dateline — the serif date over a small uppercase "No. 642" — with the two
 // columns bottom-aligned beneath a single hairline rule. Sits atop the players rail on
 // desktop only; hidden on mobile, where Discord shows its own activity header above the
@@ -282,15 +303,10 @@ function Header({
         className
       }
     >
-      {/* left lockup — the kept brick icon (frameless, wordmark-height) · "Connections" */}
-      <div className="flex items-center gap-2.5">
-        <img
-          src={iconUrl}
-          alt=""
-          className="h-[27px] w-[27px] flex-none object-contain"
-        />
-        <span className="font-display text-[27px] font-bold leading-none tracking-[-0.025em] text-[#efefe6] [text-box:trim-both_cap_alphabetic]">
-          Connections
+      {/* left lockup — the serif wordmark alone */}
+      <div className="flex items-center">
+        <span className="font-display text-[27px] font-bold leading-none tracking-[-0.025em] text-[#e8eaee] [text-box:trim-both_cap_alphabetic]">
+          Disconnections
         </span>
       </div>
       {/* right dateline — the serif date riding the right edge, over a small uppercase
@@ -310,7 +326,7 @@ function Header({
 }
 
 // Mobile masthead (min-[800px]:hidden): the in-flow top bar mirroring the desktop Header's
-// editorial lockup — brick logo · "Connections" wordmark on the left, the serif date over
+// editorial lockup — D lettermark · wordmark on the left, the serif date over
 // the puzzle number on the right — but capped with the info-menu hamburger (mobile has no
 // desktop footer, so this is where the links live). Making the trigger an in-flow header
 // element rather than a button floating over the roster is the whole point: a fixed
@@ -333,15 +349,10 @@ function MobileMasthead({
   );
   return (
     <header className="mb-2.5 flex flex-none items-center justify-between gap-3 border-b border-white/[0.08] pb-2.5 min-[800px]:hidden">
-      {/* left lockup — brick icon · serif wordmark (scaled down from the desktop masthead) */}
-      <div className="flex min-w-0 items-center gap-2">
-        <img
-          src={iconUrl}
-          alt=""
-          className="h-[22px] w-[22px] flex-none object-contain"
-        />
-        <span className="min-w-0 truncate font-display text-[21px] font-bold leading-none tracking-[-0.025em] text-[#efefe6] [text-box:trim-both_cap_alphabetic]">
-          Connections
+      {/* left lockup — the serif wordmark alone (scaled down from the desktop masthead) */}
+      <div className="flex min-w-0 items-center">
+        <span className="min-w-0 truncate font-display text-[21px] font-bold leading-none tracking-[-0.025em] text-[#e8eaee] [text-box:trim-both_cap_alphabetic]">
+          Disconnections
         </span>
       </div>
       {/* right cluster — the dateline (serif date over uppercase No.) then the menu */}
@@ -364,7 +375,7 @@ function MobileMasthead({
         >
           <Menu size={20} strokeWidth={2.2} aria-hidden />
           {hasNew && (
-            <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[#a0c35a] ring-2 ring-black" />
+            <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[#8fb356] ring-2 ring-black" />
           )}
         </HoverButton>
       </div>

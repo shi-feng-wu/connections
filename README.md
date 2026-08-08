@@ -1,11 +1,11 @@
-# Connections (Discord Activity)
+# Disconnections (Discord Activity)
 
-The daily NYT Connections puzzle as a Discord Activity (the embedded GUI that opens on Play, like the Wordle activity). Shows live progress of everyone in your session and a persistent leaderboard (this season + all-time) on the end screen.
+A daily 16-word grouping puzzle as a Discord Activity (the embedded GUI that opens on Play, like the Wordle activity). Puzzles are original Disconnections content, written and edited in-house and published one per day. Shows live progress of everyone in your session and a persistent leaderboard (this season + all-time) on the end screen.
 
 ![Mid-game: the board beside the live player roster](docs/screenshot.png)
 
 - Client: Vite + React + TypeScript + Tailwind v4
-- API: Vercel serverless functions for OAuth token exchange and the NYT puzzle proxy
+- API: Vercel serverless functions for OAuth token exchange and puzzle serving
 - Storage: Supabase Postgres (scores, live cards, daily progress) + its REST for the leaderboard
 - Realtime: an SSE relay on Railway fans live progress/tiles out to clients (Supabase has no
   realtime — a Discord Activity can't reliably hold the WebSocket it needs)
@@ -18,7 +18,7 @@ src/        client: main.tsx (bootstrap), App.tsx (state/wiring), components.tsx
             board.tsx (game UI), game.ts (model), roster.tsx + season.tsx (players
             panel / standings), presence.ts, leaderboard.ts, card-draw.ts (Discord
             card renderer), preview.tsx (screenshot harness)
-api/        Vercel functions: puzzle.ts (NYT proxy), token.ts (OAuth), score.ts +
+api/        Vercel functions: puzzle.ts (daily puzzle), token.ts (OAuth), score.ts +
             guess.ts + start.ts (server-authoritative scoring), roster.ts,
             cron-recap.ts + interactions.ts (daily recap bot)
 tests/      vitest suite (pnpm test) — co-located by subject (game, roster, sql, …);
@@ -87,7 +87,7 @@ Fill in `.env`:
 - `SESSION_SECRET`: any long random string. HMAC key for the signed game session
   that anchors solve timing. Generate e.g. `openssl rand -base64 32`.
 
-The next three are only needed for the `/connections` launch command and the
+The next three are only needed for the `/disconnections` launch command and the
 daily recap (section 5); leave them blank to ship just the Activity:
 - `DISCORD_BOT_TOKEN`: Developer Portal → Bot → Reset Token.
 - `DISCORD_PUBLIC_KEY`: Developer Portal → General Information → Public Key.
@@ -160,7 +160,7 @@ for production, so none of this ships.
 
 ## 5. Launch command + daily recap (optional bot)
 
-Adds a `/connections` command that launches the Activity and, on the midnight-ET
+Adds a `/disconnections` command (with `/connections` kept as an alias) that launches the Activity and, on the midnight-ET
 reset, a recap of yesterday's results + season standings — with a Play button —
 posted to the channel each server last played in. This is how the Wordle activity
 behaves. It needs a real bot (the Activity install alone can't post messages), so
@@ -178,7 +178,7 @@ After deploying section 4 with `DISCORD_BOT_TOKEN`, `DISCORD_PUBLIC_KEY`, and
 3. Developer Portal → **General Information** → set **Interactions Endpoint URL**
    to `https://<project>.vercel.app/api/interactions` and save. Discord sends a
    signed PING; it only saves if `DISCORD_PUBLIC_KEY` is deployed and correct.
-4. Rename the auto-created Entry Point command so it's `/connections`:
+4. Rename the auto-created Entry Point command so it's `/disconnections` (and register the `/connections` alias):
    ```bash
    pnpm register-commands   # uses VITE_DISCORD_CLIENT_ID + DISCORD_BOT_TOKEN from .env
    ```
@@ -227,18 +227,9 @@ would publish your whole database.
 
 ## Notes
 
-Personal/educational. Puzzle data is © The New York Times via their public
-endpoint; don't use commercially or against their
-[Terms](https://www.nytimes.com/content/help/rights/terms/terms-of-service.html).
-"Connections" and its puzzle artwork are NYT trademarks (the in-app icon in
-`src/assets/` derives from them) — this project is not affiliated with or
-endorsed by The New York Times.
-
-If you fork and deploy your own instance:
-- Replace the contact address in `public/privacy.html` and `public/terms.html`
-  with your own — you are the data controller for your deployment.
-- `DISCORD_SETUP.md` and `supabase/recap-cron.sql` use `your-project.vercel.app`
-  placeholders; substitute your real production host.
+Puzzle content is original to Disconnections — written, edited, and published
+in-house, one puzzle per day. Disconnections is an independent game, not
+affiliated with, endorsed by, or sponsored by The New York Times Company.
 
 Fonts: [Libre Franklin](https://fonts.google.com/specimen/Libre+Franklin) and
 [Newsreader](https://fonts.google.com/specimen/Newsreader) are bundled under the
@@ -251,19 +242,15 @@ time from a signed start session, computes the score itself, and writes with the
 service-role key. The browser's anon key is read-only (RLS blocks all writes), so
 the leaderboard can't be forged, and live presence is gated to verified users via
 short-lived Supabase JWTs. The one thing that's not preventable, because the
-puzzle is rendered client-side and the answers are published by NYT anyway, is a
-determined player looking up the answers to post a clean solve; but it's tied to
-their real identity and real (server-measured) time. Closing even that would need
-fully server-authoritative play (validate every guess, never send answers), which
-isn't worth the per-guess latency for a public puzzle.
-
-## Contributing
-
-PRs welcome. Before opening one: `pnpm test && pnpm typecheck` (CI runs both
-plus a build). UI changes can be eyeballed without any backend via the
-screenshot harness — see “UI preview (no backend)” above.
+puzzle is rendered client-side, is a determined player extracting the answers to
+post a clean solve; but it's tied to their real identity and real
+(server-measured) time. Closing even that would need fully server-authoritative
+play (validate every guess, never send answers), which isn't worth the per-guess
+latency.
 
 ## License
 
-[MIT](LICENSE). Bundled fonts are OFL-licensed; NYT trademarks and puzzle
-content remain NYT's (see Notes above).
+Source-available, not open source: © Shi Feng Wu, all rights reserved. The code
+is published for reading and reference only — no license is granted to copy,
+modify, redistribute, or deploy it. Bundled fonts are
+[OFL-licensed](https://openfontlicense.org).

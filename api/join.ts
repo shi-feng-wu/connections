@@ -6,7 +6,7 @@ import { admin } from './_admin.js';
 import { type CardPlayer, mergePlayer, renderRoster } from './_card.js';
 import { botInGuild, fetchDiscordUser, fetchUserGuildIds } from './_discord.js';
 import { botCardUrl, CARD_JOIN_THROTTLE_MS, cardPayload, playerFinished, playingLine, sendCard, withGrids } from './_livecard.js';
-import { fetchPuzzle, todayET } from './_nyt.js';
+import { fetchPuzzle, todayET } from './_puzzles.js';
 import { broadcastRoom } from './_realtime.js';
 import { stampRoomAuth } from './_scoring.js';
 

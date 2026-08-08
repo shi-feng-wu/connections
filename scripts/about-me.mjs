@@ -1,4 +1,4 @@
-// Set the bot's "About Me" — the short line shown on its profile — to "/connections",
+// Set the bot's "About Me" — the short line shown on its profile — to "/disconnections",
 // nudging people toward the launch command.
 //
 // This is the STATIC descriptor, not a live status: the bot's About Me is just the
@@ -16,7 +16,7 @@ const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const API = 'https://discord.com/api/v10';
 
 // Hardcoded. Discord caps the application description at 400 chars; this is well under.
-const ABOUT_ME = '/connections';
+const ABOUT_ME = '/disconnections';
 
 if (!TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN. Set it in .env.');

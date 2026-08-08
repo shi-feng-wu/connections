@@ -116,7 +116,7 @@ async function postDmCard(
   token: string,
 ): Promise<void> {
   const { admin } = await import("./_admin.js");
-  const { fetchPuzzle, todayET } = await import("./_nyt.js");
+  const { fetchPuzzle, todayET } = await import("./_puzzles.js");
   const { mergePlayer, renderRoster } = await import("./_card.js");
   const db = admin();
   if (!db) {
@@ -385,7 +385,7 @@ async function postCard(body: LaunchInteraction): Promise<void> {
   };
 
   const { admin } = await import("./_admin.js");
-  const { fetchPuzzle, todayET } = await import("./_nyt.js");
+  const { fetchPuzzle, todayET } = await import("./_puzzles.js");
   const db = admin();
   if (!db) {
     console.warn("[card] skip: no db (admin client unconfigured)");

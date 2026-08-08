@@ -17,6 +17,24 @@
   at the very top. Group everything that ships together into one release.
 -->
 
+## v2.0.0 — Aug 8, 2026
+
+Hey everyone, quick update with some news. This started as a small project so my friends could play the game in Discord, and it's grown way past that. Thank you all so much for the support and feedback so far. However, with that growth, there's a change that has to be made.
+
+Starting with the next puzzle at reset, we will be writing our own puzzles. (Your scores and everything will carry over.)
+
+Two reasons for the change. First, the daily has always come from the NYT's Connections, and their puzzles belong to them. Borrowing the daily was fine when this was just a couple of servers, but a game with this many players should stand on its own work, out of respect for their writer and IP. The second is sustainability: running Disconnections for this many players is getting pretty expensive, and I probably won't be able to shoulder the monthly cost alone as the game continues to grow. In the future I'd like to add optional ways to support the project, with some cool features for supporters, like an archive and a harder bonus puzzle. (Every feature that exists today will stay free.)
+
+Sorry to those of you who used the activity to keep up with NYT's Connections. I hope you'll give the new puzzles a shot, and maybe all the hate mail I get about the puzzles will actually be warranted now. Please do send any feedback you have.
+
+## v1.16.0 — Jul 17, 2026
+
+### Changed
+
+- We have a new name: Disconnections. Same game, same rooms, same scores.
+- A fresh look to go with it: richer group colors tuned for dark mode, and cooler-toned tiles.
+- /disconnections is the new launch command. /connections and /play still work like before.
+
 ## v1.15.0 — Jul 9, 2026
 
 ### Added

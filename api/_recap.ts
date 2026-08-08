@@ -1,4 +1,4 @@
-// Shapes the daily recap the bot posts on the Connections reset and turns the two
+// Shapes the daily recap the bot posts on the Disconnections reset and turns the two
 // RPC result sets (yesterday's finishers + the month's season standings) into the
 // render model for the recap PNG. The drawing itself lives in src/card-draw.ts
 // (shared with the browser preview); api/_card.ts wraps it into a Buffer and
@@ -117,7 +117,7 @@ export function recapText(opts: {
   puzzleNo?: number;
 }): string {
   // Wording lives in src/discord-copy.md (recap.*); this assembles the variant + the streak fires.
-  const puzzle = opts.puzzleNo ? `Connections #${opts.puzzleNo}` : 'Connections';
+  const puzzle = opts.puzzleNo ? `Disconnections #${opts.puzzleNo}` : 'Disconnections';
   if (opts.solved === false) {
     const broken = opts.brokenStreak ?? 0;
     const prefix = broken >= 1 ? `${fill(COPY['recap.broken-prefix'], { broken })} ` : '';

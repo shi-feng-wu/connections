@@ -39,10 +39,10 @@ export type Progress = {
 };
 
 export const LEVELS = [
-  { key: 'yellow', emoji: '🟨', color: '#f9df6d' },
-  { key: 'green', emoji: '🟩', color: '#a0c35a' },
-  { key: 'blue', emoji: '🟦', color: '#b0c4ef' },
-  { key: 'purple', emoji: '🟪', color: '#ba81c5' },
+  { key: 'yellow', emoji: '🟨', color: '#e0a93e' },
+  { key: 'green', emoji: '🟩', color: '#6f9d3f' },
+  { key: 'blue', emoji: '🟦', color: '#6c8fe8' },
+  { key: 'purple', emoji: '🟪', color: '#8f5bb5' },
 ] as const;
 
 export const MAX_MISTAKES = 4;

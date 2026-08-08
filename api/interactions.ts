@@ -26,16 +26,17 @@ import { PLAY_CUSTOM_ID } from "./_recap.js";
 // first request after a deploy is cold. So it is kept DELIBERATELY TINY — it imports no canvas
 // (@napi-rs/canvas) and no card plumbing. The "who's playing" render lives in /api/post-card, which
 // this function triggers (fire-and-forget) AFTER the ACK. /share, /enable-posts, and /disable-posts
-// still answer here synchronously and lazy-import the Supabase SDK (_admin/_nyt) so the launch ACK
+// still answer here synchronously and lazy-import the Supabase SDK (_admin/_puzzles) so the launch ACK
 // never pays for it.
 
-// Discord interactions webhook. Discord POSTs here for: the typed /connections command,
-// the App-Launcher Entry Point command, the card/recap "Play now!" button, and a PING.
+// Discord interactions webhook. Discord POSTs here for: the typed /disconnections (or
+// /connections alias) command, the App-Launcher Entry Point command, the card/recap
+// "Play now!" button, and a PING.
 //
 // A launch command is answered with LAUNCH_ACTIVITY (the game auto-opens) — we send that ACK
 // ourselves (APP_HANDLER), so Discord never posts its own Game Invitation card; only our custom
 // card appears, rendered by /api/post-card. (A LAUNCH_ACTIVITY response leaves a "<user> used
-// /connections" line, so the followup card lands just under it.)
+// /disconnections" line, so the followup card lands just under it.)
 //
 // Every request is Ed25519-signed; an unverified request must get a 401 (Discord
 // rejects the endpoint at setup time otherwise). The signature covers the exact
@@ -53,10 +54,14 @@ const PONG = 1;
 const LAUNCH_ACTIVITY = 12;
 
 // Command names that should open the Activity. Both the Entry Point command (App Launcher)
-// and the chat-input command arrive as APPLICATION_COMMAND interactions named `connections`.
-// `play` is kept as an alias in case `connections` collides with the Entry Point command
-// name at registration time.
-const LAUNCH_COMMANDS = new Set(["connections", "play"]);
+// and the primary chat-input command arrive as APPLICATION_COMMAND interactions named
+// `disconnections`. `connections` is registered too, as an indefinite post-rebrand alias
+// (scripts/register-commands.mjs) — same launch behavior, described as "Launch
+// Disconnections". `play` is kept as a further alias in case either name collides with the
+// Entry Point command name at registration time. Keep this set in sync with the names
+// registered in scripts/register-commands.mjs (its header comment demands it): missing a
+// name here means that command launches nothing.
+const LAUNCH_COMMANDS = new Set(["disconnections", "connections", "play"]);
 
 // The "/enable-posts" command: in a server without the bot it replies (privately) with a
 // one-click "Add to Server" button — the only way recaps and the live card can post there.
@@ -66,8 +71,8 @@ const ENABLE_POSTS_COMMAND = "enable-posts";
 // player's stored guesses (a DB read), so it's handled off the pure router (see shareResponse).
 const SHARE_COMMAND = "share";
 // The "/donate" command: replies (privately) with a Ko-fi link button — the same one in the
-// app footer. Connections is free and ad-free; donations cover the server costs. KEEP the URL
-// in sync with the Ko-fi link in src/infolinks.tsx.
+// app footer. Disconnections is free and ad-free; donations cover the server costs. KEEP the
+// URL in sync with the Ko-fi link in src/infolinks.tsx.
 const DONATE_COMMAND = "donate";
 // The "/disable-posts" command: a moderator turns the bot's posts off in the channel it's run in —
 // BOTH the live "who's playing" card AND the nightly recap. It writes a post_optouts row that
@@ -252,7 +257,7 @@ async function shareResponse(body: LaunchInteraction): Promise<object> {
 
   // Heavy deps loaded here, off the launch-ACK cold path (see the import note up top).
   const { admin } = await import("./_admin.js");
-  const { fetchPuzzle, todayET } = await import("./_nyt.js");
+  const { fetchPuzzle, todayET } = await import("./_puzzles.js");
   const db = admin();
   if (!db) return ephemeral(COPY["share.unavailable"]);
 
@@ -366,7 +371,7 @@ async function disablePostsResponse(body: LaunchInteraction): Promise<object> {
   // Best-effort throughout — the null is the load-bearing guarantee; a failed delete just leaves the
   // frozen card until it ages out.
   try {
-    const { todayET } = await import("./_nyt.js");
+    const { todayET } = await import("./_puzzles.js");
     const date = todayET();
     const { data: liveRow } = await db
       .from("live_cards")

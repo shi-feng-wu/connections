@@ -6,7 +6,7 @@ interface ImportMetaEnv {
   readonly VITE_SUPABASE_ANON_KEY: string;
   // Optional: large image for the Rich Presence card. A public image URL (Discord
   // fetches it server-side) or an uploaded Art Asset key. Defaults to the icon
-  // served from public/connections-icon.png on the production host.
+  // an uploaded Discord asset URL (the app ships no logo file).
   readonly VITE_RP_ICON_URL?: string;
 }
 

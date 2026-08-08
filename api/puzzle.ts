@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { bearerToken } from './_discord.js';
-import { fetchPuzzle, todayET, randomDate, isValidDate, FIRST_DATE } from './_nyt.js';
+import { fetchPuzzle, todayET, randomDate, isValidDate, FIRST_DATE } from './_puzzles.js';
+import { pgPuzzle } from './_playtest.js';
 import { query } from './_query.js';
 import { isLocalDev, verifyAuth } from './_session.js';
 
@@ -16,6 +17,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
     const q = query(req);
+    // Local-only playtest: `?pg=<index>` serves a certified original board
+    // (main track first, gauntlet last) instead of the NYT daily. Double-guarded:
+    // the batch file is gitignored (absent from any deployment) AND the branch
+    // requires isLocalDev(), so this path cannot exist in prod.
+    const pgParam = q.get('pg');
+    if (pgParam !== null) {
+      if (!isLocalDev()) {
+        res.status(404).json({ error: 'not found' });
+        return;
+      }
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json(pgPuzzle(Number(pgParam) || 0));
+      return;
+    }
     const dateParam = q.get('date') ?? undefined;
     if (dateParam && !isValidDate(dateParam)) {
       res.status(400).json({ error: `Date must be between ${FIRST_DATE} and ${todayET()}.` });

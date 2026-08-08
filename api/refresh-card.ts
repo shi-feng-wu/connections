@@ -3,7 +3,7 @@ import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import { type CardPlayer, renderRoster } from './_card.js';
 import { botCardUrl, cardPayload, claimEditSlot, dmWindowClosing, gridFinished, interactionMessageUrl, playingLine, sendCard, tokenStillEditable, withGrids } from './_livecard.js';
-import { fetchPuzzle, todayET } from './_nyt.js';
+import { fetchPuzzle, todayET } from './_puzzles.js';
 
 // Re-renders the room's "who's playing today" card with each player's current guess grid and edits
 // the card in place, so the colour squares fill in live like the Wordle card. Fired server-to-server

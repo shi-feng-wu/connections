@@ -247,7 +247,7 @@ function RankCell({
 
 function ScoreCell({ v }: { v: number }) {
   return (
-    <span className="font-extrabold tabular-nums tracking-[-0.01em] text-[#efefe6]">
+    <span className="font-extrabold tabular-nums tracking-[-0.01em] text-[#e8eaee]">
       {v.toLocaleString()}
       {/* the unit only fits once the desktop rail frees up width; on mobile the
           column header ("Score") carries the meaning instead */}

@@ -1,7 +1,9 @@
 // One-off: rename the Activity's auto-created "Launch" Entry Point command to
-// "connections" and give it a real description, so users launch the game with
-// /connections (mirrors /wordle) and the command picker shows what it does instead
-// of Discord's generic "Launch an activity".
+// "disconnections" and give it a real description, so users launch the game with
+// /disconnections (mirrors /wordle) and the command picker shows what it does instead
+// of Discord's generic "Launch an activity". /connections is kept registered too, as
+// an indefinite alias (same behavior, description "Launch Disconnections") so existing
+// muscle memory and cached client command lists still work post-rebrand.
 //
 // Discord creates a PRIMARY_ENTRY_POINT command (type 4) automatically when an app
 // enables Activities. We PATCH it by id rather than bulk-overwriting the command
@@ -14,7 +16,7 @@
 // The auto-created command also ships localized as "launch" (translated into every
 // locale). Discord shows each user the name for THEIR locale, so the base `name`
 // alone isn't enough — e.g. an en-US user still sees /launch. We null out
-// name_localizations/description_localizations so /connections (+ our description)
+// name_localizations/description_localizations so /disconnections (+ our description)
 // applies everywhere.
 //
 // Then we also register a CHAT_INPUT (type 1) command. The Entry Point command lives
@@ -30,17 +32,22 @@
 
 const APP_ID = process.env.VITE_DISCORD_CLIENT_ID;
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
-const NAME = 'connections';
+const NAME = 'disconnections';
 // Shown in the command picker / app launcher. Max 100 chars (Discord limit).
-const DESCRIPTION = 'Launch the daily 16-word Connections puzzle and play live with the channel';
+const DESCRIPTION = 'Launch the daily 16-word Disconnections puzzle and play live with the channel';
 const PRIMARY_ENTRY_POINT = 4;
 // Entry Point command handlers: 1 = APP_HANDLER (our Interactions Endpoint launches
 // it), 2 = DISCORD_LAUNCH_ACTIVITY (Discord launches + auto-posts the invite card).
 const APP_HANDLER = 1;
 const CHAT_INPUT = 1;
 // The typed "/" command. Keep in sync with LAUNCH_COMMANDS in api/interactions.ts.
-const CHAT_NAME = 'connections';
-const CHAT_DESCRIPTION = 'Launch the daily 16-word Connections puzzle';
+const CHAT_NAME = 'disconnections';
+const CHAT_DESCRIPTION = 'Launch the daily 16-word Disconnections puzzle';
+// Kept as an indefinite alias post-rebrand (same launch behavior, same options/handler
+// shape as the primary chat command) so existing muscle memory and any cached client
+// command lists still work. Keep in sync with LAUNCH_COMMANDS in api/interactions.ts.
+const ALIAS_NAME = 'connections';
+const ALIAS_DESCRIPTION = 'Launch Disconnections';
 // Match the Entry Point command so the slash command appears in the same places.
 const CONTEXTS = [0, 1, 2];
 const INTEGRATION_TYPES = [0, 1];
@@ -87,7 +94,7 @@ if (nameOk && descOk && handlerOk) {
     method: 'PATCH',
     headers: auth,
     // null localizations clear Discord's auto-translated "launch" so the base name
-    // (connections) and description apply in every locale. handler: APP_HANDLER routes
+    // (disconnections) and description apply in every locale. handler: APP_HANDLER routes
     // the launch through our Interactions Endpoint so Discord stops launching the
     // Activity itself and auto-posting its invite card on every launch.
     body: JSON.stringify({
@@ -133,6 +140,37 @@ if (chat) {
     `Registered chat command /${cmd.name} (id ${cmd.id}). Typing /${cmd.name} launches the Activity ` +
       `(via the Interactions Endpoint — make sure it's set to <host>/api/interactions).`,
   );
+}
+
+// --- 2b) Alias chat-input command (/connections) -----------------------------------
+// Kept indefinitely post-rebrand: same options/handler shape as the primary launch
+// command above (no options, same contexts/integration types, no bulk handler — the
+// Interactions Endpoint answers both), just a different registered name. The
+// description reads "Launch Disconnections" so the displayed branding is always the
+// new name even when someone still types /connections. api/interactions.ts's
+// LAUNCH_COMMANDS treats this name identically to CHAT_NAME. Revisit dropping this
+// alias at monetization launch.
+const aliasChat = commands.find((c) => c.type === CHAT_INPUT && c.name === ALIAS_NAME);
+if (aliasChat) {
+  console.log(`Chat command /${ALIAS_NAME} already registered (id ${aliasChat.id}).`);
+} else {
+  const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({
+      name: ALIAS_NAME,
+      description: ALIAS_DESCRIPTION,
+      type: CHAT_INPUT,
+      contexts: CONTEXTS,
+      integration_types: INTEGRATION_TYPES,
+    }),
+  });
+  if (!createRes.ok) {
+    console.error(`Failed to register /${ALIAS_NAME}: ${createRes.status} ${await createRes.text()}`);
+    process.exit(1);
+  }
+  const cmd = await createRes.json();
+  console.log(`Registered alias chat command /${cmd.name} (id ${cmd.id}) — "${ALIAS_DESCRIPTION}".`);
 }
 
 // --- 3) enable-posts chat-input command -------------------------------------------
@@ -205,7 +243,7 @@ if (enable) {
 // integration types as the launch command so it's available in user-install servers too —
 // the share posts as an interaction response, which needs no bot in the guild.
 const SHARE = 'share';
-const SHARE_DESCRIPTION = "Share your Connections result grid for today's puzzle";
+const SHARE_DESCRIPTION = "Share your Disconnections result grid for today's puzzle";
 const share = commands.find((c) => c.type === CHAT_INPUT && c.name === SHARE);
 if (share) {
   console.log(`Chat command /${SHARE} already registered (id ${share.id}).`);
@@ -236,7 +274,7 @@ if (share) {
 // launch command so it's available everywhere, including user-install (bot-less) servers — it
 // posts as an interaction response and needs no bot in the guild.
 const DONATE = 'donate';
-const DONATE_DESCRIPTION = 'Support Connections — donate to help cover the server costs';
+const DONATE_DESCRIPTION = 'Support Disconnections — donate to help cover the server costs';
 const donate = commands.find((c) => c.type === CHAT_INPUT && c.name === DONATE);
 if (donate) {
   console.log(`Chat command /${DONATE} already registered (id ${donate.id}).`);

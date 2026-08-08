@@ -69,15 +69,25 @@ describe("CHANGELOG (parsed from changelog.md)", () => {
     }
   });
 
-  it("gives every release a date and at least one non-empty item in a labelled section", () => {
+  it("gives every release a date and substance: note paragraphs or labelled items", () => {
     for (const e of CHANGELOG) {
       expect(e.d.length).toBeGreaterThan(0);
-      expect(e.sections.length).toBeGreaterThan(0);
       const items = e.sections.flatMap((s) => s.items);
-      expect(items.length).toBeGreaterThan(0);
+      const noteParas = e.note?.length ?? 0;
+      // A release informs via a dev-letter note (v2.0.0's switch letter), via
+      // Keep-a-Changelog items, or both — never neither.
+      expect(noteParas + items.length).toBeGreaterThan(0);
       expect(items.every((it) => it.trim().length > 0)).toBe(true);
       // Real releases always label their sections (Added / Changed / Fixed / …).
       expect(e.sections.every((s) => s.label.trim().length > 0)).toBe(true);
     }
+  });
+
+  it("collects plain lines before the first section as note paragraphs", () => {
+    const out = parseChangelog(
+      "## v2.0.0 — TBD\nDear players, a letter.\nSecond paragraph.\n### Changed\n- Item.\nstray text after sections began is still ignored\n",
+    );
+    expect(out[0].note).toEqual(["Dear players, a letter.", "Second paragraph."]);
+    expect(out[0].sections).toEqual([{ label: "Changed", items: ["Item."] }]);
   });
 });

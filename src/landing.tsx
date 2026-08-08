@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import iconUrl from "./assets/connections-nyt.png";
 import { Board } from "./board";
 import {
   cardLayout,
@@ -554,7 +553,7 @@ const CARD_RECAP: RecapData = {
   streak: 12,
   winRate: 84,
   guildName: "Puzzle Club",
-  channelName: "daily-connections",
+  channelName: "daily-disconnections",
   results: [
     {
       id: "d-omar",
@@ -736,7 +735,7 @@ const riseDelay = (i: number): { animationDelay: string } => ({
 // Section heading, the game's display serif.
 function H2({ children }: { children: string }) {
   return (
-    <h2 className="text-balance font-display text-[28px] font-bold tracking-[-0.01em] text-[#efefe6]">
+    <h2 className="text-balance font-display text-[28px] font-bold tracking-[-0.01em] text-[#e8eaee]">
       {children}
     </h2>
   );
@@ -758,13 +757,8 @@ export function Landing() {
 
       {/* Wordmark, the game header's own lockup (components.tsx Header). */}
       <header className="flex animate-tab-in items-center gap-2.5" style={riseDelay(0)}>
-        <img
-          src={iconUrl}
-          alt=""
-          className="h-[27px] w-[27px] flex-none object-contain"
-        />
-        <span className="font-display text-[27px] font-bold leading-none tracking-[-0.025em] text-[#efefe6] [text-box:trim-both_cap_alphabetic]">
-          Connections
+        <span className="font-display text-[27px] font-bold leading-none tracking-[-0.025em] text-[#e8eaee] [text-box:trim-both_cap_alphabetic]">
+          Disconnections
         </span>
       </header>
 
@@ -772,10 +766,10 @@ export function Landing() {
       <section className="mt-14 grid items-center gap-12 min-[820px]:mt-20 min-[820px]:grid-cols-[1fr_minmax(0,420px)] min-[820px]:gap-14">
         <div className="flex flex-col items-start gap-6">
           <h1
-            className="animate-tab-in text-balance font-display text-[42px] font-bold leading-[1.04] tracking-[-0.015em] text-[#efefe6] min-[820px]:text-[54px]"
+            className="animate-tab-in text-balance font-display text-[42px] font-bold leading-[1.04] tracking-[-0.015em] text-[#e8eaee] min-[820px]:text-[54px]"
             style={riseDelay(1)}
           >
-            The daily Connections, played together.
+            The daily puzzle, played together.
           </h1>
           <p
             className="max-w-[46ch] animate-tab-in text-pretty font-sans text-[15px] leading-[1.75] text-zinc-400"
@@ -865,15 +859,12 @@ export function Landing() {
 
       <footer className="mt-28 flex flex-col gap-4 border-t border-white/10 pt-7 pb-2 min-[820px]:flex-row min-[820px]:items-center min-[820px]:justify-between">
         <p className="max-w-[58ch] text-pretty font-sans text-[12px] leading-relaxed text-zinc-600">
-          A personal project, not affiliated with or endorsed by The New York
-          Times. Puzzle content and the Connections name are NYT's.
+          An independent game with original daily puzzles, written and edited
+          in-house. Not affiliated with or endorsed by The New York Times.
         </p>
         <nav className="flex items-center gap-5 font-sans text-[12px] font-semibold text-zinc-500">
           <a href={GITHUB} className="transition-colors hover:text-zinc-200">
             GitHub
-          </a>
-          <a href={`${GITHUB}/blob/main/LICENSE`} className="transition-colors hover:text-zinc-200">
-            MIT License
           </a>
           <a href="/privacy.html" className="transition-colors hover:text-zinc-200">
             Privacy

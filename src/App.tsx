@@ -17,6 +17,10 @@ import { primeTicketCache } from "./chatview";
 import { DayTurnover, GameView, LoadingScreen } from "./components";
 import { msUntilNextEtMidnight } from "./countdown";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
+
+// Metadata attached by the local-dev playtest branch of /api/puzzle (`?pg=`),
+// absent on every real puzzle response. Drives the playtest stepper bar only.
+type PgMeta = { id: string; index: number; total: number; slot: "main" | "gauntlet" };
 import { Landing } from "./landing";
 import {
   currentSeasonStart,
@@ -479,6 +483,9 @@ export function App({
   // identity set at boot; the live roster/presence stay Discord-only. The backend (/api/chat) takes
   // the stub via isLocalDev(), so threads read/write against the local Supabase.
   const mockEmbedded = !isEmbedded && import.meta.env.DEV;
+  // Local playtest (`?pg=<n>` on vercel dev): metadata of the currently
+  // loaded original board, driving the stepper bar. Null in every other mode.
+  const [pgInfo, setPgInfo] = useState<PgMeta | null>(null);
   // Whether this guild has the bot (guild install): the live answer from /api/join,
   // seeded from the per-guild localStorage cache at handshake so a repeat launch
   // targets the loading tip immediately. null = unknown / not a guild → show nothing.
@@ -890,23 +897,27 @@ export function App({
   }
 
   async function loadPuzzle(
-    opts: { date?: string; random?: boolean } = {},
+    opts: { date?: string; random?: boolean; pg?: number } = {},
   ): Promise<void> {
     setPhase("loading");
     // New board → let the first Rich Presence push through (a different puzzle/status).
     lastPresenceSig.current = "";
-    isDailyRef.current = !opts.random && !opts.date;
+    // Playtest boards (local dev only) behave like practice: no daily
+    // session, no roster, purely local play.
+    isDailyRef.current = !opts.random && !opts.date && opts.pg === undefined;
     // The room roster is daily-scoped; practice/by-date shows only you (no poll).
     if (!isDailyRef.current) setServerRoster([]);
     const qs = new URLSearchParams();
     if (opts.date) qs.set("date", opts.date);
     if (opts.random) qs.set("random", "1");
+    if (opts.pg !== undefined) qs.set("pg", String(opts.pg));
     try {
       const res = await fetch("/api/puzzle?" + qs.toString(), {
         headers: authHeaders(),
       });
       if (!res.ok) throw new Error(String(res.status));
-      const puzzle = (await res.json()) as Puzzle;
+      const puzzle = (await res.json()) as Puzzle & { pg?: PgMeta };
+      setPgInfo(puzzle.pg ?? null);
 
       // Open/resume the day, then rebuild the game from the committed guesses so a
       // relaunch resumes the exact board (mistakes, solved groups) instead of
@@ -1167,7 +1178,14 @@ export function App({
         return;
       }
       // Embedded + authenticated, or the DEV standalone fallback.
-      await loadPuzzle();
+      // Local playtest deep-link: /?pg=3 plays certified board #3
+      // (mains first, gauntlet last). Standalone dev only — embedded ignores it.
+      const pgBoot = mockEmbedded
+        ? new URLSearchParams(location.search).get("pg")
+        : null;
+      await loadPuzzle(
+        pgBoot !== null ? { pg: Math.max(0, Number(pgBoot) || 0) } : {},
+      );
       await refreshLeaderboard();
     })();
   }, []);
@@ -1578,6 +1596,12 @@ export function App({
     }
   };
   const deadHandshake = handshakeFail === "discord-ready-timeout";
+  // hsRetryCount() >= 1 means this document IS the reload retry and its READY never came
+  // either. The funnel shows that state riding a wedged Discord client (machine-level; it
+  // can outlive app restarts, re-login, even quit+reopen), so the blocked screen drops the
+  // channel copy for an honest try-later note. Render-time read is fine — the count only
+  // changes across document loads. Storage-blocked (-1) stays on the mild copy.
+  const wedgedClient = deadHandshake && hsRetryCount() >= 1;
   // Open Discord's guild-install consent (the same link as /enable-posts' button) in the
   // user's browser. Embedded-only by construction: botInstalled is only ever set after a
   // Discord handshake, so the prompt never renders standalone where sdkRef is null.
@@ -1633,6 +1657,7 @@ export function App({
               ? reloadForHandshake
               : retryHandshake
         }
+        wedged={wedgedClient}
         date={etDate()}
         number={cachedPuzzleNo(etDate())}
         // Tip only where it can act: a guild that positively lacks the bot. Installed
@@ -1673,6 +1698,61 @@ export function App({
     <>
       {content}
       <DayTurnover active={resetting} date={newDayDate} number={newDayNo} />
+      {pgInfo && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 12,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 60,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            background: "rgba(18,18,22,0.92)",
+            color: "#ece9e2",
+            borderRadius: 999,
+            padding: "6px 8px",
+            font: "500 13px/1 system-ui, sans-serif",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.45)",
+          }}
+        >
+          <button
+            type="button"
+            disabled={pgInfo.index === 0}
+            onClick={() => (location.href = `?pg=${pgInfo.index - 1}`)}
+            style={{
+              background: "none",
+              border: "none",
+              color: pgInfo.index === 0 ? "#666" : "#ece9e2",
+              cursor: pgInfo.index === 0 ? "default" : "pointer",
+              font: "inherit",
+              padding: "4px 8px",
+            }}
+          >
+            ‹ Prev
+          </button>
+          <span style={{ opacity: 0.9 }}>
+            {pgInfo.id} · {pgInfo.index + 1}/{pgInfo.total}
+            {pgInfo.slot === "gauntlet" ? " · GAUNTLET" : ""}
+          </span>
+          <button
+            type="button"
+            disabled={pgInfo.index >= pgInfo.total - 1}
+            onClick={() => (location.href = `?pg=${pgInfo.index + 1}`)}
+            style={{
+              background: "none",
+              border: "none",
+              color: pgInfo.index >= pgInfo.total - 1 ? "#666" : "#ece9e2",
+              cursor: pgInfo.index >= pgInfo.total - 1 ? "default" : "pointer",
+              font: "inherit",
+              padding: "4px 8px",
+            }}
+          >
+            Next ›
+          </button>
+        </div>
+      )}
     </>
   );
 }

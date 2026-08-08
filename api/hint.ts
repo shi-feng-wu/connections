@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Game } from '../src/game.js';
 import { admin } from './_admin.js';
 import { bearerToken } from './_discord.js';
-import { fetchPuzzle, isValidDate, todayET } from './_nyt.js';
+import { fetchPuzzle, isValidDate, todayET } from './_puzzles.js';
 import { isLocalDev, verifyAuth } from './_session.js';
 
 // Record one revealed hint into the player's authoritative daily record. Same

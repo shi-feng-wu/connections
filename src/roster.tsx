@@ -374,7 +374,7 @@ function MiniBoard({
             }}
             className="rounded-[1px] transition-colors duration-200"
             style={{
-              background: wrong ? "#e0707a" : idx < picking ? "#5a594e" : "#efefe6",
+              background: wrong ? "#e0707a" : idx < picking ? "#4a4f5a" : "#e8eaee",
             }}
           />
         );
@@ -414,7 +414,7 @@ function FinalScore({ p, won }: { p: PlayerState; won: boolean }) {
     <span
       className={
         "hidden w-[42px] flex-none text-right text-[13px] font-extrabold tabular-nums tracking-[-0.01em] min-[800px]:inline " +
-        (p.done === "won" ? "text-[#efefe6]" : "text-zinc-500")
+        (p.done === "won" ? "text-[#e8eaee]" : "text-zinc-500")
       }
     >
       {p.done && (
@@ -456,7 +456,7 @@ function Status({ p, won }: { p: PlayerState; won: boolean }) {
     <span
       className={
         "flex-none text-[12.5px] font-extrabold tabular-nums min-[800px]:hidden " +
-        (p.done === "won" ? "text-[#efefe6]" : "text-zinc-500")
+        (p.done === "won" ? "text-[#e8eaee]" : "text-zinc-500")
       }
     >
       <ScoreNum value={scoreOf(p)} run={won} />
@@ -561,7 +561,6 @@ const RosterRow = memo(function RosterRow({
         }
       >
         {p.name}
-        {you ? " (you)" : ""}
       </span>
       <Mistakes p={p} mistake={!!ev?.mistake} />
       <FinalScore p={p} won={!!ev?.won} />

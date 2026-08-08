@@ -2,7 +2,6 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleHelp,
-  Coffee,
   FileText,
   Inbox,
   MessageCircle,
@@ -66,18 +65,26 @@ const LINKS: LinkDef[] = [
     Icon: MessageCircle,
     page: "feedback",
   },
-  {
-    key: "kofi",
-    label: "Ko-fi",
-    Icon: Coffee,
-    href: "https://ko-fi.com/borgardev",
-    sub: "Help cover the server costs",
-  },
 ];
 
 // Dev-only entry, appended to the link list when the chat load reports isDev. Opens the admin
 // inbox (every player's thread) on the same DetailView the other pages use.
 const INBOX_LINK: LinkDef = { key: "inbox", label: "Inbox", Icon: Inbox, page: "inbox" };
+
+// The dev's test server (Great Group of Loving Goopers): the Changelog link (and its
+// "New" dot) is hidden there, so in-progress release notes under test never read as a
+// live announcement. Read once from the frame's launch params — standalone/local runs
+// carry no guild_id and keep the changelog.
+const CHANGELOG_HIDDEN_GUILDS = new Set(["251790553027575818"]);
+const changelogHidden = ((): boolean => {
+  try {
+    return CHANGELOG_HIDDEN_GUILDS.has(
+      new URLSearchParams(window.location.search).get("guild_id") ?? "",
+    );
+  } catch {
+    return false; // no window/search (tests) — keep the changelog
+  }
+})();
 
 // The DetailView header (centered title card): a tracked eyebrow over a big serif title.
 // The eyebrow is the section/nav name; the title reads editorial.
@@ -189,7 +196,7 @@ function Faq(): ReactNode {
           almost always a <b className={BOLD}>private channel</b> its role was
           never added to. Open the channel’s settings, go to{" "}
           <b className={BOLD}>Permissions</b>, and give the{" "}
-          <b className={BOLD}>Connections</b> bot (or its role){" "}
+          <b className={BOLD}>Disconnections</b> bot (or its role){" "}
           <b className={BOLD}>View Channel</b>,{" "}
           <b className={BOLD}>Send Messages</b>, and{" "}
           <b className={BOLD}>Attach Files</b>. The next nightly recap posts on
@@ -223,12 +230,17 @@ function Changelog(): ReactNode {
               {e.v}
             </span>
             {e.isNew && (
-              <span className="rounded-full bg-[#a0c35a] px-1 py-0.5 text-[8px] font-extrabold uppercase leading-none tracking-[0.04em] text-[#0d1a0d]">
+              <span className="rounded-full bg-[#8fb356] px-1 py-0.5 text-[8px] font-extrabold uppercase leading-none tracking-[0.04em] text-[#0d1a0d]">
                 New
               </span>
             )}
             <span className="ml-auto text-[12px] text-zinc-500">{e.d}</span>
           </div>
+          {e.note?.map((p, pi) => (
+            <p key={pi} className="text-[13.5px] leading-[1.5] text-zinc-300">
+              {p}
+            </p>
+          ))}
           {e.sections.map((s, si) => {
             const tone = SECTION_TONE[s.label] ?? SECTION_FALLBACK;
             return (
@@ -453,7 +465,7 @@ function DetailView({
             <div className="font-sans text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">
               {m.eyebrow}
             </div>
-            <h1 className="mt-3.5 font-display text-[34px] font-bold leading-[1.04] tracking-[-0.025em] text-[#efefe6] min-[800px]:text-[40px]">
+            <h1 className="mt-3.5 font-display text-[34px] font-bold leading-[1.04] tracking-[-0.025em] text-[#e8eaee] min-[800px]:text-[40px]">
               {m.title}
             </h1>
           </header>
@@ -527,12 +539,12 @@ function SheetRow({
         <span className="flex items-center gap-2 font-sans text-[15px] font-semibold text-zinc-100">
           {l.label}
           {showBadge && l.badge && (
-            <span className="rounded-full bg-[#a0c35a] px-1.25 py-0.5 text-[8px] font-extrabold uppercase leading-none tracking-[0.04em] text-[#0d1a0d]">
+            <span className="rounded-full bg-[#8fb356] px-1.25 py-0.5 text-[8px] font-extrabold uppercase leading-none tracking-[0.04em] text-[#0d1a0d]">
               New
             </span>
           )}
           {l.key === "feedback" && chatUnread && (
-            <span className="h-2 w-2 rounded-full bg-[#a0c35a]" aria-label="New reply" />
+            <span className="h-2 w-2 rounded-full bg-[#8fb356]" aria-label="New reply" />
           )}
         </span>
         <span className="font-sans text-[12px] text-zinc-500">
@@ -750,10 +762,10 @@ function LinkBar({
           <l.Icon size={14} strokeWidth={2} aria-hidden />
           <span>{l.label}</span>
           {showBadge && l.badge && (
-            <span className="h-1.5 w-1.5 rounded-full bg-[#a0c35a]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-[#8fb356]" />
           )}
           {l.key === "feedback" && chatUnread && (
-            <span className="h-1.5 w-1.5 rounded-full bg-[#a0c35a]" aria-label="New reply" />
+            <span className="h-1.5 w-1.5 rounded-full bg-[#8fb356]" aria-label="New reply" />
           )}
         </button>
       ))}
@@ -806,7 +818,10 @@ export function useInfoLinks(
   const showBadge = seen !== APP_VERSION;
   // A dev (per the chat load) also gets the admin Inbox entry; everyone sees the unread dot
   // for a reply waiting on their own thread.
-  const links = chat?.isDev ? [...LINKS, INBOX_LINK] : LINKS;
+  const base = changelogHidden
+    ? LINKS.filter((l) => l.key !== "changelog")
+    : LINKS;
+  const links = chat?.isDev ? [...base, INBOX_LINK] : base;
   const chatUnread = !!chat?.unread;
 
   const markSeen = (id: LinkId): void => {

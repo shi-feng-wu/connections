@@ -3,7 +3,7 @@ import { Game } from '../src/game.js';
 import { canonicalScope } from '../src/scope.js';
 import { admin } from './_admin.js';
 import { fetchDiscordUser, fetchUserGuildIds } from './_discord.js';
-import { fetchPuzzle, todayET } from './_nyt.js';
+import { fetchPuzzle, todayET } from './_puzzles.js';
 import { MAX_GUESSES, scoreRow, upsertScore } from './_scoring.js';
 import { verifySession } from './_session.js';
 

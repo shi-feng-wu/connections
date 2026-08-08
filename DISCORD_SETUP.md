@@ -2,7 +2,7 @@
 
 Most of the Developer Portal config for a Discord **Activity** is non-obvious and
 silently breaks the app in different ways. This is the exact config this project
-needs. Portal: <https://discord.com/developers/applications> → **Connections**.
+needs. Portal: <https://discord.com/developers/applications> → **Disconnections**.
 
 Production host (the deployed Vercel **production alias**, kept public; the per-deploy
 `*-<team>.vercel.app` URLs are behind Vercel Authentication and won't load in Discord):
@@ -83,7 +83,7 @@ Post-deploy checklist when testing a launch:
 https://your-project.vercel.app/api/interactions
 ```
 
-- Required for the typed `/connections` slash command (Discord POSTs the interaction
+- Required for the typed `/disconnections` slash command (and its `/connections` alias — Discord POSTs the interaction
   here; `api/interactions.ts` replies with `LAUNCH_ACTIVITY`).
 - ⚠️ This field gets **blanked out if you re-save other settings on this page with it
   empty** — which silently breaks the slash command (*"The application did not
@@ -91,7 +91,7 @@ https://your-project.vercel.app/api/interactions
 
 ## 4. Commands (`pnpm register-commands`)
 
-Two commands, two surfaces — both named `connections`:
+Two commands, two surfaces — both named `disconnections` (`connections` is also registered as an indefinite alias, see §4):
 
 | Type                  | Surface                          | How it launches                                   |
 | --------------------- | -------------------------------- | ------------------------------------------------- |
@@ -99,14 +99,16 @@ Two commands, two surfaces — both named `connections`:
 | `CHAT_INPUT`          | typed `/` menu                   | `api/interactions.ts` replies `LAUNCH_ACTIVITY`   |
 
 `scripts/register-commands.mjs` (run once after setup):
-- renames the auto-created Entry Point command to `connections` and **clears its
+- renames the auto-created Entry Point command to `disconnections` and **clears its
   localizations** (otherwise it shows as `/launch` in every locale),
 - sets the Entry Point command's `handler` to `APP_HANDLER` so the launch is routed to
   `/api/interactions` instead of Discord launching it natively — the native
   (`DISCORD_LAUNCH_ACTIVITY`) path auto-posts a "Game Invitation / Game ended" invite
   card to the channel on every launch; this avoids that. **Requires the Interactions
   Endpoint URL from §3.**, and
-- registers the `CHAT_INPUT` `/connections` command.
+- registers the `CHAT_INPUT` `/disconnections` command, and also registers `/connections`
+  as an indefinite alias (same behavior, described as "Launch Disconnections") so
+  existing muscle memory and cached client command lists keep working.
 
 ## 5. Installation (native two-option "Add App" screen + bot recap)
 
@@ -114,7 +116,7 @@ Use Discord's own install screen — the same one Wordle shows — with two choi
 
 | Option              | Context      | Grants                                  | Effect                                                              |
 | ------------------- | ------------ | --------------------------------------- | ------------------------------------------------------------------ |
-| **Add to My Apps**  | User install | `applications.commands`                 | `/connections` works **everywhere** (any server/DM). No bot, no recap. |
+| **Add to My Apps**  | User install | `applications.commands`                 | `/disconnections` (or the `/connections` alias) works **everywhere** (any server/DM). No bot, no recap. |
 | **Add to Server**   | Guild install| `applications.commands` + `bot` (View Channel, Send Messages, Embed Links, Attach Files) | Adds the bot so the daily recap can post. |
 
 `pnpm configure-install` sets this up (PATCHes `/applications/@me`): it writes the

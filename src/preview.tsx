@@ -1202,6 +1202,7 @@ function LoadState({
   error,
   blocked,
   retry,
+  wedged,
 }: {
   label: string;
   error?: boolean;
@@ -1209,6 +1210,8 @@ function LoadState({
   // the embedded blocked variant: a retryable handshake failure ("Try again" — the plain
   // in-place re-run, or the document reload for a READY timeout)
   retry?: boolean;
+  // the escalated variant: the reload retry also died at READY (wedged Discord client)
+  wedged?: boolean;
 }) {
   return (
     <section className="w-full max-w-[940px] px-4">
@@ -1220,6 +1223,7 @@ function LoadState({
         blocked={blocked}
         onRetry={noop}
         onRetryHandshake={retry ? noop : undefined}
+        wedged={wedged}
         date="2026-06-06"
         number={1169}
         // bot-less-guild path so the harness shows the targeted tip
@@ -1236,6 +1240,7 @@ const STATES = [
   <LoadState key="er" label="Error · couldn’t load" error />,
   <LoadState key="bl" label="Blocked · open in Discord" blocked />,
   <LoadState key="blr" label="Blocked · handshake retry" blocked retry />,
+  <LoadState key="blw" label="Blocked · wedged client" blocked retry wedged />,
   <State key="p" label="In progress" game={playing} />,
   <State key="pf" label="Results · won · perfect" game={perfect} />,
   <State key="w" label="Results · won" game={won} />,
@@ -1260,6 +1265,7 @@ const known = [
   "error",
   "blocked",
   "retry",
+  "wedged",
   "handshake",
   "simulate",
   "feedback",
@@ -1714,6 +1720,7 @@ const FILTERS = [
   "error",
   "blocked",
   "retry",
+  "wedged",
   "handshake",
   "simulate",
   "feedback",

@@ -71,6 +71,21 @@ const LINKS: LinkDef[] = [
 // inbox (every player's thread) on the same DetailView the other pages use.
 const INBOX_LINK: LinkDef = { key: "inbox", label: "Inbox", Icon: Inbox, page: "inbox" };
 
+// The dev's test server (Great Group of Loving Goopers): the Changelog link (and its
+// "New" dot) is hidden there, so in-progress release notes under test never read as a
+// live announcement. Read once from the frame's launch params — standalone/local runs
+// carry no guild_id and keep the changelog.
+const CHANGELOG_HIDDEN_GUILDS = new Set(["251790553027575818"]);
+const changelogHidden = ((): boolean => {
+  try {
+    return CHANGELOG_HIDDEN_GUILDS.has(
+      new URLSearchParams(window.location.search).get("guild_id") ?? "",
+    );
+  } catch {
+    return false; // no window/search (tests) — keep the changelog
+  }
+})();
+
 // The DetailView header (centered title card): a tracked eyebrow over a big serif title.
 // The eyebrow is the section/nav name; the title reads editorial.
 const META: Record<LinkId, { eyebrow: string; title: string }> = {
@@ -803,7 +818,10 @@ export function useInfoLinks(
   const showBadge = seen !== APP_VERSION;
   // A dev (per the chat load) also gets the admin Inbox entry; everyone sees the unread dot
   // for a reply waiting on their own thread.
-  const links = chat?.isDev ? [...LINKS, INBOX_LINK] : LINKS;
+  const base = changelogHidden
+    ? LINKS.filter((l) => l.key !== "changelog")
+    : LINKS;
+  const links = chat?.isDev ? [...base, INBOX_LINK] : base;
   const chatUnread = !!chat?.unread;
 
   const markSeen = (id: LinkId): void => {

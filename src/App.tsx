@@ -1596,6 +1596,12 @@ export function App({
     }
   };
   const deadHandshake = handshakeFail === "discord-ready-timeout";
+  // hsRetryCount() >= 1 means this document IS the reload retry and its READY never came
+  // either. The funnel shows that state riding a wedged Discord client (machine-level; it
+  // can outlive app restarts, re-login, even quit+reopen), so the blocked screen drops the
+  // channel copy for an honest try-later note. Render-time read is fine — the count only
+  // changes across document loads. Storage-blocked (-1) stays on the mild copy.
+  const wedgedClient = deadHandshake && hsRetryCount() >= 1;
   // Open Discord's guild-install consent (the same link as /enable-posts' button) in the
   // user's browser. Embedded-only by construction: botInstalled is only ever set after a
   // Discord handshake, so the prompt never renders standalone where sdkRef is null.
@@ -1651,6 +1657,7 @@ export function App({
               ? reloadForHandshake
               : retryHandshake
         }
+        wedged={wedgedClient}
         date={etDate()}
         number={cachedPuzzleNo(etDate())}
         // Tip only where it can act: a guild that positively lacks the bot. Installed

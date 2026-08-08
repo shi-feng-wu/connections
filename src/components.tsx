@@ -93,6 +93,7 @@ export function LoadingScreen({
   blocked = false,
   onRetry,
   onRetryHandshake,
+  wedged = false,
   date,
   number,
   tip = false,
@@ -104,6 +105,10 @@ export function LoadingScreen({
   // failure): the plain handshake re-run for transient failures, or the in-place document
   // reload for a READY timeout. Absent → the screen just shows the "open in Discord" copy.
   onRetryHandshake?: () => void;
+  // The reload retry ALSO died at READY: the Discord client on this device is wedged, and no
+  // in-frame action can clear that state (quit+reopen proven insufficient too). Swap the
+  // channel copy for an honest "not you, try later / another device" note.
+  wedged?: boolean;
   date?: string;
   number?: number;
   // show the /enable-posts tip — App passes true only in a guild that positively
@@ -111,7 +116,24 @@ export function LoadingScreen({
   tip?: boolean;
 }) {
   const inner = blocked ? (
-    onRetryHandshake ? (
+    onRetryHandshake && wedged ? (
+      <>
+        <div className="text-balance text-sm font-medium text-zinc-300">
+          Something went wrong.
+        </div>
+        <div className="text-pretty text-xs text-zinc-500">
+          Try again later.
+        </div>
+        <HoverButton
+          type="button"
+          onClick={onRetryHandshake}
+          hover="opacity-85"
+          className="mt-1 cursor-pointer rounded-full border border-zinc-100 bg-zinc-100 px-5.5 py-2.5 text-sm font-semibold text-zinc-900 transition-opacity duration-150 ease-out"
+        >
+          Try again
+        </HoverButton>
+      </>
+    ) : onRetryHandshake ? (
       <>
         <div className="text-balance text-sm font-medium text-zinc-300">
           Couldn’t start the activity.

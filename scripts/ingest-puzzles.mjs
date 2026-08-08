@@ -21,7 +21,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const ROOT = process.cwd();
 const EDITORIAL = join(ROOT, 'editorial');
-const BATCHES = ['batch-013.json', 'batch-015.json', 'batch-016.json', 'batch-017.json', 'batch-018.json'];
+const BATCHES = ['batch-013.json', 'batch-015.json', 'batch-016.json', 'batch-017.json', 'batch-018.json', 'batch-019.json'];
 const LEDGER = join(EDITORIAL, 'data', 'publish-ledger.json');
 
 const args = process.argv.slice(2);
@@ -59,7 +59,10 @@ function mulberry32(seed) {
 function toPuzzle(board, seq, date) {
   const groups = [...board.groups]
     .sort((a, b) => a.level - b.level)
-    .map((g) => ({ level: g.level, category: g.name, members: [...g.words] }));
+    // Members alphabetized within each group: NYT convention (798/800 recent NYT
+    // groups list members A-Z at reveal) and the top provenance tell in the
+    // 2026-08-08 blind eye test. Authored order stays in the editorial files.
+    .map((g) => ({ level: g.level, category: g.name, members: [...g.words].sort((a, b) => a.localeCompare(b)) }));
   const layout = groups.flatMap((g) => g.members);
   // Seed from the board id digits, not the date, so rescheduling never re-deals.
   const rand = mulberry32(Number(String(board.id).replace(/\D/g, '')) || seq);
@@ -83,7 +86,9 @@ for (const f of BATCHES) {
     process.exit(1);
   }
   for (const b of JSON.parse(readFileSync(p, 'utf8'))) {
-    if ((b.slot ?? 'main') !== 'gauntlet') boards.push(b);
+    // 'gauntlet' is premium stock; 'held' is certified inventory deferred past a
+    // self-repeat window (e.g. an identical title already scheduled this run).
+    if (!['gauntlet', 'held'].includes(b.slot ?? 'main')) boards.push(b);
   }
 }
 

@@ -553,6 +553,36 @@ create index if not exists recap_posts_served_idx
 -- and returns; successive per-minute ticks drain the whole set because terminal rows drop out of
 -- this result. This is what fixes the tail-truncation OOM: no single invocation ever renders more
 -- than p_limit cards, and a crashed tick just leaves its remainder for the next tick to pick up.
+--
+-- DORMANCY. A 'failed' row is terminal for its DATE only, and every night is a new date — so a
+-- channel the bot was kicked out of (403/50001), one whose channel was deleted (404/10003), or one
+-- whose perms were revoked (403/50013) got re-rendered and re-POSTed EVERY night, forever: the
+-- ledger shows 508 guilds racking up ~20 failed nights each inside 28 days, every one of them a
+-- render and a POST spent re-proving the same 4xx. So a (scope, channel) goes DORMANT — dropped
+-- from the queue — once BOTH of these hold:
+--   1. Its last 3 terminal outcomes before p_date are ALL 'failed', and there ARE 3 of them. A kept
+--      'failed' row is a permanent 4xx by construction: postOne DELETES the row on a transient
+--      429/5xx so a later run retries, and only stamps 'failed' on a 4xx that won't fix itself.
+--      Three in a row is the "this is not a blip" bar. 'claimed' is in flight, not an outcome, so
+--      those rows aren't in the window — a killed run can't push a channel toward dormancy.
+--   2. No fresh bot-backed launch since that last failure: no live_cards row past the last failed
+--      date that is bot-backed (message_id posted, interaction_token null, bot_can_post not false —
+--      see recap_channels() for what those three mean).
+-- (2) is the revival contract, and it's why this is safe without ever re-probing Discord: a fresh
+-- bot-backed launch revives the channel — the owner's rule is "play there again if you want recaps
+-- there". A token-backed row (interaction_token set) is a bot-LESS launch through the interaction
+-- webhook; it says nothing about whether the bot is present, so it must NOT revive.
+--
+-- Cost: these probes run for every recap_channels() row every tick (the ORDER BY forces the whole
+-- WHERE to evaluate before LIMIT), but each is a per-channel, index-bounded lookup — the same cost
+-- class as the max(puzzle_date) subquery the ORDER BY already runs. The max-failed-date probe is an
+-- index-only scan on recap_posts_served_idx (scope_id, channel_id, status, puzzle_date desc): all
+-- four of its predicates are scan keys. The last-3 window can ride that index too, but the planner
+-- prefers a BACKWARD scan of the PK (scope_id, puzzle_date, channel_id), which is already in
+-- puzzle_date-desc order — it reads until 3 rows match on channel/status and stops, no sort. Both
+-- stay sub-millisecond per channel with the ledger at a few hundred thousand rows. The live_cards
+-- probe has no (scope, channel) index; the PK (scope_id, puzzle_date, channel_id) gives a
+-- scope_id-prefix scan, bounded by one guild's card rows (~90 at most, one per day played) — fine.
 drop function if exists public.recap_pending(date, int);
 create or replace function public.recap_pending(p_date date, p_limit int)
 returns table (scope_id text, channel_id text)
@@ -569,6 +599,35 @@ as $$
         rp.status in ('posted', 'failed')                                            -- terminal for this date
         or (rp.status = 'claimed' and rp.attempted_at > now() - interval '15 minutes') -- fresh in-flight claim
       )                                                                              -- (stale claims stay pending → recovered)
+  )
+  and not (
+    -- (1) The last 3 terminal outcomes before p_date are all 'failed' — and there are 3 of them.
+    -- count(*) = 3 is what keeps a 1- or 2-failure (or empty) history OUT of dormancy; bool_and over
+    -- an empty window is NULL, and `false and NULL` is false, so a fresh channel is never dormant.
+    (select count(*) = 3 and bool_and(w.status = 'failed')
+       from (
+         select rp3.status
+         from public.recap_posts rp3
+         where rp3.scope_id = rc.scope_id and rp3.channel_id = rc.channel_id
+           and rp3.puzzle_date < p_date
+           and rp3.status in ('posted', 'failed') -- 'claimed'/NULL aren't outcomes → not in the window
+         order by rp3.puzzle_date desc
+         limit 3
+       ) w)
+    -- (2) …and nothing has revived it since: no bot-backed launch after that last failed date.
+    and not exists (
+      select 1 from public.live_cards lc
+      where lc.scope_id = rc.scope_id and lc.channel_id = rc.channel_id
+        and lc.message_id is not null                -- a card actually posted there
+        and lc.interaction_token is null             -- bot-backed only; a token-backed launch proves no bot
+        and lc.bot_can_post is distinct from false   -- NULL = unknown → still counts as revival (fail-open)
+        and lc.puzzle_date > (
+          select max(rp4.puzzle_date)
+          from public.recap_posts rp4
+          where rp4.scope_id = rc.scope_id and rp4.channel_id = rc.channel_id
+            and rp4.status = 'failed' and rp4.puzzle_date < p_date
+        )
+    )
   )
   order by
     (select max(rp2.puzzle_date)

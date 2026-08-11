@@ -77,9 +77,11 @@ type Outcome = "posted" | "skipped" | "failed";
 
 // (Removed the fetchBotGuildIds bot-membership pre-filter. It paginated /users/@me/guilds and 429'd
 // nightly on the growing guild list, so it failed open and attempted all channels anyway. With the
-// queue drainer, attempting a user-install / no-bot channel just 403s once and records a terminal
-// 'failed' row, which drops it from recap_pending — no worse than the old fail-open behavior, and it
-// removes the 429 noise. Future optimization: skip known-bot-less channels up front to save a render.)
+// queue drainer, attempting a user-install / no-bot channel 403s and records a terminal 'failed' row,
+// which drops it from recap_pending for that DATE — and since every night is a new date, it used to
+// come back every night, forever. It no longer does: after 3 consecutive failed nights the channel
+// goes DORMANT in recap_pending and is skipped entirely, until a fresh bot-backed launch there
+// revives it (see the recap_pending() comment in supabase/schema.sql for the exact rule).)
 
 export default async function handler(
   req: VercelRequest,
@@ -158,7 +160,9 @@ export default async function handler(
   // This invocation's slice of work. Single-channel test override fires exactly that one channel;
   // otherwise pull the next BATCH_LIMIT channels that still need a recap for `date` from the queue.
   // recap_pending() = recap_channels() minus any (scope, channel) already terminal ('posted'/'failed')
-  // for the date, ordered neediest-first (never-served / least-recently-served lead). Because terminal
+  // for the date, minus DORMANT channels (3 straight failed nights with no bot-backed relaunch since —
+  // see the dormancy block in supabase/schema.sql), ordered neediest-first (never-served /
+  // least-recently-served lead). Because terminal
   // rows drop out of that result, successive per-minute ticks drain the whole set — and no single
   // invocation renders more than BATCH_LIMIT cards, which is the OOM guard (see BATCH_LIMIT above).
   let pairs: { scope: string; channel: string }[];

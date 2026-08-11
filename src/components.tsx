@@ -1,6 +1,6 @@
 import { Menu } from "lucide-react";
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { Board, type BoardSnapshot } from "./board";
+import { Board, type BoardSnapshot, type ShareOutcome } from "./board";
 import type { ChatBundle } from "./chat";
 import { LEVELS, type Game, type Puzzle } from "./game";
 import { HoverButton } from "./hoverbutton";
@@ -507,6 +507,7 @@ export function GameView({
   onCommit,
   onHint,
   onFinish,
+  onShareLink,
   chat,
   onOpenExternal,
   initialRevealed,
@@ -532,6 +533,9 @@ export function GameView({
   // Record one revealed hint server-side (its group level). Absent in standalone/practice.
   onHint?: (level: number) => void;
   onFinish: () => void;
+  // Post the finished result to Discord as a share card (mint + native share modal). App
+  // supplies it only inside the Activity on the official daily; the preview/landing omit it.
+  onShareLink?: () => Promise<ShareOutcome>;
   // The player↔dev chat (the footer's "Feedback" page): its bound api plus the unread/isDev
   // badge state. Omitted by the dev preview / landing, where the page falls back to a
   // local-only form.
@@ -657,6 +661,7 @@ export function GameView({
                       setDone(true);
                       onFinish();
                     }}
+                    onShareLink={onShareLink}
                     initialRevealed={initialRevealed}
                   />
                 </div>

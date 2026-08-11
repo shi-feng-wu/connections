@@ -4,6 +4,8 @@ import {
   Copy,
   Eraser,
   Lightbulb,
+  LoaderCircle,
+  Send,
   Share,
   Share2,
   Shuffle as ShuffleIcon,
@@ -52,10 +54,15 @@ function buildShareText(game: Game): string {
   return `${title}\n${game.shareGrid()}\n${stats}\n${PLAY_URL}`;
 }
 
+// What a Discord share attempt ended up doing, so the footer can confirm the right thing:
+// "shared" = Discord's own share modal opened (it IS the confirmation, so we stay quiet),
+// "copied" = no share modal here, the link went to the clipboard instead, "failed" = neither.
+export type ShareOutcome = "shared" | "copied" | "failed";
+
 // Copy with a legacy fallback: the async Clipboard API is the happy path, but the
 // Activity iframe can lack clipboard-write permission, so fall back to a throwaway
 // <textarea> + execCommand. Returns whether the copy landed.
-async function copyToClipboard(text: string): Promise<boolean> {
+export async function copyToClipboard(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
@@ -188,19 +195,29 @@ function EndSummary({
   game,
   note,
   autoOpen,
+  onShareLink,
 }: {
   game: Game;
   note?: string | null;
   // True only on a live finish — the breakdown then self-reveals once the entrance
   // settles, so the points makeup is seen without a trigger. Off on rehydrated finishes.
   autoOpen?: boolean;
+  // Post the result into Discord as a share card (a quick link: our result image, a
+  // description, and a Play button). Present only inside the Activity on the official
+  // daily — everywhere else the footer keeps just the OS-share/Copy button. See App.tsx
+  // shareResult.
+  onShareLink?: () => Promise<ShareOutcome>;
 }) {
   const b = game.scoreBreakdown;
   const won = game.status === "won";
   const perfect = won && game.mistakesLeft === MAX_MISTAKES;
   const label = perfect ? "Perfect" : won ? "Solved" : "Failed";
   const [pinned, setPinned] = useState(false);
-  const [copied, setCopied] = useState(false);
+  // Transient confirmation chip ("Copied!", "Couldn’t share"). One slot, one message.
+  const [flash, setFlash] = useState<string | null>(null);
+  // A share is a render plus two round-trips, so the button holds a pending state rather
+  // than looking dead. Also the re-entry guard: a double tap can't mint twice.
+  const [sharing, setSharing] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const copiedTimer = useRef<number | null>(null);
   const autoOpenTimer = useRef<number | null>(null);
@@ -258,11 +275,30 @@ function EndSummary({
     };
   }, [autoOpen]);
 
-  const flashCopied = (ok: boolean): void => {
-    if (!ok) return;
-    setCopied(true);
+  const flashMsg = (text: string): void => {
+    setFlash(text);
     if (copiedTimer.current != null) clearTimeout(copiedTimer.current);
-    copiedTimer.current = window.setTimeout(() => setCopied(false), 1800);
+    copiedTimer.current = window.setTimeout(() => setFlash(null), 1800);
+  };
+  const flashCopied = (ok: boolean): void => {
+    if (ok) flashMsg("Copied!");
+  };
+
+  // Share into Discord. The mint + the native share modal both live in App.tsx (it owns the
+  // SDK and the token); this only drives the pending state and confirms the outcome. A
+  // clipboard fallback flashes "Copied!" exactly like the Copy button, so the two never
+  // disagree about what just happened.
+  const onDiscordShare = (): void => {
+    if (!onShareLink || sharing) return;
+    setSharing(true);
+    void onShareLink()
+      .then((outcome) => {
+        // "shared" needs no chip: Discord's own share modal is the confirmation.
+        if (outcome === "copied") flashMsg("Copied!");
+        else if (outcome === "failed") flashMsg("Couldn’t share");
+      })
+      .catch(() => flashMsg("Couldn’t share"))
+      .finally(() => setSharing(false));
   };
 
   // Native share where it exists (must fire in the gesture, so nothing is awaited before
@@ -316,9 +352,9 @@ function EndSummary({
             />
           ))}
         </span>
-        {/* COPIED! — the copy confirmation pops here, the dead space between the dots and
-            the stats: the same stage (and cream-chip look) the in-play "One away…" hint
-            uses. The chip is absolute (centred by the flex alignment, so it doesn't widen
+        {/* CONFIRMATION CHIP — "Copied!" / "Couldn’t share" pops here, the dead space between
+            the dots and the stats: the same stage (and cream-chip look) the in-play "One away…"
+            hint uses. The chip is absolute (centred by the flex alignment, so it doesn't widen
             the row) and nowrap — it overhangs rather than squeezing the stats on narrow
             layouts; opaque + shadowed + z-raised so it reads over whatever it covers. The
             sr-only twin announces it. */}
@@ -327,16 +363,17 @@ function EndSummary({
             aria-hidden
             className={
               "pointer-events-none absolute z-20 whitespace-nowrap rounded-full bg-[#e8eaee] px-3.5 py-2 text-[11px] font-bold uppercase leading-none tracking-[0.08em] text-[#121212] shadow-[0_3px_12px_rgba(0,0,0,0.45)] transition-all duration-200 ease-[cubic-bezier(.34,1.56,.64,1)] max-[420px]:px-3 max-[420px]:text-[10px] max-[420px]:tracking-[0.04em] " +
-              (copied ? "scale-100 opacity-100" : "scale-90 opacity-0")
+              (flash ? "scale-100 opacity-100" : "scale-90 opacity-0")
             }
           >
-            Copied!
+            {flash ?? "Copied!"}
           </span>
           <span className="sr-only" role="status">
-            {copied ? "Copied" : ""}
+            {flash ?? ""}
           </span>
         </div>
-        {/* RIGHT — solve-time · divider · status+score, then the Share button. */}
+        {/* RIGHT — solve-time · divider · status+score, then the OS-share/Copy button and
+            (inside the Activity) the filled Share-to-Discord button on the far edge. */}
         <div className="flex min-w-0 flex-none items-center gap-3.5 max-[360px]:gap-2.5">
           {/* Score cluster — taps to toggle the breakdown. Wrapped so the popover anchors to
               it (caret points at the score, not the Share button to its right). */}
@@ -445,6 +482,38 @@ function EndSummary({
             )}
             <span className="sr-only">{canNativeShare ? "Share" : "Copy"}</span>
           </HoverButton>
+          {/* SHARE TO DISCORD — the primary end-screen action inside the Activity, so it
+              takes the far edge and the filled treatment (the round twin of BTN_PRIMARY)
+              rather than reading as a second, identical icon button. It posts the result as
+              a share card: our spoiler-free grid image with a Play button under it, which is
+              the only way a finished game turns into another player. Absent outside the
+              Activity (the OS-share/Copy button to its left is the whole affordance there).
+              Pending state is a spinner, since minting the card is a real round-trip. */}
+          {onShareLink && (
+            <HoverButton
+              data-end="share-discord"
+              className={BTN_ICON_PRIMARY}
+              hover="opacity-85"
+              onClick={onDiscordShare}
+              disabled={sharing}
+              aria-label="Share your result to Discord"
+              title="Share your result to Discord"
+            >
+              {sharing ? (
+                <LoaderCircle size={18} strokeWidth={2.5} className="animate-spin" aria-hidden />
+              ) : (
+                // Send is right-heavy (the plane points up-right), so nudge it a hair to sit
+                // optically centred in the round button.
+                <Send
+                  size={17}
+                  strokeWidth={2.5}
+                  className="-translate-x-[0.5px] translate-y-[0.5px]"
+                  aria-hidden
+                />
+              )}
+              <span className="sr-only">Share to Discord</span>
+            </HoverButton>
+          )}
         </div>
       </div>
 
@@ -612,6 +681,10 @@ const BTN_ICON =
   "inline-flex h-[42px] w-[42px] flex-none items-center justify-center cursor-pointer rounded-full border border-zinc-600 text-zinc-100 transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
 const BTN_PRIMARY =
   "inline-flex h-[42px] items-center justify-center cursor-pointer rounded-full px-5.5 border border-zinc-100 bg-zinc-100 text-zinc-900 font-semibold text-sm transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
+// BTN_PRIMARY's round, icon-only twin — the filled counterpart to BTN_ICON, for the one
+// end-screen action that outranks the rest (Share to Discord).
+const BTN_ICON_PRIMARY =
+  "inline-flex h-[42px] w-[42px] flex-none items-center justify-center cursor-pointer rounded-full border border-zinc-100 bg-zinc-100 text-zinc-900 transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
 
 const SPRING = "cubic-bezier(.34,1.56,.64,1)";
 const GLIDE = "cubic-bezier(.22,.61,.36,1)";
@@ -742,6 +815,7 @@ export function Board({
   onCommit,
   onHint,
   onFinish,
+  onShareLink,
   initialRevealed = [],
 }: {
   game: Game;
@@ -754,6 +828,9 @@ export function Board({
   // in standalone/practice, where the reveal is purely local. See doHint.
   onHint?: (level: number) => void;
   onFinish: () => void;
+  // Post the finished result to Discord as a share card. Forwarded to the end footer;
+  // absent outside the Activity / off the daily, where the footer shows only Copy.
+  onShareLink?: () => Promise<ShareOutcome>;
   // seeds revealed-on-loss bars when rehydrating a finished game (preview harness).
   initialRevealed?: number[];
 }) {
@@ -1645,7 +1722,12 @@ export function Board({
   // warning arriving after the end swap still surfaces. See EndSummary.
   function renderBelowEnd() {
     return (
-      <EndSummary game={game} note={hint} autoOpen={freshFinish.current} />
+      <EndSummary
+        game={game}
+        note={hint}
+        autoOpen={freshFinish.current}
+        onShareLink={onShareLink}
+      />
     );
   }
 }

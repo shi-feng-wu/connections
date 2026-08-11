@@ -1,6 +1,6 @@
 import { Common, DiscordSDK, RPCCloseCodes } from "@discord/embedded-app-sdk";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BoardSnapshot } from "./board";
+import { copyToClipboard, type BoardSnapshot, type ShareOutcome } from "./board";
 import {
   createTicket,
   listChat,
@@ -728,6 +728,83 @@ export function App({
     }
   }
 
+  // ——— the share loop ———
+  // Turn a finished daily into a Discord SHARE CARD and hand it to Discord's own share
+  // modal. The card is minted server-side from this player's own committed record
+  // (/api/share-link; the client never supplies a grid), which answers with a quick-link
+  // id. discordSdk.commands.shareLink then opens the picker, and whatever chat they choose
+  // gets the card: the spoiler-free grid image, a line of copy, and a Play button that
+  // opens the Activity for everyone who sees it. That Play button is the entire loop —
+  // it's the only free compounding acquisition surface Discord gives an Activity, and
+  // Discord stamps the sharer onto the link so /api/referral can count what it brings back.
+  //
+  // Fallbacks, in order: a host whose client can't run the shareLink RPC (an older Discord
+  // build, the dev standalone) gets the same URL on the clipboard instead; if even that
+  // fails, the footer says so. A dismissed share modal is NOT a failure — the player saw
+  // the picker and backed out, and copying behind their back would be wrong.
+  async function shareResult(): Promise<ShareOutcome> {
+    const accessToken = accessTokenRef.current;
+    const g = gameRef.current;
+    if (!accessToken || !g) return "failed";
+    // Same race /api/score hits: the finishing guess commits in the BACKGROUND while the end
+    // choreography plays, so a Share tapped the instant the footer appears can replay a record
+    // that doesn't contain it yet ("not-finished"). Flush the chain, then retry once for any
+    // residual write lag — this is the feature's first impression, so it must not lose to a
+    // fast finger.
+    await commitChain.current;
+    const post = async (): Promise<{ ok?: boolean; link_id?: string; url?: string; message?: string; reason?: string } | null> => {
+      try {
+        const r = await fetch("/api/share-link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ date: g.puzzle.date, accessToken }),
+          signal: timeoutSignal(20_000),
+        });
+        return (await r.json()) as { ok?: boolean };
+      } catch {
+        return null;
+      }
+    };
+    let minted = await post();
+    if (minted?.reason === "not-finished") {
+      await new Promise((res) => setTimeout(res, 700));
+      minted = await post();
+    }
+    if (!minted?.ok || !minted.link_id || !minted.url) return "failed";
+    const sdk = sdkRef.current;
+    try {
+      if (typeof sdk?.commands?.shareLink === "function") {
+        await sdk.commands.shareLink({
+          message: minted.message ?? "",
+          link_id: minted.link_id,
+        });
+        // Resolved at all = the native picker ran (success:false just means "didn't send").
+        return "shared";
+      }
+    } catch {
+      /* the RPC isn't available on this client — fall through to the clipboard */
+    }
+    return (await copyToClipboard(minted.url)) ? "copied" : "failed";
+  }
+
+  // Record how this player arrived: Discord hands the client the sharer's id (referrerId)
+  // and whatever we stamped on the link at mint time (customId) when the Activity is opened
+  // from a shared quick link. Fire-and-forget at boot, first-writer-wins server-side, no
+  // rewards attached — v1 measures the loop, nothing more. Nothing to send on a normal
+  // launch (both null), so the common case costs one comparison.
+  function logReferral(sdk: DiscordSDK): void {
+    const referrerId = sdk.referrerId ?? null;
+    const customId = sdk.customId ?? null;
+    if (!referrerId && !customId) return;
+    void fetch("/api/referral", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ referrerId, customId }),
+    }).catch(() => {
+      /* best-effort telemetry; a miss costs one uncounted attribution */
+    });
+  }
+
   function onFinish(): void {
     const g = gameRef.current;
     if (!g) return;
@@ -1122,6 +1199,10 @@ export function App({
       } catch (e) {
         console.warn("Discord authenticate failed:", e);
       }
+
+      // Attribution for an arrival off a shared card. Runs here (not in the bootstrap
+      // effect) because it needs the auth ticket, which the token exchange above just set.
+      logReferral(sdk);
 
       // Register this player in the room (see joinRoom): the "who's playing" card append
       // AND the join-time room stamp that finish-time scoring depends on. Fire-and-forget:
@@ -1688,6 +1769,9 @@ export function App({
         onCommit={commitGuess}
         onHint={commitHint}
         onFinish={onFinish}
+        // The end screen's Share-to-Discord button, only where it can work: inside the
+        // Activity, on the official daily (a practice replay has no record to mint from).
+        onShareLink={isEmbedded && isDailyRef.current ? shareResult : undefined}
         chat={chatBundle}
         onOpenExternal={openExternal}
         initialRevealed={revealedLevelsOf(gameRef.current)}

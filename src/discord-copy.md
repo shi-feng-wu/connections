@@ -102,6 +102,30 @@ Still mid-puzzle: {solved}/4 groups, {mistakes} left. Finish it, then `/share`.
 
 Couldn’t build your share. Try `/share` again.
 
+## share-link.message
+
+Disconnections #{puzzle}: {result}
+
+## share-link.result-perfect
+
+solved with no mistakes
+
+## share-link.result-solved
+
+solved with {mistakes} mistake{s}
+
+## share-link.result-lost
+
+ran out of guesses
+
+## share-card.title
+
+{name} played Disconnections #{puzzle}
+
+## share-card.description
+
+Four groups hiding in sixteen words. Play today’s puzzle and see how you do.
+
 ## reply-dm.subject
 
 Re: {subject}

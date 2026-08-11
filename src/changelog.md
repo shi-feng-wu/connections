@@ -17,6 +17,12 @@
   at the very top. Group everything that ships together into one release.
 -->
 
+## v2.2.0 — Aug 11, 2026
+
+### Added
+
+- Share your result as a card. Finish the daily, hit the Share button, and pick a chat: your grid goes out as a card with a Play button under it, so anyone who sees it can jump straight into today's puzzle. Still spoiler-free, just colored squares and your mistake count.
+
 ## v2.1.0 — Aug 11, 2026
 
 ### Added

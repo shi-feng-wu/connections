@@ -1059,3 +1059,56 @@ create table if not exists public.room_auth (
 );
 
 alter table public.room_auth enable row level security;
+
+-- ——— the share-card viral loop (/api/share-link + /api/referral) ———
+
+-- Minted Discord quick links, one per (player, puzzle date). A quick link is Discord's
+-- shareable chat embed: our 43:24 result card, a title, a description and a "Play" button that
+-- opens the Activity. /api/share-link POSTs it to /applications/{app}/quick-links on the
+-- PLAYER'S OAuth token and stores the answer here, so a second Share click on the same result
+-- reuses the same link instead of burning another render, another Discord write, and another
+-- slot of the per-day mint quota (the quota is literally a count of this table's rows for the
+-- player since midnight ET — the PK makes one row exactly one distinct date). Links carry a
+-- 30-day TTL on Discord's side; the route re-mints at 29 days rather than hand out one that is
+-- about to expire mid-share. Written only by the service role (RLS, no policy → anon sees
+-- nothing); the route degrades to minting-without-cache if this table isn't there yet.
+create table if not exists public.share_links (
+  user_id     text        not null,
+  puzzle_date date        not null,
+  link_id     text        not null,                 -- Discord's quick-link id, passed to shareLink()
+  url         text        not null,                 -- the constructed activity URL (clipboard fallback)
+  created_at  timestamptz not null default now(),   -- mint time: drives both the TTL and the quota
+  primary key (user_id, puzzle_date)
+);
+
+-- The mint quota's window scan: rows for one player since midnight ET.
+create index if not exists share_links_user_minted_idx on public.share_links (user_id, created_at);
+
+alter table public.share_links enable row level security;
+
+-- Who brought whom. When a player opens the Activity from a shared quick link, their client
+-- reads discordSdk.referrerId (the sharer) and discordSdk.customId (what we stamped at mint
+-- time) at boot and posts them to /api/referral. FIRST-WRITER-WINS IS THE PRIMARY KEY: a player
+-- is attributed to exactly one referrer, ever, and every later link they open is a no-op 23505.
+-- Self-referrals (opening your own link) are dropped before the insert.
+--
+-- referrer_user_id is nullable on purpose: a STATIC dev-portal campaign link carries a custom_id
+-- with no sharer behind it, and those arrivals are worth counting in the same table. link_id is
+-- nullable too — the Embedded App SDK (2.5.0) exposes referrerId and customId at boot but NOT
+-- the link id, so in practice it stays null until the SDK surfaces one.
+--
+-- v1 IS MEASUREMENT ONLY: nothing is granted off these rows, which is what lets the write stay
+-- a bare insert. Anything that ever pays out a referral needs a real anti-farming pass first.
+-- Written only by the service role (RLS, no policy → anon sees nothing).
+create table if not exists public.referrals (
+  referred_user_id text        primary key,          -- the arriving player; one attribution, ever
+  referrer_user_id text,                             -- the sharer (null for a campaign link)
+  custom_id        text,                             -- what we stamped on the link at mint time
+  link_id          text,                             -- the quick link, when the client can see it
+  first_seen       timestamptz not null default now()
+);
+
+-- "How did this referrer's links convert" — the one read the loop's telemetry needs.
+create index if not exists referrals_referrer_idx on public.referrals (referrer_user_id, first_seen);
+
+alter table public.referrals enable row level security;

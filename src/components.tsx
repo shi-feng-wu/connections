@@ -111,7 +111,7 @@ export function LoadingScreen({
   wedged?: boolean;
   date?: string;
   number?: number;
-  // show the /enable-posts tip — App passes true only in a guild that positively
+  // show the /invite-bot tip — App passes true only in a guild that positively
   // lacks the bot, so installed servers and DMs load clean.
   tip?: boolean;
 }) {
@@ -205,7 +205,7 @@ export function LoadingScreen({
             Want the day’s results and the leaderboard posted here at every
             reset? Run{" "}
             <span className="rounded-[5px] bg-white/[0.06] px-[5px] py-px font-semibold text-zinc-300">
-              /enable-posts
+              /invite-bot
             </span>
             .
           </p>

@@ -1,6 +1,7 @@
 // Pure builders for the Discord messages the bot sends in response to interactions —
-// the ephemeral command replies (/enable-posts, /donate, /disable-posts), the mid-launch
-// install/permission nudges, and the /share result card. No node/server imports, so
+// the ephemeral command replies (/unmute, /donate, /mute, /invite-bot, /help), the mid-launch
+// permission nudge, the piggybacked recap's invite aside, and the /share result card. No
+// node/server imports, so
 // BOTH api/interactions.ts (the live webhook) and src/preview.tsx (the offline visual
 // harness) build the EXACT same payloads — the preview is the real message, not a
 // replica that can drift (mirrors how src/card-draw.ts is shared for the PNG card).
@@ -57,35 +58,54 @@ function linkButton(label: string, url: string, emoji?: string): unknown {
   return { type: 1, components: [button] };
 }
 
-// "/enable-posts" where the bot is already guild-installed AND this channel wasn't disabled —
+// "/unmute" where the bot is already guild-installed AND this channel wasn't muted —
 // nothing to do, posts are on; if they're not showing, it's a channel-permission gap, so name
 // what the bot needs. Ephemeral: no state changed, so don't post a public confirmation.
 export function enablePostsAlreadyEnabled(): MessageData {
   return { content: COPY["enable-posts.already"], flags: EPHEMERAL };
 }
 
-// "/enable-posts" that actually cleared a /disable-posts opt-out — posts are back on. PUBLIC (no
-// ephemeral flag), mirroring the public /disable-posts confirmation, so the channel sees the live
+// "/unmute" that actually cleared a /mute opt-out — posts are back on. PUBLIC (no
+// ephemeral flag), mirroring the public /mute confirmation, so the channel sees the live
 // card + recap were turned back on and by whom.
 export function enablePostsReenabled(): MessageData {
   return { content: COPY["enable-posts.reenabled"] };
 }
 
-// "/enable-posts" run by a non-moderator where posts ARE off — re-enabling is the mirror of
-// /disable-posts, so it needs Manage Channels. Ephemeral: it's a "you can't do this" nudge, not a
-// channel post. (The command itself is open so anyone can still reach the add-bot pitch.)
+// "/unmute" run by a non-moderator where posts ARE off — un-muting is the mirror of
+// /mute, so it needs Manage Channels — Discord gates the command, and the handler re-checks.
+// Ephemeral: it's a "you can't do this" nudge, not a channel post.
 export function enablePostsNeedPerms(): MessageData {
   return { content: COPY["enable-posts.need-perms"], flags: EPHEMERAL };
 }
 
-// "/enable-posts" in a server without the bot: the casual pitch + a one-click "Add to Server"
-// button. (Guild-only command, so there's no DM variant — it can't be run in a DM.)
-export function enablePostsAddBot(appId: string): MessageData {
+// "/unmute" in a server WITHOUT the bot. Posts happen there now — the who's playing card rides the
+// launcher's interaction token, and yesterday's recap piggybacks on the first launch of the day
+// (api/post-card.ts) — so the reply confirms posts are on rather than pitching an install, and the
+// small line offers the bot as the upgrade. `reenabled` = an actual /mute opt-out was just cleared
+// (PUBLIC, mirroring the bot-installed confirmation); otherwise nothing changed, so stay ephemeral.
+export function unmuteBotless(appId: string, reenabled: boolean): MessageData {
+  const key = reenabled ? "unmute.botless-reenabled" : "unmute.botless-on";
+  const content = fill(COPY[key], { url: installUrl(appId) });
+  return reenabled ? { content } : { content, flags: EPHEMERAL };
+}
+
+// "/invite-bot": the one-click "Add to Server" link, plus a line on what the bot adds. Ephemeral —
+// it's a personal nudge, not a channel post. Open to everyone (the OAuth add needs Manage Server
+// anyway), and available everywhere, so it also works from a DM.
+export function inviteBotMessage(appId: string): MessageData {
   return {
-    content: COPY["enable-posts.add-bot"],
+    content: COPY["invite-bot"],
     flags: EPHEMERAL,
     components: [linkButton(COPY["button.add-server"], installUrl(appId))],
   };
+}
+
+// "/help": the static command list. Ephemeral — one person asked, the channel doesn't need it. Keep
+// the list in src/discord-copy.md in sync with what scripts/command-defs.mjs actually registers
+// (tests/interactions.test.ts fails if a registered command is missing from this text).
+export function helpMessage(): MessageData {
+  return { content: COPY.help, flags: EPHEMERAL };
 }
 
 // "/donate": a private reply with the Ko-fi link button (the footer's "Help cover the
@@ -98,7 +118,7 @@ export function donateMessage(): MessageData {
   };
 }
 
-// The /disable-posts reply data, by outcome. "done" is a PUBLIC channel post (no ephemeral flag)
+// The /mute reply data, by outcome. "done" is a PUBLIC channel post (no ephemeral flag)
 // so the channel sees that posts (live card + recap) were turned off and how to turn them back on.
 // The rest stay ephemeral so re-runs and edge cases don't post noise: "already" (posts were
 // already off — it's sticky, so nothing re-armed them), "no-guild" (a DM/non-guild surface with
@@ -117,7 +137,7 @@ export function disablePostsMessage(
   return { content, flags: EPHEMERAL };
 }
 
-// The full /disable-posts interaction response (the data wrapped in a message callback).
+// The full /mute interaction response (the data wrapped in a message callback).
 // Pure so it's unit-testable without a request. Exported (api/interactions.ts re-exports it).
 export function disablePostsResult(
   kind: "done" | "already" | "no-guild" | "error",
@@ -128,16 +148,18 @@ export function disablePostsResult(
   };
 }
 
-// The ephemeral "add the bot" nudge a launcher gets in a server without the bot — the
-// highest-intent install moment there is (someone is actively playing where recaps can't
-// post). Unlike /enable-posts it fires mid-launch, so it leads with the live card — the
-// payoff the launcher would see right now — and the recap rides along second.
-export function installNudgePayload(appId: string): MessageData {
-  return {
-    content: COPY["install-nudge"],
-    flags: EPHEMERAL,
-    components: [linkButton(COPY["button.add-server"], installUrl(appId))],
-  };
+// The one small line appended to a PIGGYBACKED recap — the recap a bot-less server gets on the
+// first launch of the day (api/post-card.ts), where no bot can post one at midnight. It replaces the
+// old ephemeral "add the bot" install nudge entirely: same offer, but riding a message the room
+// already wanted instead of interrupting the launcher with a popup. NEVER added to a bot-posted
+// recap (the cron uses recapText's output as-is) — that server already has the bot.
+export function piggybackRecapAside(appId: string): string {
+  return fill(COPY["recap.invite-aside"], { url: installUrl(appId) });
+}
+
+// The piggybacked recap's message body: the normal recap line (recapText) plus the aside above.
+export function piggybackRecapText(recapBody: string, appId: string): string {
+  return `${recapBody}\n${piggybackRecapAside(appId)}`;
 }
 
 // The ephemeral nudge a launcher gets when the bot IS in the server but can't post in THIS

@@ -17,6 +17,23 @@
   at the very top. Group everything that ships together into one release.
 -->
 
+## v2.1.0 — Aug 11, 2026
+
+### Added
+
+- Servers without the bot now get the daily recap: yesterday's results and standings arrive when the first person opens the game each day, in the channel they opened it in.
+- /invite-bot gives you the add-the-bot link whenever you want it.
+- /help lists every command and what it does.
+
+### Changed
+
+- /disable-posts is now /mute and /enable-posts is now /unmute. Same thing they always did: mute stops the cards and recaps in a channel, unmute turns them back on. Both need the Manage Channels permission, and the old names keep working for a bit.
+- /unmute now works in servers without the bot too, since those channels get posts now.
+
+### Removed
+
+- The popup asking you to add the bot is gone. There's a small note on the recap instead.
+
 ## v2.0.0 — Aug 8, 2026
 
 Hey everyone, quick update with some news. This started as a small project so my friends could play the game in Discord, and it's grown way past that. Thank you all so much for the support and feedback so far. However, with that growth, there's a change that has to be made.

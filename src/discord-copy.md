@@ -16,11 +16,6 @@
 
 Disconnections is ad-free. Donations help cover the server costs. Any amount helps, thank you!
 
-## enable-posts.add-bot
-
-Add the bot and it’ll drop a nightly recap in this channel. It also extends how long it can edit the who’s playing card for.
--# Adding it needs the Manage Server permission.
-
 ## enable-posts.already
 
 Posts are already on for this channel, so the live card and nightly recap should show up here.
@@ -32,12 +27,33 @@ Posts are back on for this channel. The live card and nightly recap will show up
 
 ## enable-posts.need-perms
 
-Posts are off in this channel, and turning them back on needs the Manage Channels permission. Ask a mod to run `/enable-posts` here.
+Posts are off in this channel, and turning them back on needs the Manage Channels permission. Ask a mod to run `/unmute` here.
 
-## install-nudge
+## unmute.botless-on
 
-Add the bot to extend how long it can edit the who’s playing card, plus a nightly recap when the puzzle resets.
--# Needs the Manage Server permission. Not an admin? Ask one to run `/enable-posts`.
+Posts are on in this channel. The who’s playing card shows up when someone launches, and yesterday’s recap lands on the first launch of the day.
+-# [Invite the bot]({url}) and the card updates all day, plus recaps arrive at midnight automatically.
+
+## unmute.botless-reenabled
+
+Posts are back on in this channel: the who’s playing card, and yesterday’s recap on the first launch of the day.
+-# [Invite the bot]({url}) and the card updates all day, plus recaps arrive at midnight automatically.
+
+## invite-bot
+
+Here’s the invite link for the Disconnections bot.
+-# With the bot in the server, the who’s playing card updates all day and recaps arrive at midnight automatically. Adding it needs the Manage Server permission.
+
+## help
+
+Disconnections commands:
+`/disconnections` launches the daily puzzle. `/connections` does the same.
+`/share` posts your result grid for today’s puzzle.
+`/donate` helps cover the server costs.
+`/invite-bot` adds the Disconnections bot to this server.
+`/mute` (mods) stops the cards and recaps in this channel.
+`/unmute` (mods) turns them back on here.
+`/help` shows this list.
 
 ## missing-perms
 
@@ -47,20 +63,20 @@ Give the Disconnections bot these permissions on this channel: View Channel, Sen
 
 ## disable-posts.done
 
-Posts are off for this channel now, no live card and no nightly recap. Run `/enable-posts` here to turn them back on.
--# People can still play; this only mutes what the bot posts.
+Posts are off for this channel now, no who’s playing card and no recaps. Run `/unmute` here to turn them back on.
+-# People can still play; this only mutes what Disconnections posts.
 
 ## disable-posts.already
 
-Posts are already off for this channel. Run `/enable-posts` here to turn them back on.
+Posts are already off for this channel. Run `/unmute` here to turn them back on.
 
 ## disable-posts.no-guild
 
-`/disable-posts` only works in a server channel, since that’s the only place the bot posts.
+`/mute` only works in a server channel, since that’s the only place Disconnections posts.
 
 ## disable-posts.error
 
-Couldn’t update posts just now. Try `/disable-posts` again in a moment.
+Couldn’t update posts just now. Try `/mute` again in a moment.
 
 ## share.no-account
 
@@ -145,3 +161,7 @@ Nobody played yesterday's {puzzle}
 ## recap.new-day
 
 … but today is a new day 🌞
+
+## recap.invite-aside
+
+-# (btw: [invite the bot]({url}) and the who’s playing card updates all day, plus recaps arrive at midnight automatically)

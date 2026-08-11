@@ -2,16 +2,18 @@
 // Edit the wording in src/discord-copy.md, then run `npm run gen:copy` (the build also does this).
 export const COPY = {
   "donate": "Disconnections is ad-free. Donations help cover the server costs. Any amount helps, thank you!",
-  "enable-posts.add-bot": "Add the bot and it’ll drop a nightly recap in this channel. It also extends how long it can edit the who’s playing card for.\n-# Adding it needs the Manage Server permission.",
   "enable-posts.already": "Posts are already on for this channel, so the live card and nightly recap should show up here.\n-# Not seeing them? Check the bot has View Channel, Send Messages, and Attach Files in this channel.",
   "enable-posts.reenabled": "Posts are back on for this channel. The live card and nightly recap will show up here again.",
-  "enable-posts.need-perms": "Posts are off in this channel, and turning them back on needs the Manage Channels permission. Ask a mod to run `/enable-posts` here.",
-  "install-nudge": "Add the bot to extend how long it can edit the who’s playing card, plus a nightly recap when the puzzle resets.\n-# Needs the Manage Server permission. Not an admin? Ask one to run `/enable-posts`.",
+  "enable-posts.need-perms": "Posts are off in this channel, and turning them back on needs the Manage Channels permission. Ask a mod to run `/unmute` here.",
+  "unmute.botless-on": "Posts are on in this channel. The who’s playing card shows up when someone launches, and yesterday’s recap lands on the first launch of the day.\n-# [Invite the bot]({url}) and the card updates all day, plus recaps arrive at midnight automatically.",
+  "unmute.botless-reenabled": "Posts are back on in this channel: the who’s playing card, and yesterday’s recap on the first launch of the day.\n-# [Invite the bot]({url}) and the card updates all day, plus recaps arrive at midnight automatically.",
+  "invite-bot": "Here’s the invite link for the Disconnections bot.\n-# With the bot in the server, the who’s playing card updates all day and recaps arrive at midnight automatically. Adding it needs the Manage Server permission.",
+  "help": "Disconnections commands:\n`/disconnections` launches the daily puzzle. `/connections` does the same.\n`/share` posts your result grid for today’s puzzle.\n`/donate` helps cover the server costs.\n`/invite-bot` adds the Disconnections bot to this server.\n`/mute` (mods) stops the cards and recaps in this channel.\n`/unmute` (mods) turns them back on here.\n`/help` shows this list.",
   "missing-perms": "I’m in this server but can’t post in this channel, so the card and recap won’t show up here.\nGive the Disconnections bot these permissions on this channel: View Channel, Send Messages, Attach Files.\n-# Usually it’s a private channel the bot’s role isn’t in. Check the channel’s Permissions.",
-  "disable-posts.done": "Posts are off for this channel now, no live card and no nightly recap. Run `/enable-posts` here to turn them back on.\n-# People can still play; this only mutes what the bot posts.",
-  "disable-posts.already": "Posts are already off for this channel. Run `/enable-posts` here to turn them back on.",
-  "disable-posts.no-guild": "`/disable-posts` only works in a server channel, since that’s the only place the bot posts.",
-  "disable-posts.error": "Couldn’t update posts just now. Try `/disable-posts` again in a moment.",
+  "disable-posts.done": "Posts are off for this channel now, no who’s playing card and no recaps. Run `/unmute` here to turn them back on.\n-# People can still play; this only mutes what Disconnections posts.",
+  "disable-posts.already": "Posts are already off for this channel. Run `/unmute` here to turn them back on.",
+  "disable-posts.no-guild": "`/mute` only works in a server channel, since that’s the only place Disconnections posts.",
+  "disable-posts.error": "Couldn’t update posts just now. Try `/mute` again in a moment.",
   "share.no-account": "Couldn’t read your Discord account. Try again?",
   "share.unavailable": "Sharing’s down right now. Try again in a bit.",
   "share.not-played": "You haven’t played today’s Disconnections yet. Run `/disconnections`, then `/share` your grid.",
@@ -32,5 +34,6 @@ export const COPY = {
   "recap.broken-prefix": "**{broken}-day streak broken!**",
   "recap.stumped": "Yesterday's {puzzle} stumped everyone",
   "recap.no-play": "Nobody played yesterday's {puzzle}",
-  "recap.new-day": "… but today is a new day 🌞"
+  "recap.new-day": "… but today is a new day 🌞",
+  "recap.invite-aside": "-# (btw: [invite the bot]({url}) and the who’s playing card updates all day, plus recaps arrive at midnight automatically)"
 } as const;

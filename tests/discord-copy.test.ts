@@ -20,11 +20,13 @@ describe("discord copy", () => {
     // empty message, so fail loudly here instead.
     const required = [
       "donate",
-      "enable-posts.add-bot",
       "enable-posts.already",
       "enable-posts.reenabled",
       "enable-posts.need-perms",
-      "install-nudge",
+      "unmute.botless-on",
+      "unmute.botless-reenabled",
+      "invite-bot",
+      "help",
       "missing-perms",
       "disable-posts.done",
       "disable-posts.already",
@@ -51,6 +53,7 @@ describe("discord copy", () => {
       "recap.stumped",
       "recap.no-play",
       "recap.new-day",
+      "recap.invite-aside",
     ];
     for (const key of required) {
       expect(COPY, `missing copy key: ${key}`).toHaveProperty([key]);
@@ -66,5 +69,10 @@ describe("discord copy", () => {
     expect(COPY["recap.streak"]).toContain("{streak}");
     expect(COPY["recap.streak"]).toContain("{fires}");
     expect(COPY["reply-dm.subject"]).toContain("{subject}");
+    // The invite link is filled in at send time (installUrl(appId)) — a dropped placeholder would
+    // ship a recap aside / unmute reply with no link at all.
+    expect(COPY["recap.invite-aside"]).toContain("{url}");
+    expect(COPY["unmute.botless-on"]).toContain("{url}");
+    expect(COPY["unmute.botless-reenabled"]).toContain("{url}");
   });
 });

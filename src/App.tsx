@@ -278,7 +278,7 @@ function mark(label: string): void {
 const CLOSE_ON_EXIT = true;
 
 // Guild-install ("Add to Server") link for the end-screen recap prompt — same scopes +
-// permissions as the /enable-posts button. KEEP IN SYNC with api/interactions.ts
+// permissions as the /invite-bot button. KEEP IN SYNC with api/interactions.ts
 // installUrl() and scripts/configure-install.mjs. s
 const INSTALL_PERMISSIONS = "117760";
 function installUrl(): string {
@@ -1602,7 +1602,7 @@ export function App({
   // channel copy for an honest try-later note. Render-time read is fine — the count only
   // changes across document loads. Storage-blocked (-1) stays on the mild copy.
   const wedgedClient = deadHandshake && hsRetryCount() >= 1;
-  // Open Discord's guild-install consent (the same link as /enable-posts' button) in the
+  // Open Discord's guild-install consent (the same link as /invite-bot's button) in the
   // user's browser. Embedded-only by construction: botInstalled is only ever set after a
   // Discord handshake, so the prompt never renders standalone where sdkRef is null.
   const addBot = (): void => {

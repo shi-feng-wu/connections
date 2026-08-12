@@ -231,6 +231,34 @@ export function mistakesOf(game: Game): number {
   return MAX_MISTAKES - game.mistakesLeft;
 }
 
+// The player's own leaderboard row for a date: the score and the solve time the end screen
+// shows. Looked up by user + date ONLY, never by the room the share happens in — `scores`
+// keeps ONE row per (puzzle, user), pinned to the scope where they FIRST finished, so
+// filtering by scope would miss it (the same bug the /share command hit). These can't be
+// recomputed from the replay: a server-side Game.fromGuesses has no start time, so its speed
+// bonus would be zero and its score wrong. Either field may be absent (never scored, or an
+// older row with no duration) — the card DROPS a missing stat rather than inventing one.
+export async function fetchOwnScore(
+  db: SupabaseClient,
+  userId: string,
+  date: string,
+): Promise<{ score: number | null; durationMs: number | null }> {
+  try {
+    const { data } = await db
+      .from('scores')
+      .select('score, duration_ms')
+      .eq('user_id', userId)
+      .eq('puzzle_date', date)
+      .maybeSingle();
+    return {
+      score: typeof data?.score === 'number' ? data.score : null,
+      durationMs: typeof data?.duration_ms === 'number' ? data.duration_ms : null,
+    };
+  } catch {
+    return { score: null, durationMs: null };
+  }
+}
+
 // The prefilled share-modal line for a replayed game.
 export function messageFor(puzzle: Puzzle, game: Game): string {
   return shareMessage(puzzle.id, game.status === 'won', mistakesOf(game));

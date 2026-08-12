@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   countMintedToday,
   etMidnightIso,
+  fetchOwnScore,
   loadCachedShareLink,
   MAX_SHARE_DATES_PER_DAY,
   mintQuickLink,
@@ -29,7 +30,7 @@ import {
 
 // ---- in-memory tables + the Supabase-builder shim over them (only the chains we use) ----
 type Row = Record<string, any>;
-type Store = { share_links: Row[]; progress: Row[] };
+type Store = { share_links: Row[]; progress: Row[]; scores: Row[] };
 
 class Q {
   private op: "select" | "insert" | "upsert" = "select";
@@ -97,7 +98,11 @@ class Q {
 }
 
 function mkDb(seed: Partial<Store> = {}, fail: string | null = null): { db: SupabaseClient; store: Store } {
-  const store: Store = { share_links: seed.share_links ?? [], progress: seed.progress ?? [] };
+  const store: Store = {
+    share_links: seed.share_links ?? [],
+    progress: seed.progress ?? [],
+    scores: seed.scores ?? [],
+  };
   const db = { from: (t: keyof Store) => new Q(store, t, fail) } as unknown as SupabaseClient;
   return { db, store };
 }
@@ -278,6 +283,46 @@ describe("mint quota", () => {
   });
 });
 
+// ——— the score + time the card restages from the end screen ———
+describe("own scores row", () => {
+  it("reads the player's score and solve time for the date", async () => {
+    const { db } = mkDb({
+      scores: [{ user_id: UID, puzzle_date: DATE, score: 412, duration_ms: 134_000 }],
+    });
+    expect(await fetchOwnScore(db, UID, DATE)).toEqual({ score: 412, durationMs: 134_000 });
+  });
+
+  it("finds the row wherever it was earned: it is NOT filtered by the sharing room", async () => {
+    // scores keeps one row per (puzzle, user), pinned to the scope where they first finished —
+    // filtering by the room /api/share-link runs in would miss it.
+    const { db } = mkDb({
+      scores: [
+        { user_id: UID, puzzle_date: DATE, scope_id: "g:somewhere-else", score: 300, duration_ms: 90_000 },
+      ],
+    });
+    expect((await fetchOwnScore(db, UID, DATE)).score).toBe(300);
+  });
+
+  it("returns nulls (never zeros) when the player has no scored row", async () => {
+    const { db } = mkDb();
+    expect(await fetchOwnScore(db, UID, DATE)).toEqual({ score: null, durationMs: null });
+  });
+
+  it("drops just the time on an older row that never recorded one", async () => {
+    const { db } = mkDb({
+      scores: [{ user_id: UID, puzzle_date: DATE, score: 250, duration_ms: null }],
+    });
+    expect(await fetchOwnScore(db, UID, DATE)).toEqual({ score: 250, durationMs: null });
+  });
+
+  it("never reads another player's row", async () => {
+    const { db } = mkDb({
+      scores: [{ user_id: "999", puzzle_date: DATE, score: 900, duration_ms: 10_000 }],
+    });
+    expect(await fetchOwnScore(db, UID, DATE)).toEqual({ score: null, durationMs: null });
+  });
+});
+
 // ——— the Discord POST: the contract we can't reach without a live user token ———
 describe("quick-links POST", () => {
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
@@ -397,11 +442,13 @@ describe("POST /api/share-link", () => {
     const { db, store } = mkDb();
     route = { db, store, user: { id: UID, name: "Alice" } };
     process.env.VITE_DISCORD_CLIENT_ID = "app1";
+    // A fresh Response per call: a body stream can only be read once, so a shared instance
+    // would make every mint after the first look like "no link_id in response".
     vi.stubGlobal(
       "fetch",
-      vi.fn<typeof fetch>().mockResolvedValue(
-        new Response(JSON.stringify({ link_id: "lnk_new" }), { status: 200 }),
-      ),
+      vi
+        .fn<typeof fetch>()
+        .mockImplementation(async () => new Response(JSON.stringify({ link_id: "lnk_new" }), { status: 200 })),
     );
   });
   afterEach(() => vi.restoreAllMocks());
@@ -427,6 +474,29 @@ describe("POST /api/share-link", () => {
     expect(r.body.link_id).toBe("lnk_new");
     expect(r.body.message).toBe("Disconnections #1170: solved with no mistakes");
     expect(r.body.url).toContain(`referrer_id=${UID}`);
+  });
+
+  it("puts the caller's own score and solve time on the card", async () => {
+    // The PNG is opaque to a test, so the proof is that seeding the scores row changes the
+    // bytes the route hands Discord: without this plumbing the two renders would be identical.
+    const image = async (): Promise<string> => {
+      const r = await call({ date: DATE, accessToken: "t" });
+      expect(r.body.ok).toBe(true);
+      return JSON.parse(String((globalThis.fetch as any).mock.calls[0][1].body)).image;
+    };
+    route.store.progress.push({ user_id: UID, puzzle_date: DATE, guesses: WON, hints: [] });
+    const bare = await image();
+
+    const made = mkDb();
+    route.db = made.db;
+    route.store = made.store;
+    (globalThis.fetch as any).mockClear();
+    route.store.progress.push({ user_id: UID, puzzle_date: DATE, guesses: WON, hints: [] });
+    route.store.scores.push({ user_id: UID, puzzle_date: DATE, score: 412, duration_ms: 134_000 });
+    const scored = await image();
+
+    expect(scored).not.toBe(bare);
+    expect(scored.startsWith("data:image/png;base64,")).toBe(true);
   });
 
   it("refuses to mint a game the caller never played", async () => {

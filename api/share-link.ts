@@ -7,6 +7,7 @@ import { isValidDate, todayET } from './_puzzles.js';
 import {
   countMintedToday,
   etMidnightIso,
+  fetchOwnScore,
   fetchStreak,
   loadCachedShareLink,
   MAX_SHARE_DATES_PER_DAY,
@@ -104,13 +105,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
     const { puzzle, game } = replay;
 
+    // The card restages the end screen, so it needs the two numbers the end screen shows that
+    // a replay alone can't produce: the scored points and the solve time. Both are read from
+    // the player's own scores row, and both are best-effort — the card drops whichever is
+    // missing instead of rendering a placeholder.
+    const [{ score, durationMs }, streak] = await Promise.all([
+      fetchOwnScore(db, user.id, date),
+      fetchStreak(db, user.id),
+    ]);
     const png = await renderShareCard({
       puzzleNo: puzzle.id,
       puzzleDate: date,
       grid: game.history,
       solved: game.status === 'won',
       mistakes: mistakesOf(game),
-      streak: await fetchStreak(db, user.id),
+      streak,
+      score,
+      durationMs,
     });
 
     const minted = await mintQuickLink(appId, accessToken, {

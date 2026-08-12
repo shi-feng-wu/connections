@@ -21,7 +21,7 @@
 
 ### Added
 
-- Share your result as a card. Finish the daily, hit the Share button, and pick a chat: your grid goes out as a card with a Play button under it, so anyone who sees it can jump straight into today's puzzle. Still spoiler-free, just colored squares and your mistake count.
+- Share your result as a card. Finish the daily, hit the Share button, and pick a chat: your end screen goes out as a card with a Play button under it, so anyone who sees it can jump straight into today's puzzle. Same grid, dots, time, score and streak you see when you finish, and just as spoiler-free: colored squares only, no words.
 
 ## v2.1.0 — Aug 11, 2026
 

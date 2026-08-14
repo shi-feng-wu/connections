@@ -509,6 +509,7 @@ export function GameView({
   onFinish,
   onShareLink,
   onCopyImage,
+  onCopyLink,
   chat,
   onOpenExternal,
   initialRevealed,
@@ -540,6 +541,9 @@ export function GameView({
   // Copy the finished result as a PNG (the share card's image) to the clipboard. Same gate
   // as onShareLink — it's minted from the server's record of this player's daily.
   onCopyImage?: () => Promise<boolean>;
+  // Copy the PERMANENT url of that same card (disconnections.app/i/<token>.png) as text. Gated
+  // like onShareLink, but without Copy image's desktop-app exemption — text writes work there.
+  onCopyLink?: () => Promise<boolean>;
   // The player↔dev chat (the footer's "Feedback" page): its bound api plus the unread/isDev
   // badge state. Omitted by the dev preview / landing, where the page falls back to a
   // local-only form.
@@ -667,6 +671,7 @@ export function GameView({
                     }}
                     onShareLink={onShareLink}
                     onCopyImage={onCopyImage}
+                    onCopyLink={onCopyLink}
                     // The same opener the info footer uses — the board's "Post on X" row
                     // just needs a way out of the iframe, not its own plumbing.
                     onExternal={onOpenExternal}

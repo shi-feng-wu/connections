@@ -5,6 +5,7 @@ import {
   Eraser,
   Image as ImageIcon,
   Lightbulb,
+  Link as LinkIcon,
   LoaderCircle,
   Share2,
   Shuffle as ShuffleIcon,
@@ -249,6 +250,7 @@ function EndSummary({
   autoOpen,
   onShareLink,
   onCopyImage,
+  onCopyLink,
   onExternal,
 }: {
   game: Game;
@@ -265,6 +267,11 @@ function EndSummary({
   // failed. Gated like onShareLink — the image is minted from the server's record — and
   // the row additionally needs a clipboard that takes images. See App.tsx copyResultImage.
   onCopyImage?: () => Promise<boolean>;
+  // Put the PERMANENT url of that same card on the clipboard, as text — a link that re-renders
+  // the result forever, for the chats and pages a pasted image can't live in. Gated like
+  // onShareLink; unlike Copy image it needs nothing of the clipboard but text, so it's the row
+  // that still works in the desktop app. See App.tsx copyResultLink.
+  onCopyLink?: () => Promise<boolean>;
   // Open a URL outside the app (the "Post on X" row). Embedded it must route through the
   // Discord SDK's leave-app consent, so the footer never calls window.open itself.
   onExternal?: (url: string) => void;
@@ -295,7 +302,8 @@ function EndSummary({
   // NO native-sheet ("Share…") row: navigator.share is untrustworthy in the one place this
   // menu ships (the Discord iframe) — on some mobile WebViews the function EXISTS but the
   // call is killed by the iframe's permissions policy, so a presence check shows a row that
-  // then does nothing (owner-tested, 2026-08-14). Copy image / Copy text are the way out.
+  // then does nothing (owner-tested, 2026-08-14). Copy image / Copy link / Copy text are the
+  // way out.
   // Can the clipboard hold a PNG? Safari/Chrome can, Firefox's write() is behind a flag,
   // and older webviews have no ClipboardItem at all — where it's missing the row is a dead
   // end, so it doesn't render.
@@ -396,6 +404,16 @@ function EndSummary({
     if (!onCopyImage) return;
     setMenuOpen(false);
     void onCopyImage().then((ok) => flashMsg(ok ? "Copied!" : "Couldn’t copy"));
+  };
+
+  // Copy the permanent link to the result card. Text, not bytes, so there's no clipboard
+  // capability to test for and no gesture to preserve — this one can await its round-trip.
+  // Same fire-and-flash shape as Copy image otherwise: the menu closes on the tap and the chip
+  // reports what happened.
+  const onCopyLinkRow = (): void => {
+    if (!onCopyLink) return;
+    setMenuOpen(false);
+    void onCopyLink().then((ok) => flashMsg(ok ? "Copied!" : "Couldn’t copy"));
   };
 
   // Copy the grid as text — the fallback that works everywhere, so it's the one row with
@@ -580,9 +598,10 @@ function EndSummary({
             {/* SHARE MENU — the breakdown popover's twin (same card, same pop, same
                 dismiss), anchored above the button. Copies lead (they resolve instantly,
                 no round-trip, no leaving the app), then the destinations. Rows only appear
-                where they'd actually work: Discord's share modal and the result image need
-                the Activity and a server record, X needs a way out of the iframe. Copy
-                emoji grid is the floor — it works everywhere, so the menu is never empty.
+                where they'd actually work: Discord's share modal, the result image, and the
+                permanent card link all need the Activity and a server record, X needs a way
+                out of the iframe. Copy emoji grid is the floor — it works everywhere, so the
+                menu is never empty.
                 Mounted always; .sb-pop-open drives the pop (see index.css), so closed rows
                 leave the tab order by hand. */}
             <div
@@ -608,6 +627,14 @@ function EndSummary({
                 tabbable={menu}
                 onSelect={onCopyText}
               />
+              {onCopyLink && (
+                <ShareRow
+                  label="Copy image link"
+                  icon={<LinkIcon size={16} strokeWidth={2.5} aria-hidden />}
+                  tabbable={menu}
+                  onSelect={onCopyLinkRow}
+                />
+              )}
               {onShareLink && (
                 <ShareRow
                   label="Share to Discord"
@@ -951,6 +978,7 @@ export function Board({
   onFinish,
   onShareLink,
   onCopyImage,
+  onCopyLink,
   onExternal,
   initialRevealed = [],
 }: {
@@ -967,9 +995,11 @@ export function Board({
   // Post the finished result to Discord as a share card. Forwarded to the end footer's
   // share menu; absent outside the Activity / off the daily, where that row is dropped.
   onShareLink?: () => Promise<ShareOutcome>;
-  // Put the result image on the clipboard (gated like onShareLink) and open a URL outside
-  // the app — the end footer's other two share routes. See EndSummary.
+  // Put the result image on the clipboard, copy the permanent link to that same card (both
+  // gated like onShareLink), and open a URL outside the app — the end footer's other share
+  // routes. See EndSummary.
   onCopyImage?: () => Promise<boolean>;
+  onCopyLink?: () => Promise<boolean>;
   onExternal?: (url: string) => void;
   // seeds revealed-on-loss bars when rehydrating a finished game (preview harness).
   initialRevealed?: number[];
@@ -1882,6 +1912,7 @@ export function Board({
         autoOpen={freshFinish.current}
         onShareLink={onShareLink}
         onCopyImage={onCopyImage}
+        onCopyLink={onCopyLink}
         onExternal={onExternal}
       />
     );

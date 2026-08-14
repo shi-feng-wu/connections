@@ -1,8 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { COPY } from '../src/discord-copy.js';
 import { fill } from '../src/copy-util.js';
 import { Game, MAX_MISTAKES } from '../src/game.js';
-import { fetchPuzzle, type Puzzle } from './_puzzles.js';
+import { fetchPuzzle, isValidDate, type Puzzle } from './_puzzles.js';
 import { MAX_GUESSES } from './_scoring.js';
 
 // Shared plumbing for the SHARE-CARD LOOP: minting a Discord quick link out of a player's
@@ -51,6 +52,65 @@ export function parseShareCustomId(customId: unknown): { userId: string; date: s
   if (typeof customId !== 'string') return null;
   const m = /^(\d{5,25})\/(\d{4})(\d{2})(\d{2})$/.exec(customId);
   return m ? { userId: m[1], date: `${m[2]}-${m[3]}-${m[4]}` } : null;
+}
+
+// ——— PERMANENT CARD URLS: the token behind https://disconnections.app/i/<token>.png ———
+//
+// Every other way a card leaves this app hands out a link with a clock on it. Discord's
+// quick-link image and the share-moment attachment are both SIGNED CDN urls that expire, so a
+// card pasted somewhere durable — a forum, a group chat someone scrolls back through, a blog —
+// eventually rots into a broken image. This one doesn't: the token names a (player, date), and
+// /api/share-png RE-RENDERS the card from the append-only record on every request. A finished
+// result is immutable, so the same token always draws the same card, for as long as the app is
+// up.
+//
+// NO TABLE, DELIBERATELY. The token IS the record: `<userId>.<yyyymmdd>.<sig>`, where sig is a
+// truncated HMAC over the pair. That's what makes the url non-enumerable without paying for a
+// row (and a write, on the end screen's critical path) per share: you can't mint a link to
+// someone else's result by editing an id or walking dates out of a link you were handed.
+//
+// INTERNAL_SECRET is the signing key ON PURPOSE. It's a server-only secret that never leaves a
+// function and is already set in production, which is the whole requirement — the same shape as
+// SESSION_SECRET in _session.ts. Its other job (authenticating our function-to-function
+// self-calls) is the same job in different clothes: prove this came from us.
+//
+// 20 hex chars = 80 bits of signature. Short enough to keep the url pasteable, hopelessly far
+// past what anyone could grind against a route that renders a PNG per attempt.
+const SHARE_PNG_SIG_LEN = 20;
+const SHARE_PNG_TOKEN_RE = new RegExp(
+  `^(\\d{5,25})\\.(\\d{4})(\\d{2})(\\d{2})\\.([0-9a-f]{${SHARE_PNG_SIG_LEN}})$`,
+);
+
+// Read at call time, not at module load: a route can be imported before the env is in place,
+// and the tests toggle it between assertions.
+const sharePngSig = (userId: string, date: string): string =>
+  createHmac('sha256', process.env.INTERNAL_SECRET ?? '')
+    .update(`share-png:${userId}:${date}`)
+    .digest('hex')
+    .slice(0, SHARE_PNG_SIG_LEN);
+
+// The token for one player's result on one date. Signed over the yyyy-mm-dd date (the form the
+// rest of the server speaks); the token carries the compact yyyymmdd, like shareCustomId.
+export function sharePngToken(userId: string, date: string): string {
+  return `${userId}.${date.replace(/-/g, '')}.${sharePngSig(userId, date)}`;
+}
+
+// Inverse of sharePngToken. Null for anything that isn't one of ours — a wrong shape, a date
+// that isn't a real puzzle day, or a signature that doesn't re-derive. The comparison is
+// constant-time over the raw signature bytes, so a forger learns nothing from how long a 404
+// took. An unset INTERNAL_SECRET can't verify anything, so it refuses rather than signing with
+// the empty string (the caller answers 503 — see /api/share-png).
+export function parseSharePngToken(token: unknown): { userId: string; date: string } | null {
+  if (!process.env.INTERNAL_SECRET || typeof token !== 'string') return null;
+  const m = SHARE_PNG_TOKEN_RE.exec(token);
+  if (!m) return null;
+  const userId = m[1];
+  const date = `${m[2]}-${m[3]}-${m[4]}`;
+  if (!isValidDate(date)) return null;
+  const sig = Buffer.from(m[5], 'hex');
+  const expected = Buffer.from(sharePngSig(userId, date), 'hex');
+  if (sig.length !== expected.length || !timingSafeEqual(sig, expected)) return null;
+  return { userId, date };
 }
 
 // The result phrase, e.g. "solved with 1 mistake". Counts and outcomes only — never a word, a

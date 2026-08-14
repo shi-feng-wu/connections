@@ -875,6 +875,39 @@ export function App({
     }
   }
 
+  // The third way out, and the only one that OUTLIVES the share: a permanent url for this
+  // result's card. /api/share-url answers with https://disconnections.app/i/<token>.png, which
+  // re-renders the same card from this player's own record on every request — where Discord's
+  // own image links (the quick link's, the share-moment attachment's) are signed and expire, so
+  // a card pasted somewhere durable eventually rots into a broken image.
+  //
+  // Plain TEXT on the clipboard, which is the whole reason this row exists next to Copy image:
+  // the desktop app denies image clipboard writes but not text ones (see the gates at the
+  // GameView callsite), so this is the desktop's copy story — and it works in the one place a
+  // PNG can't go anyway, a chat that only takes links.
+  //
+  // No gesture gymnastics either: writeText survives an await where an image write doesn't, and
+  // there's no render on the server side of this call, so it's the plain fetch-then-copy shape
+  // shareResult's clipboard fallback already uses.
+  async function copyResultLink(): Promise<boolean> {
+    const g = gameRef.current;
+    const accessToken = accessTokenRef.current;
+    if (!g || !accessToken) return false;
+    try {
+      const r = await fetch("/api/share-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: g.puzzle.date, accessToken }),
+        signal: timeoutSignal(20_000),
+      });
+      const j = (await r.json()) as { ok?: boolean; url?: string };
+      if (!j?.ok || !j.url) return false;
+      return await copyToClipboard(j.url);
+    } catch {
+      return false;
+    }
+  }
+
   // Record how this player arrived: Discord hands the client the sharer's id (referrerId)
   // and whatever we stamped on the link at mint time (customId) when the Activity is opened
   // from a shared quick link. Fire-and-forget at boot, first-writer-wins server-side, no
@@ -1875,6 +1908,11 @@ export function App({
             ? copyResultImage
             : undefined
         }
+        // Copy link carries NO Electron gate, deliberately: it writes TEXT, and text writes are
+        // the exemption that keeps Copy emoji grid working in the desktop app. So this row is
+        // the desktop's copy story — the one way to put a picture of the result into another
+        // chat there — and everywhere else it's the link that never expires.
+        onCopyLink={isEmbedded && isDailyRef.current ? copyResultLink : undefined}
         chat={chatBundle}
         onOpenExternal={openExternal}
         initialRevealed={revealedLevelsOf(gameRef.current)}

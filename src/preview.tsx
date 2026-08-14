@@ -1094,6 +1094,7 @@ function State({
         // Discord-share reports "copied", copy-image reports success, external no-ops.
         onShareLink={() => Promise.resolve("copied" as const)}
         onCopyImage={() => Promise.resolve(true)}
+        onCopyLink={() => Promise.resolve(true)}
         onOpenExternal={noop}
       />
     </section>

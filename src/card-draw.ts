@@ -79,7 +79,6 @@ const RING_LIVE = ZINC_600; // #52525b — still playing / no guesses yet
 const RING_WON = EMERALD; // a solve earns an emerald avatar ring
 const RING_LOST = ZINC_700; // #3f3f46 — out of guesses
 const TROPHY_GOLD = CAT_COLOR[0]; // ~gold; evokes the 🏆 (a color emoji can't render server-side)
-const LOST_DIM = 0.7; // a lost player's avatar/bars fade back
 
 // Identity palette + hashing, mirrored from src/roster.tsx (deliberately NOT the
 // category colors, so an avatar's color never reads as a solved group).
@@ -117,10 +116,10 @@ function initials(name: string): string {
 const PAD_X = 30;
 const PAD_BOTTOM = 30; // matches PAD_X (sides) and NP_PAD_TOP — uniform inset all around
 
-// The "who's playing" card shares the recap's brand header (a four-color mark + "Now
-// playing" eyebrow over the "Disconnections" wordmark and a "Puzzle # · date" subline,
-// with the Playing / Solved counts anchored right and a full-width rule beneath). The
-// header metrics live with the recap (RC_* constants); tiles start below its rule.
+// The "who's playing" card shares the recap's brand header (the "Disconnections"
+// wordmark over a "Puzzle #N · date" subline, Playing / Solved counts anchored right,
+// a full-width rule beneath — no eyebrow, no emblem). The header metrics live with the
+// recap (RC_* constants); tiles start below its rule.
 const HEADER_GAP = 48; // min gap between the header's left block and its right stats
 // GRID_TOP (the first tile's top edge) is derived from the header rule (RC_RULE_Y) and so
 // lives with the RC_* header metrics below — keeping it a literal here let it silently
@@ -204,14 +203,13 @@ function fmtDateFull(s?: string): string {
   const m = s ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(s) : null;
   return m ? `${MON_FULL[+m[2] - 1]} ${+m[3]}, ${m[1]}` : "";
 }
-// The card's eyebrow: "NOW PLAYING · #1195" — the puzzle number rides up beside the
-// label in the new design (the subline below carries the date).
-function nowPlayingEyebrow(opts: CardOpts): string {
-  return opts.puzzleNo ? `NOW PLAYING · #${opts.puzzleNo}` : "NOW PLAYING";
-}
-// The card's subline: the full puzzle date ("June 26, 2026"), or "" when unknown.
+// The card's subline: "Puzzle #1245 · August 14, 2026" — the recap subline's shape. The
+// old "NOW PLAYING" eyebrow is gone (owner call, 2026-08-14), so the puzzle number rides
+// here beside the date instead.
 function nowPlayingSubline(opts: CardOpts): string {
-  return fmtDateFull(opts.puzzleDate);
+  const date = fmtDateFull(opts.puzzleDate);
+  if (!opts.puzzleNo) return date;
+  return date ? `Puzzle #${opts.puzzleNo} · ${date}` : `Puzzle #${opts.puzzleNo}`;
 }
 // The header's right-anchored stats: how many players are in the room, and how many of
 // them have solved today (Solved is accented emerald, the app's "solved" color).
@@ -398,10 +396,9 @@ export function cardLayout(
 
   // The header (left block + the right-anchored stats) can be wider than a single
   // column (e.g. solo), so let it set the card's floor.
-  const eyebrow = nowPlayingEyebrow(opts);
   const subline = nowPlayingSubline(opts);
   const stats = nowPlayingStats(players);
-  const leftW = brandHeaderLeftWidth(measure, eyebrow, subline, false);
+  const leftW = brandHeaderLeftWidth(measure, "", subline);
   const headerW = leftW + HEADER_GAP + statsClusterWidth(measure, stats);
 
   const gridW = cols * TILE + (cols - 1) * GRID_GAP;
@@ -428,18 +425,17 @@ export async function drawRoster(
   // Rounded near-black card background (borderless — the radius alone frames it).
   fillCardBg(ctx, W, height);
 
-  // ---- header (shared with the recap): "Now playing" eyebrow + brand mark over the
-  // wordmark and a "Puzzle # · date" subline, with the Playing / Solved counts anchored
-  // to the card's right edge, then a full-width rule above the tiles ----
+  // ---- header (shared with the recap): the wordmark over a "Puzzle #N · date"
+  // subline, with the Playing / Solved counts anchored to the card's right edge, then a
+  // full-width rule above the tiles ----
   ctx.save();
   ctx.translate(0, HEAD_DY); // lift the shared header to the live card's tighter top inset
   drawBrandHeader(
     ctx,
     {
-      eyebrow: nowPlayingEyebrow(opts),
+      eyebrow: "", // no NOW PLAYING line — the wordmark leads, the subline carries the number
       subline: nowPlayingSubline(opts),
       stats: nowPlayingStats(players),
-      mark: false, // the new live-card design drops the four-square emblem
     },
     PAD_X,
     W - PAD_X,
@@ -507,10 +503,19 @@ export async function drawRoster(
     const avCx = px + TILE_PAD + AV_RING;
     const avCy = py + TILE_PAD + AV_RING;
     const ringColor = isWon ? RING_WON : isLost ? RING_LOST : RING_LIVE;
-    if (isLost) ctx.save();
-    if (isLost) ctx.globalAlpha = LOST_DIM;
     drawAvatar(ctx, p, images[i], avCx, avCy, AV, ringColor);
-    if (isLost) ctx.restore();
+    if (isLost) {
+      // Fade a lost avatar back with a NEUTRAL SCRIM, not globalAlpha: a translucent photo
+      // lets the identity-color disc underneath bleed through and tints the face (it read
+      // as a red overlay on red-hashed players). zinc-950 at 30% is the same visual dim,
+      // hue-true.
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(avCx, avCy, AV / 2 + 0.5, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(9,9,11,0.3)";
+      ctx.fill();
+      ctx.restore();
+    }
 
     // ---- name + status label (status icon/time live in the bottom row now) ----
     const idX = px + TILE_PAD + HEAD_H + HEAD_GAP;
@@ -667,11 +672,8 @@ const RC_COL_GAP = 26;
 const RC_W = RC_PAD_X * 2 + RC_RESULTS_W + RC_COL_GAP + RC_STAND_W; // 994
 
 // header rhythm (baselines from canvas top)
-const RC_MARK = 9; // brand-mark square
-const RC_MARK_GAP = 3;
-const RC_MARK_TO_TEXT = 10;
 const RC_EYE_SIZE = 11;
-const RC_EYE_BASE = RC_PAD_TOP + RC_MARK; // 55
+const RC_EYE_BASE = RC_PAD_TOP + 9; // 55
 const RC_TITLE_SIZE = 38;
 const RC_TITLE_BASE = RC_PAD_TOP + 52; // 98
 const RC_SUB_SIZE = 12.5;
@@ -693,7 +695,10 @@ const RC_RULE_Y = RC_SUB_BASE + 18; // 144 — the full-width divider under the 
 // (drawRoster translates by HEAD_DY) so the top inset matches the sides, and move the tiles
 // up with it.
 const NP_PAD_TOP = 30; // live-card top inset, ~equal to PAD_X (sides)
-const HEAD_DY = NP_PAD_TOP - RC_PAD_TOP; // -16 — how far the live-card header is lifted
+// -40: the -16 that equalises the top inset, plus 24 for the dropped eyebrow — with no
+// "NOW PLAYING" line above it, the wordmark rises into that slot so its cap height sits
+// right on the uniform 30px inset (the puzzle number lives in the subline now).
+const HEAD_DY = NP_PAD_TOP - RC_PAD_TOP - 24;
 // The "who's playing" tiles start 20px below the (lifted) rule. Derived from RC_RULE_Y + the
 // lift (not a literal) so the breathing room tracks the header automatically.
 const GRID_TOP = RC_RULE_Y + HEAD_DY + 20; // 148
@@ -733,7 +738,7 @@ const RC_WL = "#e4e4e7";
 // channel trailing dimmer with a middot that matches the subline separators and a quiet
 // brand-blue hash. Truncates so it stays clear of the right-anchored stat cluster.
 const RC_ROOM_SEP = "#3f3f46"; // zinc-700, same as the subline middots
-const RC_ROOM_HASH = "#6aa0e0"; // the brand mark's blue — a nod to a Discord channel
+const RC_ROOM_HASH = ZINC_500; // the hash matches the channel text — no brand blue (owner call, 2026-08-14)
 const RC_EYE_SERVER_MAX = 210; // px cap on the server name before the channel
 const RC_EYE_MAX_RIGHT = 470; // px from leftX the room eyebrow may reach before truncating
 
@@ -767,14 +772,7 @@ type BrandHeaderOpts = {
   stats: BrandStat[];
   room?: Room | null;
   titleSuffix?: string | null;
-  // The four-color brand mark before the eyebrow. Defaults on (the recap keeps it); the
-  // live card sets it false — the new design leans on the serif wordmark alone, no emblem.
-  mark?: boolean;
 };
-
-// brand marks span 4·(mark+gap) − the trailing gap; then a fixed gap to the eyebrow text
-const RC_EYE_TEXT_X =
-  4 * (RC_MARK + RC_MARK_GAP) - RC_MARK_GAP + RC_MARK_TO_TEXT; // 55
 
 // One right-aligned stat (number + optional unit on a shared baseline, label beneath).
 // Returns the cluster's left edge so the caller can place a divider / the next stat.
@@ -863,12 +861,10 @@ function brandHeaderLeftWidth(
   ctx: CanvasRenderingContext2D,
   eyebrow: string,
   subline: string,
-  mark = true,
 ): number {
   ctx.font = `700 ${RC_EYE_SIZE}px "Libre Franklin"`;
   ctx.letterSpacing = "1.8px";
-  // Without the brand mark the eyebrow sits flush-left (offset 0), like the wordmark.
-  const eyeW = (mark ? RC_EYE_TEXT_X : 0) + ctx.measureText(eyebrow).width;
+  const eyeW = ctx.measureText(eyebrow).width;
   ctx.letterSpacing = "0px";
   ctx.font = `700 ${RC_TITLE_SIZE}px Newsreader`;
   ctx.letterSpacing = "-0.76px";
@@ -889,7 +885,7 @@ function drawRoomEyebrow(
 ): void {
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
-  let x = leftX + RC_EYE_TEXT_X;
+  let x = leftX; // flush-left with the wordmark — the four-square emblem is gone
   const maxRight = leftX + RC_EYE_MAX_RIGHT;
 
   ctx.font = `700 ${RC_EYE_SIZE}px "Libre Franklin"`;
@@ -927,16 +923,6 @@ function drawBrandHeader(
   leftX: number,
   rightX: number,
 ): void {
-  const showMark = opts.mark !== false;
-  if (showMark) {
-    let mx = leftX;
-    for (let c = 0; c < 4; c++) {
-      roundRect(ctx, mx, RC_EYE_BASE - RC_MARK, RC_MARK, RC_MARK, 2.5);
-      ctx.fillStyle = CAT_COLOR[c];
-      ctx.fill();
-      mx += RC_MARK + RC_MARK_GAP;
-    }
-  }
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   if (opts.room) {
@@ -945,8 +931,7 @@ function drawBrandHeader(
     ctx.fillStyle = ZINC_500;
     ctx.font = `700 ${RC_EYE_SIZE}px "Libre Franklin"`;
     ctx.letterSpacing = "1.8px"; // 0.16em of 11px
-    // Eyebrow sits past the mark when it's shown, else flush-left with the wordmark.
-    ctx.fillText(opts.eyebrow, leftX + (showMark ? RC_EYE_TEXT_X : 0), RC_EYE_BASE);
+    ctx.fillText(opts.eyebrow, leftX, RC_EYE_BASE);
     ctx.letterSpacing = "0px";
   }
 

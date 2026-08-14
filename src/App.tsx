@@ -729,19 +729,25 @@ export function App({
   }
 
   // ——— the share loop ———
-  // Turn a finished daily into a Discord SHARE CARD and hand it to Discord's own share
-  // modal. The card is minted server-side from this player's own committed record
-  // (/api/share-link; the client never supplies a grid), which answers with a quick-link
-  // id. discordSdk.commands.shareLink then opens the picker, and whatever chat they choose
-  // gets the card: the spoiler-free grid image, a line of copy, and a Play button that
-  // opens the Activity for everyone who sees it. That Play button is the entire loop —
-  // it's the only free compounding acquisition surface Discord gives an Activity, and
-  // Discord stamps the sharer onto the link so /api/referral can count what it brings back.
+  // Turn a finished daily into a shareable result and hand it to Discord's own picker. Two
+  // paths, in this order (owner call, 2026-08-14):
   //
-  // Fallbacks, in order: a host whose client can't run the shareLink RPC (an older Discord
-  // build, the dev standalone) gets the same URL on the clipboard instead; if even that
-  // fails, the footer says so. A dismissed share modal is NOT a failure — the player saw
-  // the picker and backed out, and copying behind their back would be wrong.
+  //   1. THE PLAIN PICTURE, preferred. /api/share-moment renders the portrait card from this
+  //      player's own committed record (the client never supplies a grid), uploads it to
+  //      Discord, and answers with the ephemeral CDN url that
+  //      discordSdk.commands.openShareMomentDialog takes. Whatever chat they pick gets the
+  //      image as their own message — no embed frame, no our-voice copy, no button. It reads
+  //      like a person sharing a screenshot, which is the thing people actually forward.
+  //   2. THE QUICK LINK, fallback. The v1 path: /api/share-link mints a 30-day link and
+  //      discordSdk.commands.shareLink posts it as a rich embed with a Play button. Kept
+  //      because clients that predate the share-moment RPC still need a working Share, and
+  //      because the quick link is the only path Discord stamps with the sharer — referral
+  //      attribution (/api/referral) survives there and nowhere else.
+  //
+  // Fallbacks past that: a host that can run neither RPC (the dev standalone) gets the quick
+  // link's URL on the clipboard instead; if even that fails, the footer says so. A dismissed
+  // picker is NOT a failure — the player saw it and backed out, and copying behind their back
+  // would be wrong.
   async function shareResult(): Promise<ShareOutcome> {
     const accessToken = accessTokenRef.current;
     const g = gameRef.current;
@@ -750,28 +756,64 @@ export function App({
     // choreography plays, so a Share tapped the instant the footer appears can replay a record
     // that doesn't contain it yet ("not-finished"). Flush the chain, then retry once for any
     // residual write lag — this is the feature's first impression, so it must not lose to a
-    // fast finger.
+    // fast finger. Both share routes replay the SAME record, so both post through here.
     await commitChain.current;
-    const post = async (): Promise<{ ok?: boolean; link_id?: string; url?: string; message?: string; reason?: string } | null> => {
-      try {
-        const r = await fetch("/api/share-link", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ date: g.puzzle.date, accessToken }),
-          signal: timeoutSignal(20_000),
-        });
-        return (await r.json()) as { ok?: boolean };
-      } catch {
-        return null;
-      }
-    };
-    let minted = await post();
-    if (minted?.reason === "not-finished") {
+    const post = async <T extends { ok?: boolean; reason?: string }>(
+      path: string,
+    ): Promise<T | null> => {
+      const once = async (): Promise<T | null> => {
+        try {
+          const r = await fetch(path, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ date: g.puzzle.date, accessToken }),
+            signal: timeoutSignal(20_000),
+          });
+          return (await r.json()) as T;
+        } catch {
+          return null;
+        }
+      };
+      const first = await once();
+      if (first?.reason !== "not-finished") return first;
       await new Promise((res) => setTimeout(res, 700));
-      minted = await post();
-    }
-    if (!minted?.ok || !minted.link_id || !minted.url) return "failed";
+      return once();
+    };
+
+    // 1. The picture. The RPC check comes BEFORE the POST: on a client without the dialog the
+    // upload would be spent for nothing, and the quick link is one round trip away anyway.
     const sdk = sdkRef.current;
+    if (typeof sdk?.commands?.openShareMomentDialog === "function") {
+      const moment = await post<{ ok?: boolean; url?: string; reason?: string }>(
+        "/api/share-moment",
+      );
+      if (moment?.ok && moment.url) {
+        try {
+          await sdk.commands.openShareMomentDialog({ mediaUrl: moment.url });
+          // Resolved at all = the picker ran. There is no message to prefill — the picture IS
+          // the message.
+          return "shared";
+        } catch (e) {
+          // A rejection carrying an RPC code is the CLIENT refusing the command (unknown
+          // command, rejected payload, missing permission): the dialog never opened, so drop
+          // to the quick link. A codeless rejection is the player closing a dialog that WAS on
+          // screen — they shared or chose not to, and opening a second, different share UI
+          // behind them would be worse than doing nothing.
+          if (typeof (e as { code?: unknown })?.code !== "number") return "shared";
+        }
+      }
+      // {ok:false} (unfinished, credentials missing) or a dead request: fall through.
+    }
+
+    // 2. The quick link, unchanged: mint, native share modal, clipboard behind that.
+    const minted = await post<{
+      ok?: boolean;
+      link_id?: string;
+      url?: string;
+      message?: string;
+      reason?: string;
+    }>("/api/share-link");
+    if (!minted?.ok || !minted.link_id || !minted.url) return "failed";
     try {
       if (typeof sdk?.commands?.shareLink === "function") {
         await sdk.commands.shareLink({

@@ -42,12 +42,15 @@ export const SHARE_CARD_W = 480 + 2 * PAD;
 export const SHARE_CARD_H = 720;
 
 // The QUICK-LINK HERO frame. Discord scales a hero image to fill the embed's width and
-// CROPS its height to a fixed wide box (observed live 2026-08-14: the portrait card showed
-// only its middle 44% — the mid-grid slice — header and stats gone). So the mint ships the
-// card composited centred on this 43:24 canvas, dark margins either side; the clipboard
-// copy keeps the bare portrait, which stands alone where it's pasted.
+// CROPS its height — and the crop box is NOT one ratio: desktop showed ~43:24, mobile a
+// ~2.8:1 letterbox (both observed live 2026-08-14; each time only the image's vertical
+// middle survived). So the hero is composed like a COVER PHOTO, not a document: everything
+// lives in a central horizontal band (HERO_BAND tall, centred), and the dark margins above
+// and below are sacrificial crop allowance. Content is safe through a 3:1 window. The
+// clipboard copy keeps the bare portrait, which stands alone where it's pasted.
 export const SHARE_HERO_W = 1290;
 export const SHARE_HERO_H = 720;
+export const HERO_BAND = 420; // the crop-safe zone: SHARE_HERO_W / 3 ≈ 430, minus rounding
 
 // ---- palette (the app's own tokens: brand.css / game.ts LEVELS / season.tsx) ----
 const BG = '#09090b'; // zinc-950 — the card surface
@@ -458,31 +461,67 @@ function drawCard(ctx: CanvasRenderingContext2D, d: ShareCardData): void {
   });
 }
 
+// The hero restages the portrait's pieces SIDE BY SIDE inside the crop-safe band: the
+// header lockup + stat row on the left (drawHeader/drawStats translated into the band —
+// their own constants are portrait-anchored), the guess grid on the right. No colophon:
+// the embed itself carries the app name, description and Play button.
+const HERO_COL_DX = 42; // shifts the 480 column from portrait x (48) to hero x (90)
+const HERO_HEADER_DY = 227; // portrait header (rule at 105) → rule at 332, upper band
+const HERO_STATS_DY = -186; // portrait stat row (cy 602) → cy 416, lower band
+const HERO_GRID_L = SHARE_HERO_W - 90 - COL_W; // right-aligned, mirroring the left margin
+
+function drawHero(ctx: CanvasRenderingContext2D, d: ShareCardData): void {
+  // Full-bleed, no rounding: Discord's own mask shapes the hero's frame, and transparent
+  // corners of ours would just show whatever the client paints behind the crop.
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, SHARE_HERO_W, SHARE_HERO_H);
+
+  ctx.save();
+  ctx.translate(HERO_COL_DX, HERO_HEADER_DY);
+  drawHeader(ctx, d);
+  ctx.restore();
+  ctx.save();
+  ctx.translate(HERO_COL_DX, HERO_STATS_DY);
+  drawStats(ctx, d);
+  ctx.restore();
+
+  // The grid, game tiles as ever (constant 8px gap, width 114), height fitted to the band
+  // instead of the portrait's grid zone, centred on the band's middle.
+  const rows = d.grid.slice(0, 8);
+  const n = Math.max(1, rows.length);
+  const tileH = Math.max(8, Math.min(TILE_H_MAX, Math.floor((HERO_BAND - (n - 1) * TILE_GAP) / n)));
+  const tileW = Math.floor((COL_W - 3 * TILE_GAP) / 4);
+  const h = n * tileH + (n - 1) * TILE_GAP;
+  const y = Math.round((SHARE_HERO_H - h) / 2);
+  rows.forEach((row, ri) => {
+    for (let ci = 0; ci < 4; ci++) {
+      roundRect(
+        ctx,
+        HERO_GRID_L + ci * (tileW + TILE_GAP),
+        y + ri * (tileH + TILE_GAP),
+        tileW,
+        tileH,
+        TILE_R,
+      );
+      ctx.fillStyle = CAT_COLOR[row[ci]] ?? ZINC_700;
+      ctx.fill();
+    }
+  });
+}
+
 // Render the share card to a PNG. Network-free (no avatars, no remote images), so it never
-// blocks on a CDN the way the roster card can.
-//
-// `hero: true` composites the card centred on the 43:24 quick-link canvas (dark margins,
-// full-bleed — Discord's own mask rounds the hero's frame). The card's transparent rounded
-// corners land on the same BG fill, so the composite is seamless. Default is the bare
-// portrait, which is what the clipboard copy wants.
+// blocks on a CDN the way the roster card can. `hero: true` renders the crop-safe wide
+// banner the quick-link mint ships; default is the bare portrait for the clipboard copy.
 export async function renderShareCard(
   d: ShareCardData,
   opts: { hero?: boolean } = {},
 ): Promise<Buffer> {
   ensureFonts();
-  const canvas = createCanvas(SHARE_CARD_W, SHARE_CARD_H);
+  const canvas = opts.hero
+    ? createCanvas(SHARE_HERO_W, SHARE_HERO_H)
+    : createCanvas(SHARE_CARD_W, SHARE_CARD_H);
   const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
-  drawCard(ctx, d);
-  if (!opts.hero) return canvas.toBuffer('image/png');
-
-  const hero = createCanvas(SHARE_HERO_W, SHARE_HERO_H);
-  const hctx = hero.getContext('2d') as unknown as CanvasRenderingContext2D;
-  hctx.fillStyle = BG;
-  hctx.fillRect(0, 0, SHARE_HERO_W, SHARE_HERO_H);
-  hctx.drawImage(
-    canvas as unknown as CanvasImageSource,
-    Math.round((SHARE_HERO_W - SHARE_CARD_W) / 2),
-    Math.round((SHARE_HERO_H - SHARE_CARD_H) / 2),
-  );
-  return hero.toBuffer('image/png');
+  if (opts.hero) drawHero(ctx, d);
+  else drawCard(ctx, d);
+  return canvas.toBuffer('image/png');
 }

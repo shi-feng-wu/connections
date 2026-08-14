@@ -19,16 +19,21 @@
 // name_localizations/description_localizations so /disconnections (+ our description)
 // applies everywhere.
 //
-// Then we also register a CHAT_INPUT (type 1) command. The Entry Point command lives
-// in the App Launcher and doesn't reliably appear in the typed "/" menu; a normal
-// slash command does. It carries no handler — Discord delivers the invocation to the
+// Then we reconcile the CHAT_INPUT (type 1) commands against scripts/command-defs.mjs:
+// /disconnections and its /connections alias, /share, /donate, /invite-bot, /help, and the
+// moderator pair /mute + /unmute (renamed from /disable-posts + /enable-posts). The Entry Point
+// command lives in the App Launcher and doesn't reliably appear in the typed "/" menu; a normal
+// slash command does. They carry no handler — Discord delivers the invocation to the
 // Interactions Endpoint URL, and api/interactions.ts replies with LAUNCH_ACTIVITY to
 // open the game. REQUIRES the app's Interactions Endpoint URL to be set to
 // <host>/api/interactions (Developer Portal ▸ General Information, or PATCH /applications/@me).
 //
-// Run once after setting up the bot:
+// Re-run whenever scripts/command-defs.mjs changes (it's idempotent — an in-sync command makes no
+// API call at all):
 //   pnpm register-commands
 // Needs VITE_DISCORD_CLIENT_ID and DISCORD_BOT_TOKEN in .env (loaded via --env-file).
+
+import { CHAT_COMMANDS } from './command-defs.mjs';
 
 const APP_ID = process.env.VITE_DISCORD_CLIENT_ID;
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
@@ -40,20 +45,6 @@ const PRIMARY_ENTRY_POINT = 4;
 // it), 2 = DISCORD_LAUNCH_ACTIVITY (Discord launches + auto-posts the invite card).
 const APP_HANDLER = 1;
 const CHAT_INPUT = 1;
-// The typed "/" command. Keep in sync with LAUNCH_COMMANDS in api/interactions.ts.
-const CHAT_NAME = 'disconnections';
-const CHAT_DESCRIPTION = 'Launch the daily 16-word Disconnections puzzle';
-// Kept as an indefinite alias post-rebrand (same launch behavior, same options/handler
-// shape as the primary chat command) so existing muscle memory and any cached client
-// command lists still work. Keep in sync with LAUNCH_COMMANDS in api/interactions.ts.
-const ALIAS_NAME = 'connections';
-const ALIAS_DESCRIPTION = 'Launch Disconnections';
-// Match the Entry Point command so the slash command appears in the same places.
-const CONTEXTS = [0, 1, 2];
-const INTEGRATION_TYPES = [0, 1];
-// Discord permission bit (1 << 4) — gates the moderator-only commands (/enable-posts, /disable-posts)
-// to members who can configure the channel.
-const MANAGE_CHANNELS = '16';
 const API = 'https://discord.com/api/v10';
 
 if (!APP_ID || !TOKEN) {
@@ -115,232 +106,75 @@ if (nameOk && descOk && handlerOk) {
   );
 }
 
-// --- 2) Chat-input command (typed "/" menu) ---------------------------------------
-const chat = commands.find((c) => c.type === CHAT_INPUT && c.name === CHAT_NAME);
-if (chat) {
-  console.log(`Chat command /${CHAT_NAME} already registered (id ${chat.id}).`);
-} else {
-  const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
-    method: 'POST',
-    headers: auth,
-    body: JSON.stringify({
-      name: CHAT_NAME,
-      description: CHAT_DESCRIPTION,
-      type: CHAT_INPUT,
-      contexts: CONTEXTS,
-      integration_types: INTEGRATION_TYPES,
-    }),
-  });
-  if (!createRes.ok) {
-    console.error(`Failed to register /${CHAT_NAME}: ${createRes.status} ${await createRes.text()}`);
-    process.exit(1);
-  }
-  const cmd = await createRes.json();
-  console.log(
-    `Registered chat command /${cmd.name} (id ${cmd.id}). Typing /${cmd.name} launches the Activity ` +
-      `(via the Interactions Endpoint — make sure it's set to <host>/api/interactions).`,
+// --- 2) Chat-input commands (typed "/" menu) --------------------------------------
+// Every chat-input command's DEFINITION lives in scripts/command-defs.mjs (pure data, also read by
+// tests/interactions.test.ts so the /help list and the moderator gates can't drift from what's
+// really registered). This loop reconciles Discord's list against it:
+//   • missing       -> POST (create)
+//   • drifted       -> PATCH by id (description / contexts / integration_types / permissions)
+//   • renamed       -> the same PATCH, matched through `previousNames`, so the command keeps its id
+//                      and any per-guild permission overrides (Discord has no rename API; PATCHing
+//                      `name` in place IS the rename — /unsubscribe -> /disable-posts -> /mute).
+//   • already right -> no call at all, so a re-run is a no-op.
+// The Entry Point command handled above is NOT part of this loop and must never be touched by it.
+const sameList = (a, b) =>
+  JSON.stringify([...(a ?? [])].sort()) === JSON.stringify([...(b ?? [])].sort());
+
+for (const def of CHAT_COMMANDS) {
+  const existing = commands.find(
+    (c) =>
+      c.type === CHAT_INPUT &&
+      (c.name === def.name || (def.previousNames ?? []).includes(c.name)),
   );
-}
+  const perms = def.default_member_permissions ?? null;
+  const body = {
+    name: def.name,
+    description: def.description,
+    contexts: def.contexts,
+    integration_types: def.integration_types,
+    default_member_permissions: perms,
+  };
 
-// --- 2b) Alias chat-input command (/connections) -----------------------------------
-// Kept indefinitely post-rebrand: same options/handler shape as the primary launch
-// command above (no options, same contexts/integration types, no bulk handler — the
-// Interactions Endpoint answers both), just a different registered name. The
-// description reads "Launch Disconnections" so the displayed branding is always the
-// new name even when someone still types /connections. api/interactions.ts's
-// LAUNCH_COMMANDS treats this name identically to CHAT_NAME. Revisit dropping this
-// alias at monetization launch.
-const aliasChat = commands.find((c) => c.type === CHAT_INPUT && c.name === ALIAS_NAME);
-if (aliasChat) {
-  console.log(`Chat command /${ALIAS_NAME} already registered (id ${aliasChat.id}).`);
-} else {
-  const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
-    method: 'POST',
-    headers: auth,
-    body: JSON.stringify({
-      name: ALIAS_NAME,
-      description: ALIAS_DESCRIPTION,
-      type: CHAT_INPUT,
-      contexts: CONTEXTS,
-      integration_types: INTEGRATION_TYPES,
-    }),
-  });
-  if (!createRes.ok) {
-    console.error(`Failed to register /${ALIAS_NAME}: ${createRes.status} ${await createRes.text()}`);
-    process.exit(1);
-  }
-  const cmd = await createRes.json();
-  console.log(`Registered alias chat command /${cmd.name} (id ${cmd.id}) — "${ALIAS_DESCRIPTION}".`);
-}
-
-// --- 3) enable-posts chat-input command -------------------------------------------
-// In a server without the bot, /enable-posts replies (privately) with a one-click "Add to Server"
-// button. Where the bot IS installed, it clears any /disable-posts opt-out for the channel — turning
-// the live card + daily recap back on. GUILD context only (no DM): the bot only posts in server
-// channels. integration_types stays [0,1] so it's still available in bot-less (user-install) servers
-// for the add-bot pitch. Deliberately NOT default_member_permissions-gated: the command is left open
-// so anyone can reach the add-bot pitch (which does nothing privileged — the OAuth add needs Manage
-// Server anyway). The moderation part — clearing a /disable-posts opt-out — is gated IN CODE
-// (Manage Channels) in api/interactions.ts (enablePostsResponse), so re-enabling still mirrors the
-// permission /disable-posts requires, without hiding the add-bot pitch from non-admins.
-const ENABLE_POSTS = 'enable-posts';
-const ENABLE_POSTS_DESCRIPTION = 'Add the bot, or turn the daily recap and live card back on in this channel';
-const ENABLE_POSTS_CONTEXTS = [0]; // GUILD only — hidden in DMs
-const enable = commands.find((c) => c.type === CHAT_INPUT && c.name === ENABLE_POSTS);
-if (enable) {
-  // Reconcile what may have drifted: contexts (it used to allow DMs), the description, and that it's
-  // NOT permission-gated (null — open to everyone; the re-enable branch is gated in code). PATCH if
-  // any differ so a re-run is a no-op once matched.
-  const contextsOk =
-    JSON.stringify((enable.contexts ?? []).slice().sort()) ===
-    JSON.stringify(ENABLE_POSTS_CONTEXTS.slice().sort());
-  const permsOk = (enable.default_member_permissions ?? null) === null;
-  const descOk = enable.description === ENABLE_POSTS_DESCRIPTION;
-  if (contextsOk && permsOk && descOk) {
-    console.log(`Chat command /${ENABLE_POSTS} already registered, GUILD-only + open (id ${enable.id}).`);
-  } else {
-    const patchRes = await fetch(`${API}/applications/${APP_ID}/commands/${enable.id}`, {
-      method: 'PATCH',
+  if (!existing) {
+    const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
+      method: 'POST',
       headers: auth,
-      body: JSON.stringify({
-        description: ENABLE_POSTS_DESCRIPTION,
-        contexts: ENABLE_POSTS_CONTEXTS,
-        default_member_permissions: null, // open — clears any prior gate; re-enable is gated in code
-      }),
+      body: JSON.stringify({ ...body, type: CHAT_INPUT }),
     });
-    if (!patchRes.ok) {
-      console.error(`Failed to update /${ENABLE_POSTS}: ${patchRes.status} ${await patchRes.text()}`);
+    if (!createRes.ok) {
+      console.error(`Failed to register /${def.name}: ${createRes.status} ${await createRes.text()}`);
       process.exit(1);
     }
-    console.log(`Updated /${ENABLE_POSTS} (id ${enable.id}): GUILD-only, open (re-enable gated in code), description synced.`);
+    const cmd = await createRes.json();
+    console.log(`Registered chat command /${cmd.name} (id ${cmd.id}).`);
+    continue;
   }
-} else {
-  const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
-    method: 'POST',
-    headers: auth,
-    body: JSON.stringify({
-      name: ENABLE_POSTS,
-      description: ENABLE_POSTS_DESCRIPTION,
-      type: CHAT_INPUT,
-      contexts: ENABLE_POSTS_CONTEXTS,
-      integration_types: INTEGRATION_TYPES,
-      // No default_member_permissions: open to everyone. Re-enabling is gated in code (Manage
-      // Channels) so the add-bot pitch stays reachable by non-admins.
-    }),
-  });
-  if (!createRes.ok) {
-    console.error(`Failed to register /${ENABLE_POSTS}: ${createRes.status} ${await createRes.text()}`);
-    process.exit(1);
-  }
-  const cmd = await createRes.json();
-  console.log(`Registered chat command /${cmd.name} (id ${cmd.id}), GUILD only, open.`);
-}
 
-// --- 4) share chat-input command --------------------------------------------------
-// /share posts the player's result grid for today's puzzle (one row of category-colour
-// squares per guess, Wordle-style) to the channel. The response is built in
-// api/interactions.ts (shareResponse); this only registers the name. Same contexts +
-// integration types as the launch command so it's available in user-install servers too —
-// the share posts as an interaction response, which needs no bot in the guild.
-const SHARE = 'share';
-const SHARE_DESCRIPTION = "Share your Disconnections result grid for today's puzzle";
-const share = commands.find((c) => c.type === CHAT_INPUT && c.name === SHARE);
-if (share) {
-  console.log(`Chat command /${SHARE} already registered (id ${share.id}).`);
-} else {
-  const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
-    method: 'POST',
-    headers: auth,
-    body: JSON.stringify({
-      name: SHARE,
-      description: SHARE_DESCRIPTION,
-      type: CHAT_INPUT,
-      contexts: CONTEXTS,
-      integration_types: INTEGRATION_TYPES,
-    }),
-  });
-  if (!createRes.ok) {
-    console.error(`Failed to register /${SHARE}: ${createRes.status} ${await createRes.text()}`);
-    process.exit(1);
+  const inSync =
+    existing.name === def.name &&
+    existing.description === def.description &&
+    sameList(existing.contexts, def.contexts) &&
+    sameList(existing.integration_types, def.integration_types) &&
+    (existing.default_member_permissions ?? null) === perms;
+  if (inSync) {
+    console.log(`Chat command /${def.name} already registered and in sync (id ${existing.id}).`);
+    continue;
   }
-  const cmd = await createRes.json();
-  console.log(`Registered chat command /${cmd.name} (id ${cmd.id}).`);
-}
 
-// --- 5) donate chat-input command -------------------------------------------------
-// /donate replies (privately) with a Ko-fi link button — the same "Help cover the server
-// costs" link in the app footer. The response is built in api/interactions.ts
-// (routeInteraction); this only registers the name. Same contexts + integration types as the
-// launch command so it's available everywhere, including user-install (bot-less) servers — it
-// posts as an interaction response and needs no bot in the guild.
-const DONATE = 'donate';
-const DONATE_DESCRIPTION = 'Support Disconnections — donate to help cover the server costs';
-const donate = commands.find((c) => c.type === CHAT_INPUT && c.name === DONATE);
-if (donate) {
-  console.log(`Chat command /${DONATE} already registered (id ${donate.id}).`);
-} else {
-  const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
-    method: 'POST',
-    headers: auth,
-    body: JSON.stringify({
-      name: DONATE,
-      description: DONATE_DESCRIPTION,
-      type: CHAT_INPUT,
-      contexts: CONTEXTS,
-      integration_types: INTEGRATION_TYPES,
-    }),
-  });
-  if (!createRes.ok) {
-    console.error(`Failed to register /${DONATE}: ${createRes.status} ${await createRes.text()}`);
-    process.exit(1);
-  }
-  const cmd = await createRes.json();
-  console.log(`Registered chat command /${cmd.name} (id ${cmd.id}).`);
-}
-
-// --- 6) disable-posts chat-input command ------------------------------------------
-// /disable-posts turns the bot's posts off in the channel it's run in — BOTH the live "who's
-// playing" card AND the nightly recap (a post_optouts row that post-card checks and recap_channels()
-// subtracts). Sticky: only /enable-posts here turns it back on. GUILD-INSTALL ONLY (integration_types
-// [0]) + GUILD context ([0]) — the bot only posts where it's in the server — and Manage Channels
-// gated so a random member can't silence a channel others want. RENAMED from /unsubscribe: Discord
-// has no rename API, so if the old command is still around we PATCH its name in place by id (same
-// command id, new name — preserves any per-guild permission overrides). api/interactions.ts also
-// still accepts the old "unsubscribe" name for clients on a cached command list mid-rollout.
-const DISABLE_POSTS = 'disable-posts';
-const DISABLE_POSTS_DESCRIPTION = "Turn the bot's posts (live card + daily recap) off in this channel";
-const DISABLE_POSTS_BODY = {
-  description: DISABLE_POSTS_DESCRIPTION,
-  contexts: [0], // GUILD only — the bot only posts in server channels
-  integration_types: [0], // GUILD_INSTALL only — hidden where the bot isn't in the server
-  default_member_permissions: MANAGE_CHANNELS,
-};
-const disablePosts = commands.find((c) => c.type === CHAT_INPUT && c.name === DISABLE_POSTS);
-const legacyUnsub = commands.find((c) => c.type === CHAT_INPUT && c.name === 'unsubscribe');
-if (disablePosts) {
-  console.log(`Chat command /${DISABLE_POSTS} already registered (id ${disablePosts.id}).`);
-} else if (legacyUnsub) {
-  // Rename the existing /unsubscribe command to /disable-posts in place (PATCH by id).
-  const patchRes = await fetch(`${API}/applications/${APP_ID}/commands/${legacyUnsub.id}`, {
+  // PATCH by id (never POST): renames keep the command id, so per-guild overrides survive. `type`
+  // is immutable, so it's not in the body.
+  const patchRes = await fetch(`${API}/applications/${APP_ID}/commands/${existing.id}`, {
     method: 'PATCH',
     headers: auth,
-    body: JSON.stringify({ name: DISABLE_POSTS, ...DISABLE_POSTS_BODY }),
+    body: JSON.stringify(body),
   });
   if (!patchRes.ok) {
-    console.error(`Failed to rename /unsubscribe -> /${DISABLE_POSTS}: ${patchRes.status} ${await patchRes.text()}`);
+    console.error(`Failed to update /${existing.name}: ${patchRes.status} ${await patchRes.text()}`);
     process.exit(1);
   }
-  console.log(`Renamed /unsubscribe -> /${DISABLE_POSTS} in place (id ${legacyUnsub.id}).`);
-} else {
-  const createRes = await fetch(`${API}/applications/${APP_ID}/commands`, {
-    method: 'POST',
-    headers: auth,
-    body: JSON.stringify({ name: DISABLE_POSTS, type: CHAT_INPUT, ...DISABLE_POSTS_BODY }),
-  });
-  if (!createRes.ok) {
-    console.error(`Failed to register /${DISABLE_POSTS}: ${createRes.status} ${await createRes.text()}`);
-    process.exit(1);
-  }
-  const cmd = await createRes.json();
-  console.log(`Registered chat command /${cmd.name} (id ${cmd.id}), GUILD only, Manage Channels gated.`);
+  const renamed = existing.name !== def.name ? `name "${existing.name}" -> "${def.name}", ` : '';
+  console.log(
+    `Updated chat command /${def.name} (id ${existing.id}): ${renamed}description/contexts/` +
+      `integration types/permissions synced${perms ? ' (Manage Channels gated)' : ''}.`,
+  );
 }

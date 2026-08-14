@@ -123,7 +123,7 @@ function QA({ q, children }: { q: string; children: ReactNode }): ReactNode {
 
 // The everyday rules of Connections are assumed — this answers what's specific to playing
 // it on Discord, as a Q&A. Copy tracks the real mechanics: the exact score formula (game.ts
-// finishedScore / SCORING), the per-channel/server leaderboards, and /enable-posts
+// finishedScore / SCORING), the per-channel/server leaderboards, and /invite-bot
 // (api/interactions.ts).
 const BOLD = "font-semibold text-zinc-100";
 function Faq(): ReactNode {
@@ -181,12 +181,13 @@ function Faq(): ReactNode {
 
       <QA q="How do we enable the who's playing cards and nightly recaps?">
         <p className="m-0">
-          Yep. Run <span className={cmd}>/enable-posts</span> to add the bot
-          (one tap, though it needs Manage Server, so grab an admin if that’s
-          not you). After that the channel gets a{" "}
-          <b className={BOLD}>daily recap</b> with yesterday’s results and the
-          standings, plus a live <b className={BOLD}>“who’s playing”</b> card
-          whenever a game starts.
+          Without the bot you still get a{" "}
+          <b className={BOLD}>“who’s playing”</b> card when someone launches,
+          and yesterday’s <b className={BOLD}>recap</b> lands on the first
+          launch of the day. Run <span className={cmd}>/invite-bot</span> to add
+          the bot (one tap, though it needs Manage Server, so grab an admin if
+          that’s not you) and the card starts updating all day, with the recap
+          arriving at the nightly reset instead.
         </p>
       </QA>
 

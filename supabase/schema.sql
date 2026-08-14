@@ -368,7 +368,9 @@ drop table if exists public.recap_channels;
 
 -- Idempotency ledger: one row per (scope, puzzle_date) once a recap is posted, so
 -- a retried or overlapping cron run can't double-post. /api/cron-recap claims a
--- row before posting and treats a unique violation as "already done".
+-- row before posting and treats a unique violation as "already done". /api/post-card claims the
+-- SAME key before piggybacking yesterday's recap onto the first launch of the day in a bot-less
+-- server (see claimRecapSlot in api/_recap.ts), so the two paths can never both deliver one recap.
 create table if not exists public.recap_posts (
   scope_id    text        not null,
   puzzle_date date        not null,
@@ -408,19 +410,28 @@ alter table public.recap_posts add column if not exists error        text;      
 alter table public.recap_posts add column if not exists message_id   text;        -- the posted recap message (proof of delivery)
 alter table public.recap_posts add column if not exists attempted_at timestamptz; -- when the POST was last attempted (stale-claim recovery)
 
+-- Which path wrote the row: 'cron' = the nightly bot post (/api/cron-recap), 'launch' = the
+-- piggybacked recap a bot-less room gets on its first launch of the day (/api/post-card). Fixed at
+-- claim time (claimRecapSlot), never rewritten. DORMANCY READS ONLY 'cron' ROWS — see the window in
+-- recap_pending() below for why: dormancy is a verdict about whether the BOT can still post here,
+-- and a piggyback outcome says nothing about that. The default backfills every historical row to
+-- 'cron', which is exactly what they all are (the piggyback didn't exist before this column).
+alter table public.recap_posts add column if not exists via text not null default 'cron';
+
 alter table public.recap_posts enable row level security;
 
--- Posts opt-out: one row per (scope, channel) a moderator turned off with /disable-posts, so the
--- bot goes silent there — NO live "who's playing" card AND no nightly recap. post-card checks this
--- set and skips posting; recap_channels() subtracts it below so the nightly cron skips it too.
--- STICKY: unlike the old recap-only opt-out, a launch/solve in the channel does NOT clear it — only
--- /enable-posts in that channel does. Absence of a row = enabled (the default); playing still
--- records scores, this only mutes the bot's posts. Written only by the service role (the
--- /disable-posts + /enable-posts handlers); RLS with no policy denies the anon key entirely.
+-- Posts opt-out: one row per (scope, channel) a moderator muted with /mute (the command renamed
+-- from /disable-posts, itself renamed from /unsubscribe), so Disconnections goes silent there — NO
+-- "who's playing" card (bot-posted OR token-backed), no piggybacked recap, and no nightly recap.
+-- post-card checks this set on BOTH of its post paths and skips posting; recap_channels() subtracts
+-- it below so the nightly cron skips it too. STICKY: unlike the old recap-only opt-out, a
+-- launch/solve in the channel does NOT clear it — only /unmute in that channel does. Absence of a
+-- row = enabled (the default); playing still records scores, this only mutes what we post. Written
+-- only by the service role (the /mute + /unmute handlers); RLS with no policy denies the anon key.
 create table if not exists public.post_optouts (
   scope_id      text        not null,
   channel_id    text        not null,
-  opted_out_by  text,                                   -- the user who ran /disable-posts (audit)
+  opted_out_by  text,                                   -- the user who ran /mute (audit)
   opted_out_at  timestamptz not null default now(),
   primary key (scope_id, channel_id)
 );
@@ -493,8 +504,8 @@ grant execute on function public.day_results(text, date, text) to anon, authenti
 -- excluded via bot_can_post (a command launch posts the live card through the interaction webhook,
 -- which needs NO bot channel perms, so message_id/interaction_token alone don't prove the bot can
 -- post its own recap message there — that was silently 403ing ~1 in 5 channels nightly). Channels a
--- moderator turned off with /disable-posts (a post_optouts row) are subtracted, so the nightly run
--- skips them until /enable-posts is run there again (which clears the opt-out — a launch no longer does).
+-- moderator muted with /mute (a post_optouts row) are subtracted, so the nightly run
+-- skips them until /unmute is run there again (which clears the opt-out — a launch no longer does).
 --
 -- bot_can_post: the bot's launch-time verdict on whether it can POST in this channel (Discord's
 -- app_permissions = View + Send + Attach), stamped by post-card on every launch. recap_channels()
@@ -553,6 +564,55 @@ create index if not exists recap_posts_served_idx
 -- and returns; successive per-minute ticks drain the whole set because terminal rows drop out of
 -- this result. This is what fixes the tail-truncation OOM: no single invocation ever renders more
 -- than p_limit cards, and a crashed tick just leaves its remainder for the next tick to pick up.
+--
+-- DORMANCY. A 'failed' row is terminal for its DATE only, and every night is a new date — so a
+-- channel the bot was kicked out of (403/50001), one whose channel was deleted (404/10003), or one
+-- whose perms were revoked (403/50013) got re-rendered and re-POSTed EVERY night, forever: the
+-- ledger shows 508 guilds racking up ~20 failed nights each inside 28 days, every one of them a
+-- render and a POST spent re-proving the same 4xx. So a (scope, channel) goes DORMANT — dropped
+-- from the queue — once BOTH of these hold:
+--   1. Its last 3 terminal outcomes before p_date are ALL 'failed', and there ARE 3 of them. A kept
+--      'failed' row is a permanent 4xx by construction: postOne DELETES the row on a transient
+--      429/5xx so a later run retries, and only stamps 'failed' on a 4xx that won't fix itself.
+--      Three in a row is the "this is not a blip" bar. 'claimed' is in flight, not an outcome, so
+--      those rows aren't in the window — a killed run can't push a channel toward dormancy.
+--   2. No fresh bot-backed launch since that last failure: no live_cards row past the last failed
+--      date that is bot-backed (message_id posted, interaction_token null, bot_can_post not false —
+--      see recap_channels() for what those three mean).
+-- (2) is the revival contract, and it's why this is safe without ever re-probing Discord: a fresh
+-- bot-backed launch revives the channel — the owner's rule is "play there again if you want recaps
+-- there". A token-backed row (interaction_token set) is a bot-LESS launch through the interaction
+-- webhook; it says nothing about whether the bot is present, so it must NOT revive.
+--
+-- BOTH dormancy probes are filtered to recap_posts.via = 'cron'. Dormancy is a verdict about one
+-- thing only: can the BOT still post its own message here? Only a cron attempt tests that. A
+-- piggybacked recap (via 'launch') is delivered on a launcher's interaction webhook, which needs no
+-- bot at all, so its outcome — success or failure — is evidence about nothing dormancy decides.
+-- Letting 'launch' rows in breaks it in both directions:
+--   • a 'launch' POSTED row lands in the last-3 window and makes it not-all-failed, so an EX-BOT
+--     channel (bot removed, but its old bot-backed live_cards rows keep it in recap_channels())
+--     flaps: dormant → the piggyback delivers → dormancy lifts → the midnight cron burns the date
+--     with a fresh 'failed' before any launch can claim it → dormant again three nights later.
+--     Steady state was a recap roughly one day in four, plus exactly the nightly wasted render and
+--     POST this dormancy clause exists to stop.
+--   • a 'launch' FAILED row would drag the (2) revival boundary (max failed date) forward, so a
+--     genuine bot-backed relaunch just before it would stop counting as revival.
+-- The per-date terminal check at the top is deliberately NOT filtered: it spans both vias, so once
+-- either path has delivered (or permanently failed) a date, the other can never post it too.
+--
+-- Cost: these probes run for every recap_channels() row every tick (the ORDER BY forces the whole
+-- WHERE to evaluate before LIMIT), but each is a per-channel, index-bounded lookup — the same cost
+-- class as the max(puzzle_date) subquery the ORDER BY already runs. The max-failed-date probe is an
+-- index-only scan on recap_posts_served_idx (scope_id, channel_id, status, puzzle_date desc): all
+-- four of its predicates are scan keys. The last-3 window can ride that index too, but the planner
+-- prefers a BACKWARD scan of the PK (scope_id, puzzle_date, channel_id), which is already in
+-- puzzle_date-desc order — it reads until 3 rows match on channel/status and stops, no sort. The
+-- via = 'cron' predicate needs NO index change: it's a cheap filter on rows those scans already
+-- visit, and the ledger is overwhelmingly cron rows anyway (one launch row per bot-less room per
+-- day at most). Both stay sub-millisecond per channel with the ledger at a few hundred thousand
+-- rows. The live_cards
+-- probe has no (scope, channel) index; the PK (scope_id, puzzle_date, channel_id) gives a
+-- scope_id-prefix scan, bounded by one guild's card rows (~90 at most, one per day played) — fine.
 drop function if exists public.recap_pending(date, int);
 create or replace function public.recap_pending(p_date date, p_limit int)
 returns table (scope_id text, channel_id text)
@@ -569,6 +629,37 @@ as $$
         rp.status in ('posted', 'failed')                                            -- terminal for this date
         or (rp.status = 'claimed' and rp.attempted_at > now() - interval '15 minutes') -- fresh in-flight claim
       )                                                                              -- (stale claims stay pending → recovered)
+  )
+  and not (
+    -- (1) The last 3 CRON outcomes before p_date are all 'failed' — and there are 3 of them.
+    -- count(*) = 3 is what keeps a 1- or 2-failure (or empty) history OUT of dormancy; bool_and over
+    -- an empty window is NULL, and `false and NULL` is false, so a fresh channel is never dormant.
+    (select count(*) = 3 and bool_and(w.status = 'failed')
+       from (
+         select rp3.status
+         from public.recap_posts rp3
+         where rp3.scope_id = rc.scope_id and rp3.channel_id = rc.channel_id
+           and rp3.puzzle_date < p_date
+           and rp3.status in ('posted', 'failed') -- 'claimed'/NULL aren't outcomes → not in the window
+           and rp3.via = 'cron'                   -- bot attempts only; a piggyback can't prove the bot works
+         order by rp3.puzzle_date desc
+         limit 3
+       ) w)
+    -- (2) …and nothing has revived it since: no bot-backed launch after that last failed CRON date.
+    and not exists (
+      select 1 from public.live_cards lc
+      where lc.scope_id = rc.scope_id and lc.channel_id = rc.channel_id
+        and lc.message_id is not null                -- a card actually posted there
+        and lc.interaction_token is null             -- bot-backed only; a token-backed launch proves no bot
+        and lc.bot_can_post is distinct from false   -- NULL = unknown → still counts as revival (fail-open)
+        and lc.puzzle_date > (
+          select max(rp4.puzzle_date)
+          from public.recap_posts rp4
+          where rp4.scope_id = rc.scope_id and rp4.channel_id = rc.channel_id
+            and rp4.status = 'failed' and rp4.puzzle_date < p_date
+            and rp4.via = 'cron'                   -- a piggyback failure must not move the revival bar
+        )
+    )
   )
   order by
     (select max(rp2.puzzle_date)
@@ -655,11 +746,13 @@ $$;
 
 grant execute on function public.room_recap_stats(text, date, date, text) to anon, authenticated;
 
--- Install-nudge throttle: one row per (room, user), bumped each time the launcher of a
--- bot-less server is shown the ephemeral "add the bot for recaps" followup (see
--- /api/interactions). The nudge re-arms after INSTALL_NUDGE_COOLDOWN_MS (a week), so the
--- timestamp is updated in place rather than appended. Written only by the service role;
--- RLS with no policy denies the anon key entirely (same posture as progress/live_cards).
+-- Nudge throttle: one row per (room, user), bumped each time a launcher is shown an ephemeral
+-- followup (see /api/post-card nudgeOnce). It re-arms after INSTALL_NUDGE_COOLDOWN_MS (a week), so
+-- the timestamp is updated in place rather than appended. The only nudge left is "the bot is in this
+-- server but can't post in this channel" — the bot-less "add the bot" popup was removed, replaced by
+-- one small invite line on the recap a bot-less room now gets on its first launch of the day (see
+-- api/post-card.ts piggybackRecap). The table keeps its name and its history rows. Written only by
+-- the service role; RLS with no policy denies the anon key entirely (same posture as progress).
 create table if not exists public.install_nudges (
   scope_id  text        not null,
   user_id   text        not null,
@@ -966,3 +1059,56 @@ create table if not exists public.room_auth (
 );
 
 alter table public.room_auth enable row level security;
+
+-- ——— the share-card viral loop (/api/share-link + /api/referral) ———
+
+-- Minted Discord quick links, one per (player, puzzle date). A quick link is Discord's
+-- shareable chat embed: our 43:24 result card, a title, a description and a "Play" button that
+-- opens the Activity. /api/share-link POSTs it to /applications/{app}/quick-links on the
+-- PLAYER'S OAuth token and stores the answer here, so a second Share click on the same result
+-- reuses the same link instead of burning another render, another Discord write, and another
+-- slot of the per-day mint quota (the quota is literally a count of this table's rows for the
+-- player since midnight ET — the PK makes one row exactly one distinct date). Links carry a
+-- 30-day TTL on Discord's side; the route re-mints at 29 days rather than hand out one that is
+-- about to expire mid-share. Written only by the service role (RLS, no policy → anon sees
+-- nothing); the route degrades to minting-without-cache if this table isn't there yet.
+create table if not exists public.share_links (
+  user_id     text        not null,
+  puzzle_date date        not null,
+  link_id     text        not null,                 -- Discord's quick-link id, passed to shareLink()
+  url         text        not null,                 -- the constructed activity URL (clipboard fallback)
+  created_at  timestamptz not null default now(),   -- mint time: drives both the TTL and the quota
+  primary key (user_id, puzzle_date)
+);
+
+-- The mint quota's window scan: rows for one player since midnight ET.
+create index if not exists share_links_user_minted_idx on public.share_links (user_id, created_at);
+
+alter table public.share_links enable row level security;
+
+-- Who brought whom. When a player opens the Activity from a shared quick link, their client
+-- reads discordSdk.referrerId (the sharer) and discordSdk.customId (what we stamped at mint
+-- time) at boot and posts them to /api/referral. FIRST-WRITER-WINS IS THE PRIMARY KEY: a player
+-- is attributed to exactly one referrer, ever, and every later link they open is a no-op 23505.
+-- Self-referrals (opening your own link) are dropped before the insert.
+--
+-- referrer_user_id is nullable on purpose: a STATIC dev-portal campaign link carries a custom_id
+-- with no sharer behind it, and those arrivals are worth counting in the same table. link_id is
+-- nullable too — the Embedded App SDK (2.5.0) exposes referrerId and customId at boot but NOT
+-- the link id, so in practice it stays null until the SDK surfaces one.
+--
+-- v1 IS MEASUREMENT ONLY: nothing is granted off these rows, which is what lets the write stay
+-- a bare insert. Anything that ever pays out a referral needs a real anti-farming pass first.
+-- Written only by the service role (RLS, no policy → anon sees nothing).
+create table if not exists public.referrals (
+  referred_user_id text        primary key,          -- the arriving player; one attribution, ever
+  referrer_user_id text,                             -- the sharer (null for a campaign link)
+  custom_id        text,                             -- what we stamped on the link at mint time
+  link_id          text,                             -- the quick link, when the client can see it
+  first_seen       timestamptz not null default now()
+);
+
+-- "How did this referrer's links convert" — the one read the loop's telemetry needs.
+create index if not exists referrals_referrer_idx on public.referrals (referrer_user_id, first_seen);
+
+alter table public.referrals enable row level security;

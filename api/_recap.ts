@@ -4,6 +4,7 @@
 // (shared with the browser preview); api/_card.ts wraps it into a Buffer and
 // api/cron-recap.ts posts it — exactly like the "who's playing" card. Leading
 // underscore keeps Vercel from treating this file as a route.
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { RecapData } from '../src/card-draw.js';
 import type { Delta } from '../src/rank-delta.js';
 import { COPY } from '../src/discord-copy.js';
@@ -150,3 +151,84 @@ export function recapPayload(content?: string): object {
 }
 
 export { PLAY_CUSTOM_ID };
+
+// ——— the recap_posts ledger (shared by the nightly cron and the bot-less piggyback) ———
+//
+// One row per (scope, puzzle_date, channel) — the idempotency lock AND the outcome record:
+//   'claimed' = in flight · 'posted' = delivered (never repost) · 'failed' = a permanent 4xx for
+//   this date (don't loop) · absent = released after a transient failure (retryable).
+// api/cron-recap.ts claims it before the bot posts a recap; api/post-card.ts claims the SAME key
+// before piggybacking yesterday's recap onto the first launch of the day in a bot-less server — so
+// the two can never both post one recap, whichever gets there first. These helpers only touch
+// Supabase through the type (no runtime import), which is what keeps this module free of the heavy
+// deps api/interactions.ts must not carry.
+
+// A recap_posts row still 'claimed' this long after its last attempt was orphaned by a killed run
+// (a hard 300s cron kill runs no cleanup), so a later run / the 05:00 twin / a later launch
+// re-attempts it. Must be well above a healthy run's duration (~90s) so a live in-flight claim is
+// never stolen mid-post.
+export const STALE_CLAIM_MS = 15 * 60 * 1000;
+
+// The ledger's primary key.
+export type RecapKey = { scope_id: string; puzzle_date: string; channel_id: string };
+
+// Which path is claiming: 'cron' = the nightly bot post, 'launch' = the bot-less piggyback. Stamped
+// on the row at claim time and never rewritten. It exists for recap_pending()'s DORMANCY window,
+// which counts ONLY 'cron' rows: dormancy answers "can the bot still post here?", and a piggyback
+// (delivered on a launcher's interaction webhook, no bot involved) is no evidence either way. Left
+// in, a piggyback delivery would keep flapping an ex-bot channel out of dormancy every few nights —
+// see the dormancy block in supabase/schema.sql.
+export type RecapVia = 'cron' | 'launch';
+
+// What claiming the slot did:
+//   'claimed'   — fresh insert, this caller owns the post.
+//   'recovered' — took over a stale claim orphaned by a killed run; also owns the post.
+//   'taken'     — someone else has it ('posted'/'failed', or a fresh in-flight claim): do nothing.
+//   'error'     — the claim write itself failed (schema/DB trouble): do nothing.
+export type ClaimResult = 'claimed' | 'recovered' | 'taken' | 'error';
+
+// Claim the recap slot for one (scope, date, channel). A fresh insert wins it. On a unique violation
+// the row already exists, so take it over ONLY if it's a stale 'claimed' row — an atomic CAS:
+// re-stamp attempted_at where the status is still 'claimed' AND the prior attempt is older than
+// STALE_CLAIM_MS. If nothing matches, leave it alone.
+export async function claimRecapSlot(
+  db: SupabaseClient,
+  key: RecapKey,
+  via: RecapVia,
+  now: number = Date.now(),
+): Promise<ClaimResult> {
+  const nowIso = new Date(now).toISOString();
+  const claim = await db
+    .from('recap_posts')
+    .insert({ ...key, status: 'claimed', attempted_at: nowIso, via });
+  if (!claim.error) return 'claimed';
+  if (claim.error.code !== '23505') return 'error';
+  const cutoff = new Date(now - STALE_CLAIM_MS).toISOString();
+  const { data: taken } = await db
+    .from('recap_posts')
+    // A takeover re-stamps `via` as well: whoever recovers an orphaned claim is the path that will
+    // actually deliver (or fail) this date, and via must describe that attempt. Otherwise a launch
+    // rescuing a killed cron's claim would file a 'launch' delivery as cron evidence and re-open the
+    // very dormancy flap the column exists to close (and vice versa).
+    .update({ attempted_at: nowIso, via })
+    .match(key)
+    .eq('status', 'claimed')
+    .lt('attempted_at', cutoff)
+    .select('scope_id');
+  return Array.isArray(taken) && taken.length > 0 ? 'recovered' : 'taken';
+}
+
+// Stamp the outcome on the claimed row: a delivery is proven (message_id), a failure is queryable
+// (status/http_status/discord_code/error).
+export function recordRecapOutcome(
+  db: SupabaseClient,
+  key: RecapKey,
+  fields: Record<string, unknown>,
+): PromiseLike<unknown> {
+  return db.from('recap_posts').update(fields).match(key);
+}
+
+// Release the claim after a TRANSIENT failure, so a later run (or launch) retries this date.
+export function releaseRecapSlot(db: SupabaseClient, key: RecapKey): PromiseLike<unknown> {
+  return db.from('recap_posts').delete().match(key);
+}

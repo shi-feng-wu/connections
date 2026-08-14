@@ -1,8 +1,9 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { waitUntil } from "@vercel/functions";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import {
-  installNudgePayload,
   missingPermsNudgePayload,
+  piggybackRecapText,
 } from "../src/discord-messages.js";
 import type { Puzzle } from "../src/game.js";
 import { canonicalScope } from "../src/scope.js";
@@ -20,6 +21,7 @@ import {
   withGrids,
   withinPostCooldown,
 } from "./_livecard.js";
+import { recapPayload } from "./_recap.js";
 
 // The "who's playing" card renderer, split out of /api/interactions so the latency-critical launch
 // ACK function stays tiny (no @napi-rs/canvas native addon in its deployment) and reliably answers
@@ -28,11 +30,17 @@ import {
 // with the verified interaction (token included), and this function renders + posts the card in the
 // background. Authenticated by INTERNAL_SECRET (mirrors cron-recap's Bearer check), NOT the Discord
 // signature — the secret proves the call came from our own interactions function.
+//
+// It also carries the BOT-LESS RECAP: in a server without the bot, nothing can post at midnight, so
+// the day's first launcher gets yesterday's recap as a second followup right behind the card (see
+// piggybackRecap). That's why this function renders two cards' worth of canvas in the worst case.
 
 const MESSAGE_COMPONENT = 3;
 
-// Ephemeral "add the bot" nudge (installNudgePayload) for a launch in a server without the
-// bot — re-shown to the same player in the same room at most once per cooldown.
+// Ephemeral nudge cooldown: the "bot can't post in this channel" nudge (missingPermsNudgePayload)
+// is re-shown to the same player in the same room at most once per this window. (The old bot-less
+// "Add to Server" nudge is gone — a bot-less server now gets the piggybacked recap below, whose one
+// small aside line carries the same invite; see piggybackRecap.)
 const INSTALL_NUDGE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Discord permission bits the card/recap need in a channel (compared as BigInt — the bitfield
@@ -335,16 +343,33 @@ async function postCard(body: LaunchInteraction): Promise<void> {
   // A user-install launch in a server without the bot still has a guild_id (so the scope gate above
   // passes), but the bot can't post/edit there — it isn't a member. The bot-edited card below would
   // 403, so post the SAME token-backed card a DM gets: created and edited on the launcher's
-  // interaction token for its ~15-min window (no bot/perms needed), after which it freezes. Still
-  // show the ephemeral "Add to Server" pitch — the all-day card + recaps need the bot installed
-  // (nudgeOnce dedupes it to once per cooldown, so it's not spammy alongside the card).
+  // interaction token for its ~15-min window (no bot/perms needed), after which it freezes. Then
+  // piggyback YESTERDAY'S RECAP as a second followup on the same token — the nightly cron can never
+  // reach this room (recap_channels() excludes token-backed cards), so the day's first launch is the
+  // only chance to deliver it. That recap carries the one-line invite aside; the old ephemeral "Add
+  // to Server" popup is gone.
   if (isUserInstallOnly(body)) {
-    console.log("[card] bot-less server → token-backed card + install nudge", {
+    console.log("[card] bot-less server → token-backed card + piggyback recap", {
       guildId,
       channel: channelId,
     });
+    const { admin } = await import("./_admin.js");
+    const db = admin();
+    // A channel a moderator muted with /mute stays silent here too. This is the ONLY optout check on
+    // this path (the bot-path check below is past the early return), and it covers BOTH the token
+    // card and the piggyback.
+    if (db && (await postsOptedOut(db, scope, channelId))) {
+      console.log("[card] skip: posts disabled for channel", { scope, channel: channelId });
+      return;
+    }
     await postDmCard(body, scope, channelId, appId, token);
-    await nudgeInstall(body, scope, appId, token);
+    // Live card FIRST, recap second. Fire-and-forget: the recap must never affect the launch (same
+    // posture the install nudge had) — piggybackRecap swallows its own failures, and this catch is
+    // the backstop.
+    if (db)
+      await piggybackRecap(db, scope, channelId, appId, token).catch((e) =>
+        console.warn("[piggyback] threw", e instanceof Error ? e.message : e),
+      );
     return;
   }
 
@@ -392,18 +417,11 @@ async function postCard(body: LaunchInteraction): Promise<void> {
     return;
   }
 
-  // A channel a moderator turned off with /disable-posts stays off — no live card AND no recap —
-  // until /enable-posts is run there again (post_optouts, checked here + subtracted by
-  // recap_channels()). Sticky: a launch/solve here does NOT re-arm it. The Activity still opens and
-  // scores still record; we only skip the bot's public post. Bail before the render so a disabled
-  // channel costs nothing.
-  const { data: optout } = await db
-    .from("post_optouts")
-    .select("scope_id")
-    .eq("scope_id", scope)
-    .eq("channel_id", channelId)
-    .maybeSingle();
-  if (optout) {
+  // A channel a moderator muted with /mute stays off — no live card AND no recap — until /unmute is
+  // run there again (post_optouts, checked here + subtracted by recap_channels()). Sticky: a
+  // launch/solve here does NOT re-arm it. The Activity still opens and scores still record; we only
+  // skip the bot's public post. Bail before the render so a disabled channel costs nothing.
+  if (await postsOptedOut(db, scope, channelId)) {
     console.log("[card] skip: posts disabled for channel", { scope, channel: channelId });
     return;
   }
@@ -602,11 +620,182 @@ async function postCard(body: LaunchInteraction): Promise<void> {
     );
 }
 
+// Has a moderator muted this channel with /mute? One indexed point-read on post_optouts. Sticky:
+// only /unmute in that channel clears it. Used by BOTH post paths — the bot card below and the
+// bot-less token card + piggyback recap above — so muting silences everything we'd post there.
+// Exported for tests.
+export async function postsOptedOut(
+  db: SupabaseClient,
+  scope: string,
+  channelId: string,
+): Promise<boolean> {
+  const { data } = await db
+    .from("post_optouts")
+    .select("scope_id")
+    .eq("scope_id", scope)
+    .eq("channel_id", channelId)
+    .maybeSingle();
+  return !!data;
+}
+
+// Has this (scope, channel) played before today? The piggyback recap must NEVER fire on a channel's
+// first-ever launch: yesterday's recap in a room that has no yesterday is a confusing cold open (and
+// an empty "nobody played" card) for someone who just discovered the game.
+//
+// The predicate is "a live_cards row for this exact (scope, channel) dated before today". live_cards
+// is written only after a card actually posted in that room, which is the same "this room has a
+// habit" signal recap_channels() uses for bot rooms, and it's a PK-prefix lookup (the PK is
+// (scope_id, puzzle_date, channel_id), so this scans one guild's card rows — ~one per day played).
+// NOT scores: a scores row is pinned to the scope where a player FIRST finished, so it can't tell
+// you whether THIS channel has history. Comparing against today (not yesterday) also makes the gate
+// independent of ordering — postDmCard has already written today's row by the time we run.
+// Exported for tests.
+export async function roomEstablished(
+  db: SupabaseClient,
+  scope: string,
+  channelId: string,
+  today: string,
+): Promise<boolean> {
+  const { data } = await db
+    .from("live_cards")
+    .select("puzzle_date")
+    .eq("scope_id", scope)
+    .eq("channel_id", channelId)
+    .lt("puzzle_date", today)
+    .limit(1)
+    .maybeSingle();
+  return !!data;
+}
+
+// Post YESTERDAY'S RECAP into a bot-less server, riding the launcher's interaction token as a SECOND
+// followup right behind the "who's playing" card (Discord honours multiple followups on one token
+// for ~15 min). This is the only way these rooms can ever get a recap: the nightly cron posts as the
+// bot, and there is no bot here — recap_channels() excludes token-backed cards for exactly that
+// reason. So the day's FIRST launcher delivers it, once.
+//
+// Gates, in order: the channel isn't muted (checked by the caller, before the live card), the room
+// has history (roomEstablished), and this caller wins the recap_posts ledger claim for
+// (scope, yesterday, channel) — the same key and the same stale-claim CAS the cron uses, so a second
+// launch today, or a cron run if the bot ever lands here mid-day, quietly skips instead of
+// double-posting. Outcomes are recorded on the ledger row exactly like the cron's.
+//
+// Every failure is swallowed: this runs after the launch is already ACKed and must never affect it.
+async function piggybackRecap(
+  db: SupabaseClient,
+  scope: string,
+  channelId: string,
+  appId: string,
+  token: string,
+): Promise<void> {
+  const { todayET, yesterdayET } = await import("./_puzzles.js");
+  const date = yesterdayET();
+
+  if (!(await roomEstablished(db, scope, channelId, todayET()))) {
+    console.log("[piggyback] skip: no history in this room yet", { scope, channel: channelId });
+    return;
+  }
+
+  const { claimRecapSlot, recordRecapOutcome, releaseRecapSlot } = await import("./_recap.js");
+  const key = { scope_id: scope, puzzle_date: date, channel_id: channelId };
+  // via 'launch': this row is a piggyback attempt, so recap_pending()'s dormancy window skips it —
+  // dormancy is a verdict on whether the BOT can post here, which a webhook followup can't test.
+  const claim = await claimRecapSlot(db, key, "launch");
+  if (claim === "error") {
+    console.warn("[piggyback] skip: ledger claim failed", { scope, channel: channelId });
+    return;
+  }
+  if (claim === "taken") {
+    // Already posted/failed for this date, or another launch is mid-post right now.
+    console.log("[piggyback] skip: recap already claimed", { scope, channel: channelId, date });
+    return;
+  }
+  if (claim === "recovered")
+    console.log("[piggyback] recovered stale claim", { scope, channel: channelId, date });
+
+  const release = () => releaseRecapSlot(db, key);
+  try {
+    // The same card the cron builds (api/_recap-build.ts). Dynamically imported so this module's
+    // canvas dependency stays where it already was. The guild/channel name lookups inside 403 in a
+    // bot-less guild and fall back to the static eyebrow.
+    const { buildRecap } = await import("./_recap-build.js");
+    const { text, png } = await buildRecap(db, {
+      scope,
+      channel: channelId,
+      date,
+      botToken: process.env.DISCORD_BOT_TOKEN ?? "",
+    });
+    // Only the piggybacked recap carries the invite aside; a bot-posted recap never does.
+    const r = await sendCard(
+      interactionFollowupUrl(appId, token),
+      recapPayload(piggybackRecapText(text, appId)),
+      png,
+      "POST",
+      "recap.png",
+    );
+    if (r.ok) {
+      const messageId = ((await r.json().catch(() => ({}))) as { id?: string }).id ?? null;
+      await recordRecapOutcome(db, key, {
+        status: "posted",
+        http_status: r.status,
+        message_id: messageId,
+        discord_code: null,
+        error: null,
+      });
+      console.log("[piggyback] posted", { scope, channel: channelId, date, messageId });
+      return;
+    }
+    const bodyText = await r.text().catch(() => "");
+    let discordCode: number | null = null;
+    try {
+      discordCode = (JSON.parse(bodyText) as { code?: number }).code ?? null;
+    } catch {
+      /* non-JSON body */
+    }
+    // Transient → release the slot so the next launch today retries. 429/5xx as in the cron, PLUS
+    // 404: on the cron's bot-token POST a 404 means the CHANNEL is gone (permanent), but here it's
+    // "Unknown Webhook" — the launcher's token lapsed before this background post ran — which the
+    // next launcher's fresh token fixes. Burning the date over an expired token would cost the room
+    // its recap for no reason.
+    if (r.status === 429 || r.status === 404 || r.status >= 500) {
+      await release();
+      cardLog(r.status)("[piggyback] post failed (will retry on a later launch)", {
+        scope,
+        channel: channelId,
+        status: r.status,
+        code: discordCode,
+      });
+      return;
+    }
+    // Permanent 4xx: keep the row so we don't loop, and record why.
+    await recordRecapOutcome(db, key, {
+      status: "failed",
+      http_status: r.status,
+      discord_code: discordCode,
+      error: bodyText.slice(0, 500),
+    });
+    console.warn("[piggyback] post failed", {
+      scope,
+      channel: channelId,
+      status: r.status,
+      code: discordCode,
+    });
+  } catch (e) {
+    // Render/RPC blew up mid-claim: release so a later launch can try again.
+    await release();
+    console.warn("[piggyback] build/post threw", {
+      scope,
+      channel: channelId,
+      err: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
 // Send an ephemeral followup to the launcher at most once per (scope, player) per
-// INSTALL_NUDGE_COOLDOWN_MS, recording the send in install_nudges. Shared by the bot-less
-// "Add to Server" nudge and the can't-post-here permissions nudge. The throttle row is claimed
-// BEFORE the followup is sent, so a double-fired interaction can't double-nudge. Any DB error
-// skips the nudge entirely — it's a growth/help nicety and must never noise up a launch.
+// INSTALL_NUDGE_COOLDOWN_MS, recording the send in install_nudges. Used by the can't-post-here
+// permissions nudge (the only nudge left — the bot-less install pitch was replaced by the piggyback
+// recap's aside). The throttle row is claimed BEFORE the followup is sent, so a double-fired
+// interaction can't double-nudge. Any DB error skips the nudge entirely — it's a help nicety and
+// must never noise up a launch.
 async function nudgeOnce(
   body: LaunchInteraction,
   scope: string,
@@ -667,23 +856,6 @@ async function nudgeOnce(
       channel: body.channel_id,
       user: u.id,
     });
-}
-
-// Show the launcher of a bot-less server the ephemeral "Add to Server" pitch.
-async function nudgeInstall(
-  body: LaunchInteraction,
-  scope: string,
-  appId: string,
-  token: string,
-): Promise<void> {
-  await nudgeOnce(
-    body,
-    scope,
-    appId,
-    token,
-    installNudgePayload(appId),
-    "nudge",
-  );
 }
 
 // Internal endpoint: /api/interactions calls this (server-to-server) after it has ACKed the launch,

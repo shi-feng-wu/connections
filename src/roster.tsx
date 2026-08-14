@@ -700,13 +700,15 @@ function RecapPrompt({ onAdd }: { onAdd: () => void }) {
         </div>
       </div>
       {/* footer row: the admin caveat sits on the Enable button's baseline (no dead
-          space under the copy) and /enable-posts reads as a command token */}
+          space under the copy) and /invite-bot reads as a command token. Anyone can RUN
+          /invite-bot (it just hands over the link); completing the add needs Manage Server. */}
       <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/[0.06] pt-3">
         <div className="text-pretty text-[10.5px] leading-snug text-zinc-600">
-          Needs Manage Server, or ask an admin to run{" "}
+          Adding needs Manage Server. Not you? Share{" "}
           <span className="whitespace-nowrap rounded-[5px] bg-white/[0.06] px-[5px] py-px font-semibold text-zinc-400">
-            /enable-posts
-          </span>
+            /invite-bot
+          </span>{" "}
+          with an admin
         </div>
         <HoverButton
           onClick={onAdd}

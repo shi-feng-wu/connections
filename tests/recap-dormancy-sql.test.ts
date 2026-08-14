@@ -1,0 +1,367 @@
+import { readFileSync } from "node:fs";
+import { PGlite } from "@electric-sql/pglite";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+
+// recap_pending() DORMANCY: a 'failed' ledger row is terminal for its DATE only, so a channel the
+// bot was kicked from (or whose channel is gone) used to be re-rendered and re-POSTed every single
+// night. It now drops out of the queue once its last 3 terminal outcomes are all 'failed' AND no
+// bot-backed launch has happened since the last failure — a fresh launch is the revival signal.
+// Both dormancy probes count ONLY recap_posts.via = 'cron' rows: a piggybacked recap (via 'launch',
+// posted on a launcher's interaction webhook by /api/post-card) tests nothing about whether the BOT
+// can post here, so it must neither lift dormancy nor move the revival boundary.
+// Runs the real recap_channels() + recap_pending() from supabase/schema.sql against Postgres-in-WASM
+// (PGlite) over minimal live_cards / post_optouts / recap_posts tables.
+
+const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
+const fnBlocks = ["recap_channels", "recap_pending"].map(
+  (name) => schema.match(new RegExp(`create or replace function public\\.${name}[\\s\\S]*?\\$\\$;`))?.[0],
+);
+
+// The date the nightly run is recapping. Every fixture's history sits before it.
+const DATE = "2026-07-10";
+
+let db: PGlite;
+
+beforeAll(async () => {
+  db = await PGlite.create();
+  // Minimal shape of what the two functions read: live_cards (the recap target set), post_optouts
+  // (subtracted by recap_channels), recap_posts (the outcome ledger dormancy is derived from). No
+  // recap_posts_served_idx here — it's a planner concern, not a correctness one.
+  await db.exec(`
+    create table public.live_cards (
+      scope_id    text not null,
+      puzzle_date date not null,
+      channel_id  text not null,
+      message_id  text,
+      interaction_token text,
+      bot_can_post boolean,
+      primary key (scope_id, puzzle_date, channel_id)
+    );
+    create table public.post_optouts (
+      scope_id   text not null,
+      channel_id text not null,
+      opted_out_by text,
+      opted_out_at timestamptz not null default now(),
+      primary key (scope_id, channel_id)
+    );
+    create table public.recap_posts (
+      scope_id    text not null,
+      puzzle_date date not null,
+      channel_id  text not null,
+      status      text,
+      attempted_at timestamptz,
+      via         text not null default 'cron', -- 'cron' = nightly bot post, 'launch' = piggyback
+      primary key (scope_id, puzzle_date, channel_id)
+    );
+  `);
+  // `language sql` bodies are parsed at CREATE time, so recap_channels() must exist first.
+  for (const block of fnBlocks) expect(block).toBeTruthy();
+  for (const block of fnBlocks) await db.exec(block as string);
+});
+
+beforeEach(async () => {
+  await db.exec(`truncate public.live_cards, public.post_optouts, public.recap_posts`);
+});
+
+type CardOpts = {
+  message_id?: string | null;
+  interaction_token?: string | null;
+  bot_can_post?: boolean | null;
+};
+
+// A launch record. Defaults to a BOT-BACKED card (message_id set, no interaction token) — which is
+// both what makes a (scope, channel) a recap target at all and what counts as a revival. Every
+// dormancy fixture needs one dated at/before its failures, or the channel isn't in recap_channels()
+// and the test would pass for the wrong reason.
+const card = (scope: string, channel: string, date: string, o: CardOpts = {}) =>
+  db.query(
+    `insert into public.live_cards (scope_id, puzzle_date, channel_id, message_id, interaction_token, bot_can_post)
+     values ($1, $2, $3, $4, $5, $6)`,
+    [scope, date, channel, o.message_id ?? "m", o.interaction_token ?? null, o.bot_can_post ?? null],
+  );
+
+// Ledger history for a channel: [puzzle_date, status, via?] rows, oldest first by convention. via
+// defaults to 'cron' — the nightly bot post, and what every row in the ledger was before the
+// piggyback existed (the column's prod default backfills exactly this way).
+const ledger = async (
+  scope: string,
+  channel: string,
+  rows: [string, string, ("cron" | "launch")?][],
+) => {
+  for (const [date, status, via] of rows) {
+    await db.query(
+      `insert into public.recap_posts (scope_id, puzzle_date, channel_id, status, attempted_at, via)
+       values ($1, $2, $3, $4, now(), $5)`,
+      [scope, date, channel, status, via ?? "cron"],
+    );
+  }
+};
+
+const pending = async (date = DATE): Promise<string[]> =>
+  (
+    await db.query<{ scope_id: string; channel_id: string }>(
+      `select scope_id, channel_id from public.recap_pending($1::date, 100)`,
+      [date],
+    )
+  ).rows
+    .map((r) => `${r.scope_id}/${r.channel_id}`)
+    .sort();
+
+const channels = async (): Promise<string[]> =>
+  (
+    await db.query<{ scope_id: string; channel_id: string }>(
+      `select scope_id, channel_id from public.recap_channels() order by scope_id, channel_id`,
+    )
+  ).rows.map((r) => `${r.scope_id}/${r.channel_id}`);
+
+// A healthy control channel present in every test: a card, no failures. Nothing about dormancy may
+// touch it.
+const healthy = () => card("g:ok", "chOk", "2026-07-01");
+
+describe("recap_pending dormancy", () => {
+  it("goes dormant on the 3rd consecutive failed night, not the 2nd", async () => {
+    await healthy();
+    await card("g:1", "chA", "2026-07-01"); // the launch that made it a recap target
+    await ledger("g:1", "chA", [
+      ["2026-07-07", "failed"],
+      ["2026-07-08", "failed"],
+    ]);
+    // Two failures is still a blip — the channel keeps getting tried.
+    expect(await pending()).toEqual(["g:1/chA", "g:ok/chOk"]);
+
+    await ledger("g:1", "chA", [["2026-07-09", "failed"]]);
+    expect(await pending()).toEqual(["g:ok/chOk"]); // 3 in a row → dormant
+
+    // The exclusion is dormancy, not target membership: chA is still a recap_channels() target.
+    expect(await channels()).toEqual(["g:1/chA", "g:ok/chOk"]);
+  });
+
+  it("looks at the LAST 3 only: a 'posted' inside the window revives nothing, outside it doesn't save you", async () => {
+    await healthy();
+    // A 'posted' inside the last 3 → not 3 consecutive failures → still queued.
+    await card("g:2", "chB", "2026-07-01");
+    await ledger("g:2", "chB", [
+      ["2026-07-06", "failed"],
+      ["2026-07-07", "failed"],
+      ["2026-07-08", "failed"],
+      ["2026-07-09", "posted"],
+    ]);
+    expect(await pending()).toContain("g:2/chB");
+
+    // A 'posted' OLDER than the last 3 failures doesn't matter — the run of 3 is what counts.
+    await card("g:3", "chC", "2026-07-01");
+    await ledger("g:3", "chC", [
+      ["2026-07-04", "failed"],
+      ["2026-07-05", "failed"],
+      ["2026-07-06", "posted"],
+      ["2026-07-07", "failed"],
+      ["2026-07-08", "failed"],
+      ["2026-07-09", "failed"],
+    ]);
+    expect(await pending()).toEqual(["g:2/chB", "g:ok/chOk"]); // chC dormant, chB kept
+  });
+
+  it("is revived by a bot-backed launch after the last failure (bot_can_post null or true)", async () => {
+    await healthy();
+    // g:4 will be revived by a bot_can_post = NULL (unknown) card, g:5 by an explicit true one.
+    for (const scope of ["g:4", "g:5"]) {
+      await card(scope, "chD", "2026-07-01");
+      await ledger(scope, "chD", [
+        ["2026-07-07", "failed"],
+        ["2026-07-08", "failed"],
+        ["2026-07-09", "failed"],
+      ]);
+    }
+    expect(await pending()).toEqual(["g:ok/chOk"]); // both dormant to start
+
+    // Somebody played there again, and the bot posted the card: "play there again if you want
+    // recaps there" — the channel comes straight back into the queue.
+    await card("g:4", "chD", "2026-07-10");
+    await card("g:5", "chD", "2026-07-10", { bot_can_post: true });
+    expect(await pending()).toEqual(["g:4/chD", "g:5/chD", "g:ok/chOk"]);
+  });
+
+  it("needs the reviving launch to be strictly AFTER the last failure, not the same day", async () => {
+    await healthy();
+    await card("g:13", "chJ", "2026-07-01");
+    await ledger("g:13", "chJ", [
+      ["2026-07-07", "failed"],
+      ["2026-07-08", "failed"],
+      ["2026-07-09", "failed"],
+    ]);
+    // A card dated the same day as the last failure was posted BEFORE that night's recap ran (the
+    // recap for 07-09 goes out on the 10th), so it's the launch that failure already knew about —
+    // not evidence the bot came back.
+    await card("g:13", "chJ", "2026-07-09");
+    expect(await pending()).toEqual(["g:ok/chOk"]);
+  });
+
+  it("is NOT revived by a token-backed launch (the bot is absent — that's the whole point)", async () => {
+    await healthy();
+    await card("g:6", "chE", "2026-07-01");
+    await ledger("g:6", "chE", [
+      ["2026-07-07", "failed"],
+      ["2026-07-08", "failed"],
+      ["2026-07-09", "failed"],
+    ]);
+    // A bot-less launch: the card went out on the launcher's interaction token, which needs no bot
+    // channel perms and so proves nothing about the bot being back.
+    await card("g:6", "chE", "2026-07-10", { interaction_token: "tok-abc" });
+    expect(await pending()).toEqual(["g:ok/chOk"]);
+  });
+
+  it("is NOT revived by a launch the bot explicitly can't post in (bot_can_post = false)", async () => {
+    await healthy();
+    await card("g:7", "chF", "2026-07-01"); // bot_can_post null → still a recap_channels() target
+    await ledger("g:7", "chF", [
+      ["2026-07-07", "failed"],
+      ["2026-07-08", "failed"],
+      ["2026-07-09", "failed"],
+    ]);
+    await card("g:7", "chF", "2026-07-10", { bot_can_post: false });
+
+    // recap_channels() filters per ROW, so the old null row keeps chF a target — proving the
+    // exclusion below is the revival probe rejecting the new row, not target membership.
+    expect(await channels()).toEqual(["g:7/chF", "g:ok/chOk"]);
+    expect(await pending()).toEqual(["g:ok/chOk"]);
+  });
+
+  it("ignores 'claimed' rows when counting the last 3 outcomes", async () => {
+    await healthy();
+    // A killed run left a 'claimed' row mid-history. It's in flight, not an outcome: the window
+    // skips past it to the 3rd real failure → dormant.
+    await card("g:8", "chG", "2026-07-01");
+    await ledger("g:8", "chG", [
+      ["2026-07-06", "failed"],
+      ["2026-07-07", "failed"],
+      ["2026-07-08", "claimed"],
+      ["2026-07-09", "failed"],
+    ]);
+
+    // …and it can't be counted AS a failure either: two real failures plus a claim is a window of
+    // 2, which is not dormant.
+    await card("g:9", "chH", "2026-07-01");
+    await ledger("g:9", "chH", [
+      ["2026-07-07", "claimed"],
+      ["2026-07-08", "failed"],
+      ["2026-07-09", "failed"],
+    ]);
+
+    expect(await pending()).toEqual(["g:9/chH", "g:ok/chOk"]); // chG dormant, chH kept
+  });
+
+  it("leaves healthy neighbours alone (no collateral exclusion)", async () => {
+    await healthy();
+    await card("g:10", "chDead", "2026-07-01");
+    await ledger("g:10", "chDead", [
+      ["2026-07-07", "failed"],
+      ["2026-07-08", "failed"],
+      ["2026-07-09", "failed"],
+    ]);
+    // Same GUILD, different channel: dormancy is per (scope, channel), so this one is untouched.
+    await card("g:10", "chLive", "2026-07-01");
+    await ledger("g:10", "chLive", [
+      ["2026-07-07", "posted"],
+      ["2026-07-08", "posted"],
+      ["2026-07-09", "posted"],
+    ]);
+    // A channel with no ledger history at all is never dormant (empty window).
+    await card("g:11", "chNew", "2026-07-09");
+
+    expect(await pending()).toEqual(["g:10/chLive", "g:11/chNew", "g:ok/chOk"]);
+  });
+
+  // ——— via: dormancy is computed from CRON outcomes only ———
+  // The failure this closes: an EX-BOT channel (bot removed, but its old bot-backed live_cards rows
+  // keep it in recap_channels()) goes dormant, the piggyback then delivers on a launch, and that
+  // 'posted' row lands in the last-3 window and lifts dormancy — so the cron burns the next date
+  // with a fresh 'failed' before any launch can claim it, and the room flaps between the two,
+  // landing a recap roughly one day in four while paying the nightly render dormancy exists to stop.
+  it("stays dormant when the only non-failure is a piggybacked (via 'launch') delivery", async () => {
+    await healthy();
+    await card("g:14", "chK", "2026-07-01");
+    await ledger("g:14", "chK", [
+      ["2026-07-07", "failed"],
+      ["2026-07-08", "failed"],
+      ["2026-07-09", "failed"],
+    ]);
+    expect(await pending("2026-07-10")).toEqual(["g:ok/chOk"]); // dormant, so the cron skips 07-10
+    // A launcher shows up on the 11th and piggybacks the 07-10 recap: a delivery, but by webhook,
+    // with no bot involved. Counting it would re-open the queue for a channel the bot still can't
+    // post in.
+    await ledger("g:14", "chK", [["2026-07-10", "posted", "launch"]]);
+    expect(await pending("2026-07-11")).toEqual(["g:ok/chOk"]); // still dormant
+  });
+
+  it("DOES lift dormancy for the same history when that delivery was the cron's own", async () => {
+    // Identical fixture, one column different — this is the control that proves the test above is
+    // measuring `via` and not something else. A cron 'posted' means the bot really did post here.
+    await healthy();
+    await card("g:15", "chL", "2026-07-01");
+    await ledger("g:15", "chL", [
+      ["2026-07-07", "failed"],
+      ["2026-07-08", "failed"],
+      ["2026-07-09", "failed"],
+      ["2026-07-10", "posted", "cron"],
+    ]);
+    expect(await pending("2026-07-11")).toEqual(["g:15/chL", "g:ok/chOk"]);
+  });
+
+  it("doesn't count a piggyback FAILURE toward the three strikes", async () => {
+    await healthy();
+    // Two real cron failures plus a failed piggyback. The launch row is not bot evidence, so the
+    // cron window is 2 — a blip, not dormancy.
+    await card("g:16", "chM", "2026-07-01");
+    await ledger("g:16", "chM", [
+      ["2026-07-08", "failed"],
+      ["2026-07-09", "failed"],
+      ["2026-07-10", "failed", "launch"],
+    ]);
+    expect(await pending("2026-07-11")).toContain("g:16/chM");
+  });
+
+  it("doesn't let a piggyback failure drag the revival boundary past a real relaunch", async () => {
+    await healthy();
+    await card("g:17", "chN", "2026-07-01");
+    await ledger("g:17", "chN", [
+      ["2026-07-06", "failed"],
+      ["2026-07-07", "failed"],
+      ["2026-07-08", "failed"],
+    ]);
+    expect(await pending("2026-07-09")).toEqual(["g:ok/chOk"]); // dormant
+    // The bot is added back and someone plays: a bot-backed card after the last CRON failure, which
+    // is the revival contract.
+    await card("g:17", "chN", "2026-07-09");
+    expect(await pending("2026-07-10")).toContain("g:17/chN");
+    // A later failed PIGGYBACK must not move the "last failure" bar past that relaunch and re-bury
+    // the channel — only cron failures define the boundary.
+    await ledger("g:17", "chN", [["2026-07-10", "failed", "launch"]]);
+    expect(await pending("2026-07-11")).toContain("g:17/chN");
+  });
+
+  it("keeps the per-date terminal guard cross-via: one recap per date, whichever path posted it", async () => {
+    // The per-date check is deliberately NOT filtered by via — otherwise a revived channel could get
+    // the piggyback AND the cron recap for the same day.
+    await healthy();
+    await card("g:18", "chO", "2026-07-01");
+    await ledger("g:18", "chO", [[DATE, "posted", "launch"]]); // the day's first launcher delivered it
+    expect(await pending()).toEqual(["g:ok/chOk"]); // the cron must not post it again
+
+    // …and the mirror: a cron delivery blocks a later piggyback claim for the same date (the TS-side
+    // claim sees the row and skips — see tests/piggyback-recap.test.ts).
+    await db.exec(`update public.recap_posts set via = 'cron' where channel_id = 'chO'`);
+    expect(await pending()).toEqual(["g:ok/chOk"]);
+  });
+
+  it("still excludes a channel already terminal for p_date itself (the per-date guard is intact)", async () => {
+    await healthy();
+    await card("g:12", "chI", "2026-07-01");
+    await ledger("g:12", "chI", [[DATE, "posted"]]); // tonight's recap already delivered
+    expect(await pending()).toEqual(["g:ok/chOk"]);
+
+    // …and a failure on p_date alone (1 in the window, from a later date's point of view) does not
+    // make it dormant the next night.
+    await db.exec(`update public.recap_posts set status = 'failed' where channel_id = 'chI'`);
+    expect(await pending("2026-07-11")).toEqual(["g:12/chI", "g:ok/chOk"]);
+  });
+});

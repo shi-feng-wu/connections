@@ -26,14 +26,15 @@ import { DayTurnover, GameView, LoadingScreen } from "./components";
 import { DiscordMessage } from "./discord-message-preview";
 import {
   donateMessage,
-  enablePostsAddBot,
   enablePostsAlreadyEnabled,
   enablePostsNeedPerms,
   enablePostsReenabled,
-  installNudgePayload,
+  helpMessage,
+  inviteBotMessage,
   IS_COMPONENTS_V2,
   type MessageData,
   missingPermsNudgePayload,
+  unmuteBotless,
   replyDm,
   shareCard,
   disablePostsMessage,
@@ -1088,6 +1089,12 @@ function State({
         // Bot-less-guild path, so the end states show the recap pitch (GameView only
         // renders it once the run is over, so in-progress states stay clean).
         onAddBot={noop}
+        // Mock share plumbing so the end screen's share menu shows EVERY row for
+        // screenshots (in prod these come gated from App). The handlers just pretend:
+        // Discord-share reports "copied", copy-image reports success, external no-ops.
+        onShareLink={() => Promise.resolve("copied" as const)}
+        onCopyImage={() => Promise.resolve(true)}
+        onOpenExternal={noop}
       />
     </section>
   );
@@ -1658,45 +1665,47 @@ const REPLY_DM_PAYLOAD: MessageData = replyDm({
 const MESSAGES = (
   <>
     <DiscordMessage
-      label="/enable-posts · server without the bot"
-      payload={enablePostsAddBot(PREVIEW_APP_ID)}
-    />
-    <DiscordMessage
-      label="/enable-posts · bot already added, posts on"
+      label="/unmute · bot already added, posts on"
       payload={enablePostsAlreadyEnabled()}
     />
     <DiscordMessage
-      label="/enable-posts · posts turned back on"
+      label="/unmute · posts turned back on"
       payload={enablePostsReenabled()}
     />
     <DiscordMessage
-      label="/enable-posts · non-mod, posts are off"
-      payload={enablePostsNeedPerms()}
+      label="/unmute · server without the bot, posts on"
+      payload={unmuteBotless(PREVIEW_APP_ID, false)}
     />
     <DiscordMessage
-      label="Launch nudge · server without the bot"
-      payload={installNudgePayload(PREVIEW_APP_ID)}
+      label="/unmute · server without the bot, posts turned back on"
+      payload={unmuteBotless(PREVIEW_APP_ID, true)}
+    />
+    <DiscordMessage
+      label="/unmute · non-mod, posts are off"
+      payload={enablePostsNeedPerms()}
     />
     <DiscordMessage
       label="Launch nudge · bot can’t post in this channel"
       payload={missingPermsNudgePayload()}
     />
     <DiscordMessage
-      label="/disable-posts · posts turned off"
+      label="/mute · posts turned off"
       payload={disablePostsMessage("done")}
     />
     <DiscordMessage
-      label="/disable-posts · already off"
+      label="/mute · already off"
       payload={disablePostsMessage("already")}
     />
     <DiscordMessage
-      label="/disable-posts · not in a server"
+      label="/mute · not in a server"
       payload={disablePostsMessage("no-guild")}
     />
     <DiscordMessage
-      label="/disable-posts · couldn’t update"
+      label="/mute · couldn’t update"
       payload={disablePostsMessage("error")}
     />
+    <DiscordMessage label="/invite-bot" payload={inviteBotMessage(PREVIEW_APP_ID)} />
+    <DiscordMessage label="/help" payload={helpMessage()} />
     <DiscordMessage label="/donate" payload={donateMessage()} />
     <DiscordMessage label="/share · result grid" payload={SHARE_PAYLOAD} />
     <DiscordMessage label="Reply DM · dev answers a feedback ticket" payload={REPLY_DM_PAYLOAD} />

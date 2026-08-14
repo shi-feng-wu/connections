@@ -1,6 +1,6 @@
 import { Menu } from "lucide-react";
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { Board, type BoardSnapshot } from "./board";
+import { Board, type BoardSnapshot, type ShareOutcome } from "./board";
 import type { ChatBundle } from "./chat";
 import { LEVELS, type Game, type Puzzle } from "./game";
 import { HoverButton } from "./hoverbutton";
@@ -111,7 +111,7 @@ export function LoadingScreen({
   wedged?: boolean;
   date?: string;
   number?: number;
-  // show the /enable-posts tip — App passes true only in a guild that positively
+  // show the /invite-bot tip — App passes true only in a guild that positively
   // lacks the bot, so installed servers and DMs load clean.
   tip?: boolean;
 }) {
@@ -205,7 +205,7 @@ export function LoadingScreen({
             Want the day’s results and the leaderboard posted here at every
             reset? Run{" "}
             <span className="rounded-[5px] bg-white/[0.06] px-[5px] py-px font-semibold text-zinc-300">
-              /enable-posts
+              /invite-bot
             </span>
             .
           </p>
@@ -507,6 +507,8 @@ export function GameView({
   onCommit,
   onHint,
   onFinish,
+  onShareLink,
+  onCopyImage,
   chat,
   onOpenExternal,
   initialRevealed,
@@ -532,6 +534,12 @@ export function GameView({
   // Record one revealed hint server-side (its group level). Absent in standalone/practice.
   onHint?: (level: number) => void;
   onFinish: () => void;
+  // Post the finished result to Discord as a share card (mint + native share modal). App
+  // supplies it only inside the Activity on the official daily; the preview/landing omit it.
+  onShareLink?: () => Promise<ShareOutcome>;
+  // Copy the finished result as a PNG (the share card's image) to the clipboard. Same gate
+  // as onShareLink — it's minted from the server's record of this player's daily.
+  onCopyImage?: () => Promise<boolean>;
   // The player↔dev chat (the footer's "Feedback" page): its bound api plus the unread/isDev
   // badge state. Omitted by the dev preview / landing, where the page falls back to a
   // local-only form.
@@ -657,6 +665,11 @@ export function GameView({
                       setDone(true);
                       onFinish();
                     }}
+                    onShareLink={onShareLink}
+                    onCopyImage={onCopyImage}
+                    // The same opener the info footer uses — the board's "Post on X" row
+                    // just needs a way out of the iframe, not its own plumbing.
+                    onExternal={onOpenExternal}
                     initialRevealed={initialRevealed}
                   />
                 </div>

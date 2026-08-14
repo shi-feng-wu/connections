@@ -1,9 +1,68 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateKeyPairSync, sign as edSign } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Game, LEVELS, type Puzzle } from "../src/game";
-import { disablePostsResult, enablePostsResponse, helpMessage, inviteBotMessage, memberCanManageChannels, missingPermsNudgePayload, routeInteraction, shareCard, verifyDiscordSig } from "../api/interactions";
+import { default as interactionsHandler, disablePostsResult, enablePostsResponse, helpMessage, inviteBotMessage, memberCanManageChannels, missingPermsNudgePayload, routeInteraction, shareCard, verifyDiscordSig } from "../api/interactions";
 // @ts-expect-error — plain .mjs command definitions shared with scripts/register-commands.mjs (no types).
 import { CHAT_COMMANDS, MANAGE_CHANNELS as MANAGE_CHANNELS_BIT } from "../scripts/command-defs.mjs";
+
+// ---- shims for the /share handler tests at the bottom of this file ----
+// api/interactions.ts must stay canvas-free (it is the function Discord holds to a 3s deadline), so
+// /share only DECIDES here and hands the render to /api/post-share. These mocks stand in for the two
+// things that decision touches — the service DB and the puzzle fetch — plus waitUntil, which the
+// self-call rides. The three enablePostsResponse cases above return before `admin()` is ever
+// imported (no channel context), so the DB shim is invisible to them.
+type Row = Record<string, unknown>;
+const shareRoute: { progress: Row[]; pending: Promise<unknown>[] } = { progress: [], pending: [] };
+
+const SHARE_UID = "111222333444555666";
+const SHARE_DATE = "2026-08-11";
+const SHARE_PUZZLE: Puzzle = {
+  id: 1170,
+  date: SHARE_DATE,
+  editor: "Test",
+  groups: [
+    { level: 0, category: "L0", members: ["A0", "B0", "C0", "D0"] },
+    { level: 1, category: "L1", members: ["A1", "B1", "C1", "D1"] },
+    { level: 2, category: "L2", members: ["A2", "B2", "C2", "D2"] },
+    { level: 3, category: "L3", members: ["A3", "B3", "C3", "D3"] },
+  ],
+  layout: ["A0", "B0", "C0", "D0", "A1", "B1", "C1", "D1", "A2", "B2", "C2", "D2", "A3", "B3", "C3", "D3"],
+};
+const SHARE_WON = [
+  ["A0", "B0", "C0", "D0"],
+  ["A1", "B1", "C1", "D1"],
+  ["A2", "B2", "C2", "D2"],
+  ["A3", "B3", "C3", "D3"],
+];
+
+vi.mock("@vercel/functions", () => ({
+  waitUntil: (p: Promise<unknown>) => {
+    shareRoute.pending.push(p);
+  },
+}));
+vi.mock("../api/_admin.js", () => {
+  class Q {
+    private eqs: [string, unknown][] = [];
+    select(): this {
+      return this;
+    }
+    eq(col: string, val: unknown): this {
+      this.eqs.push([col, val]);
+      return this;
+    }
+    async maybeSingle(): Promise<{ data: Row | null; error: null }> {
+      const row = shareRoute.progress.find((r) => this.eqs.every(([c, v]) => r[c] === v)) ?? null;
+      return { data: row, error: null };
+    }
+  }
+  return { admin: () => ({ from: () => new Q() }) as unknown as SupabaseClient };
+});
+vi.mock("../api/_puzzles.js", () => ({
+  fetchPuzzle: async () => SHARE_PUZZLE,
+  todayET: () => SHARE_DATE,
+  isValidDate: (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d),
+}));
 
 // api/interactions.ts: Discord signs every interaction (Ed25519); an unverified
 // request must be refused, and the recap's Play button must map to a launch.
@@ -412,5 +471,139 @@ describe("missingPermsNudgePayload", () => {
 
   it("has no button — granting channel permissions is a Discord settings action, not a link", () => {
     expect(p.components).toBeUndefined();
+  });
+});
+
+// ——— the /share COMMAND, end to end through the interactions webhook ———
+//
+// /share posts the rendered PORTRAIT CARD now, not the emoji grid inline. api/interactions.ts is the
+// function Discord holds to a 3s deadline and it must never carry @napi-rs/canvas (the owner rule
+// the "who's playing" card already established), so the split is: DECIDE here, DEFER publicly, and
+// fire a fire-and-forget self-call to /api/post-share, which renders and edits the deferred message.
+//
+// These drive the real signed webhook handler, so they pin both halves of that contract: a shareable
+// game must answer type 5 (deferred, PUBLIC — same visibility the inline card had) AND fire the
+// self-call; every pre-check that answers WITHOUT a result must still answer inline, ephemerally,
+// and must NOT fire it (a not-yet-played /share still can't put anything in the channel).
+describe("/share command handler", () => {
+  const post = async (body: unknown): Promise<{ status: number; body: any }> => {
+    const raw = JSON.stringify(body);
+    const ts = String(Math.floor(Date.now() / 1000));
+    const req: any = {
+      method: "POST",
+      headers: { "x-signature-ed25519": sigFor(raw, ts), "x-signature-timestamp": ts },
+      async *[Symbol.asyncIterator]() {
+        yield Buffer.from(raw);
+      },
+    };
+    const res: any = {
+      status(n: number) {
+        this.statusCode = n;
+        return this;
+      },
+      json(b: unknown) {
+        this.jsonBody = b;
+        return this;
+      },
+      setHeader() {},
+    };
+    await interactionsHandler(req, res);
+    // Drain the self-call the handler fires after the response is flushed.
+    await Promise.all(shareRoute.pending.splice(0));
+    return { status: res.statusCode, body: res.jsonBody };
+  };
+
+  const shareInteraction = (): object => ({
+    type: 2,
+    data: { name: "share" },
+    application_id: "app1",
+    token: "interaction_tok_abc",
+    guild_id: "guild123",
+    channel_id: "chan123",
+    member: { user: { id: SHARE_UID, username: "alice" } },
+  });
+
+  const calls = (): [string, RequestInit][] => (globalThis.fetch as any).mock.calls;
+
+  beforeEach(() => {
+    shareRoute.progress = [];
+    shareRoute.pending = [];
+    process.env.DISCORD_PUBLIC_KEY = pubHex;
+    process.env.INTERNAL_SECRET = "s3cret";
+    process.env.POST_CARD_URL = "https://disconnections.test";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(async () => new Response("{}", { status: 200 })),
+    );
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("defers PUBLICLY and hands the render to /api/post-share", async () => {
+    shareRoute.progress.push({ user_id: SHARE_UID, puzzle_date: SHARE_DATE, guesses: SHARE_WON });
+    const r = await post(shareInteraction());
+
+    // Type 5 = DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE. No flags: the picture lands in the channel,
+    // exactly where the emoji card used to (an EPHEMERAL flag here would hide the share).
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ type: 5 });
+
+    expect(calls()).toHaveLength(1);
+    const [url, init] = calls()[0];
+    expect(url).toBe("https://disconnections.test/api/post-share");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer s3cret");
+    // Identity + date only. The grid is NOT on the wire: post-share replays it from the player's
+    // own progress record, so nothing here can be forged into someone else's result.
+    expect(JSON.parse(init.body as string)).toEqual({
+      appId: "app1",
+      token: "interaction_tok_abc",
+      userId: SHARE_UID,
+      date: SHARE_DATE,
+    });
+  });
+
+  it("nudges a player who hasn't played, ephemerally, and renders nothing", async () => {
+    const r = await post(shareInteraction());
+    expect(r.body.type).toBe(4); // inline reply, not a deferral
+    expect(r.body.data.flags).toBe(64); // EPHEMERAL — only the invoker sees it
+    expect(r.body.data.content).toContain("haven’t played");
+    expect(calls()).toHaveLength(0);
+  });
+
+  it("nudges a player mid-puzzle, ephemerally, and renders nothing", async () => {
+    shareRoute.progress.push({
+      user_id: SHARE_UID,
+      puzzle_date: SHARE_DATE,
+      guesses: [["A0", "B0", "C0", "A1"]],
+    });
+    const r = await post(shareInteraction());
+    expect(r.body.type).toBe(4);
+    expect(r.body.data.flags).toBe(64);
+    expect(r.body.data.content).toContain("Still mid-puzzle");
+    expect(r.body.data.content).toContain("0/4"); // no group solved yet
+    expect(calls()).toHaveLength(0);
+  });
+
+  it("nudges ephemerally when the interaction carries no user", async () => {
+    const { member: _member, ...noUser } = shareInteraction() as Record<string, unknown>;
+    const r = await post(noUser);
+    expect(r.body.data.flags).toBe(64);
+    expect(calls()).toHaveLength(0);
+  });
+
+  it("never defers on an unsigned request", async () => {
+    shareRoute.progress.push({ user_id: SHARE_UID, puzzle_date: SHARE_DATE, guesses: SHARE_WON });
+    const raw = JSON.stringify(shareInteraction());
+    const req: any = {
+      method: "POST",
+      headers: { "x-signature-ed25519": "00", "x-signature-timestamp": "1" },
+      async *[Symbol.asyncIterator]() {
+        yield Buffer.from(raw);
+      },
+    };
+    const res: any = { status(n: number) { this.statusCode = n; return this; }, json(b: unknown) { this.jsonBody = b; return this; }, setHeader() {} };
+    await interactionsHandler(req, res);
+    expect(res.statusCode).toBe(401);
+    expect(calls()).toHaveLength(0);
   });
 });

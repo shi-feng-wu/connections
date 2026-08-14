@@ -24,6 +24,10 @@
 - /share now posts as an image by default.
 - New share menu post game, with options to share as text, image, to Discord or Twitter.
 
+### Changed
+
+- Sharing to Discord now sends your result card as a picture in whichever chat you pick, instead of a link preview.
+
 ## v2.1.0 — Aug 11, 2026
 
 ### Added

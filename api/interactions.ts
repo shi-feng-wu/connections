@@ -11,7 +11,6 @@ import {
   EPHEMERAL,
   helpMessage,
   inviteBotMessage,
-  IS_COMPONENTS_V2,
   missingPermsNudgePayload,
   shareCard,
   unmuteBotless,
@@ -26,9 +25,10 @@ import { PLAY_CUSTOM_ID } from "./_recap.js";
 // This is the latency-critical function: Discord enforces a ~3s deadline on the launch ACK, and the
 // first request after a deploy is cold. So it is kept DELIBERATELY TINY — it imports no canvas
 // (@napi-rs/canvas) and no card plumbing. The "who's playing" render lives in /api/post-card, which
-// this function triggers (fire-and-forget) AFTER the ACK. /share, /unmute, and /mute
-// still answer here synchronously and lazy-import the Supabase SDK (_admin/_puzzles) so the launch ACK
-// never pays for it.
+// this function triggers (fire-and-forget) AFTER the ACK. /share follows the SAME split: it decides
+// here (a DB read, no canvas) and DEFERS, then /api/post-share renders the picture and edits the
+// deferred message. /unmute and /mute still answer here synchronously. All of them lazy-import the
+// Supabase SDK (_admin/_puzzles) so the launch ACK never pays for it.
 
 // Discord interactions webhook. Discord POSTs here for: the typed /disconnections (or
 // /connections alias) command, the App-Launcher Entry Point command, the card/recap
@@ -52,6 +52,10 @@ const PING = 1;
 const APPLICATION_COMMAND = 2;
 const MESSAGE_COMPONENT = 3;
 const PONG = 1;
+// "Thinking…", publicly — the placeholder /share posts before /api/post-share edits the rendered
+// card into it. Same visibility as the old inline reply (no EPHEMERAL flag), so the picture lands
+// in the channel exactly where the emoji card used to.
+const DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE = 5;
 const LAUNCH_ACTIVITY = 12;
 
 // Command names that should open the Activity. Both the Entry Point command (App Launcher)
@@ -76,9 +80,11 @@ const UNMUTE_ALIAS = "enable-posts";
 const INVITE_BOT_COMMAND = "invite-bot";
 // The "/help" command: a private, static list of what the app's commands do.
 const HELP_COMMAND = "help";
-// The "/share" command (mirrors Wordle's share): posts the player's finished result grid —
-// one row of category-colour squares per guess — publicly to the channel. Computed from the
-// player's stored guesses (a DB read), so it's handled off the pure router (see shareResponse).
+// The "/share" command (mirrors Wordle's share): posts the player's finished result publicly to
+// the channel — now the rendered PORTRAIT CARD, the same picture the in-app share hands Discord,
+// with the emoji-square grid as the fallback. Whether there IS a result comes from the player's
+// stored guesses (a DB read), so it's handled off the pure router (see shareResponse); the card
+// itself is drawn by /api/post-share, which carries the canvas addon this function must not.
 const SHARE_COMMAND = "share";
 // The "/donate" command: replies (privately) with a Ko-fi link button — the same one in the
 // app footer. Disconnections is free and ad-free; donations cover the server costs. KEEP the
@@ -266,17 +272,30 @@ export function memberCanManageChannels(permissions: string | undefined): boolea
   }
 }
 
-// Build the /share interaction response from the player's own stored guesses. A public message
-// (CHANNEL_MESSAGE_WITH_SOURCE, no EPHEMERAL flag) on success — Discord posts it on the app's
-// behalf, so it works even where the bot isn't installed (user-install share). Anything that
-// isn't a finished game returns an ephemeral nudge only the invoker sees, so a half-played or
-// not-yet-played /share never spams the channel. Identity comes from the (Discord-verified)
-// interaction, so there's no OAuth round-trip; the grid is replayed from the same append-only
-// `progress` record /api/score trusts, so it can't be faked from the request.
-async function shareResponse(body: LaunchInteraction): Promise<object> {
-  const ephemeral = (content: string) => ({
-    type: CHANNEL_MESSAGE_WITH_SOURCE,
-    data: { content, flags: EPHEMERAL },
+// What /share should do with this invocation. Either we answer right here — always an EPHEMERAL
+// nudge, seen only by the invoker — or there IS a shareable finished game, and the caller defers
+// publicly and hands the render to /api/post-share.
+type ShareOutcome =
+  | { kind: "reply"; response: object }
+  | { kind: "defer"; userId: string; date: string };
+
+// Decide the /share interaction response from the player's own stored guesses. Every path that
+// answers WITHOUT a result — no account, sharing down, hasn't played, puzzle won't load, still
+// mid-puzzle — returns an ephemeral nudge only the invoker sees, so a half-played or not-yet-played
+// /share never spams the channel. A finished game returns "defer": the picture takes longer than
+// Discord's 3s window (and can't be rendered in this function at all — no canvas here), so the
+// public message is opened as a deferred placeholder and filled in by /api/post-share.
+//
+// Identity comes from the (Discord-verified) interaction, so there's no OAuth round-trip, and the
+// result is replayed from the same append-only `progress` record /api/score trusts — here to gate
+// the reply, and again in /api/post-share to draw it — so it can't be faked from the request.
+async function shareResponse(body: LaunchInteraction): Promise<ShareOutcome> {
+  const ephemeral = (content: string): ShareOutcome => ({
+    kind: "reply",
+    response: {
+      type: CHANNEL_MESSAGE_WITH_SOURCE,
+      data: { content, flags: EPHEMERAL },
+    },
   });
 
   const u = body.member?.user ?? body.user;
@@ -317,31 +336,10 @@ async function shareResponse(body: LaunchInteraction): Promise<object> {
     );
   }
 
-  // Best-effort time + points from the player's scored row for today. The scores table keeps ONE
-  // row per (puzzle, user) — pinned to the scope where they FIRST finished — so we look it up by
-  // user + date only, NOT by the room /share runs in: those can differ, and filtering by scope
-  // would miss the row (the bug where time/points silently dropped). Absent (never scored) → the
-  // line just omits time/points; the grid still posts. Never blocks the share.
-  let durationMs: number | null = null;
-  let score: number | null = null;
-  const { data: row } = await db
-    .from("scores")
-    .select("score, duration_ms")
-    .eq("user_id", u.id)
-    .eq("puzzle_date", date)
-    .maybeSingle();
-  if (row) {
-    score = typeof row.score === "number" ? row.score : null;
-    durationMs = typeof row.duration_ms === "number" ? row.duration_ms : null;
-  }
-
-  return {
-    type: CHANNEL_MESSAGE_WITH_SOURCE,
-    data: {
-      flags: IS_COMPONENTS_V2,
-      components: shareCard(game, { puzzleNo: puzzle.id, durationMs, score }),
-    },
-  };
+  // There's a result. Everything past this point — the scored time/points lookup, the render, the
+  // message itself — belongs to /api/post-share, which replays this same game from the same record
+  // before it draws anything. We only pass the two identifiers it needs to find it.
+  return { kind: "defer", userId: u.id, date };
 }
 
 // Handle /mute: record a post opt-out for the channel it was run in, so Disconnections goes silent
@@ -539,6 +537,35 @@ async function triggerPostCard(raw: string): Promise<void> {
   if (!r.ok) console.error("[card] post-card trigger failed", { status: r.status });
 }
 
+// Fire the /share render at /api/post-share (the function that carries the canvas addon), so THIS
+// function's deployment stays tiny — the same split, and the same INTERNAL_SECRET, the "who's
+// playing" card uses above. We forward only the interaction token (so post-share can edit the
+// deferred message) plus the invoker's id and the puzzle date: post-share replays the game from the
+// player's own `progress` record, so there is no grid on the wire to forge. Best-effort by
+// contract, but a failed trigger DOES leave the deferred message unfilled, so it logs loudly.
+async function triggerPostShare(job: {
+  appId: string;
+  token: string;
+  userId: string;
+  date: string;
+}): Promise<void> {
+  const base = internalBase();
+  const secret = process.env.INTERNAL_SECRET ?? "";
+  if (!base || !secret) {
+    console.error("[share] skip trigger: missing post-share base URL or INTERNAL_SECRET");
+    return;
+  }
+  const r = await fetch(`${base}/api/post-share`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${secret}`,
+    },
+    body: JSON.stringify(job),
+  });
+  if (!r.ok) console.error("[share] post-share trigger failed", { status: r.status });
+}
+
 async function rawBody(req: VercelRequest): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
@@ -612,21 +639,46 @@ export default async function handler(
   }
 
   // "/share" needs the player's stored guesses (a DB read), so it can't go through the pure
-  // synchronous router. Build its response (the result grid, or an ephemeral nudge) and reply
-  // — comfortably inside the 3s deadline: one indexed `progress` read + a cached puzzle fetch.
-  // A thrown error degrades to an ephemeral apology rather than a dead "did not respond".
+  // synchronous router. Deciding is cheap and stays here — one indexed `progress` read + a cached
+  // puzzle fetch, comfortably inside the 3s deadline. Anything that isn't a shareable game answers
+  // ephemerally right now; a shareable one DEFERS publicly, because the picture needs
+  // @napi-rs/canvas and that must never enter this function's bundle (see the note up top). A
+  // thrown error degrades to an ephemeral apology rather than a dead "did not respond".
   if (isShareCommand(body)) {
-    let response: object;
+    let outcome: ShareOutcome;
     try {
-      response = await shareResponse(body);
+      outcome = await shareResponse(body);
     } catch (e) {
       console.error("[share] threw", e instanceof Error ? e.message : e);
-      response = {
-        type: CHANNEL_MESSAGE_WITH_SOURCE,
-        data: { content: COPY["share.build-failed"], flags: EPHEMERAL },
+      outcome = {
+        kind: "reply",
+        response: {
+          type: CHANNEL_MESSAGE_WITH_SOURCE,
+          data: { content: COPY["share.build-failed"], flags: EPHEMERAL },
+        },
       };
     }
-    res.status(200).json(response);
+    if (outcome.kind === "reply") {
+      res.status(200).json(outcome.response);
+      return;
+    }
+    // Logged BEFORE the response is flushed, for the same reason the launch ACK's probe is (see
+    // the long note below): Vercel does NOT reliably drain stdout written after res.json(), so a
+    // line logged post-response can simply never appear.
+    console.log("[share] deferred", { user: outcome.userId, date: outcome.date });
+    res.status(200).json({ type: DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE });
+    // Then hand the render to /api/post-share. waitUntil keeps this function alive past the
+    // response flush; fire-and-forget, exactly like the launch card's trigger.
+    waitUntil(
+      triggerPostShare({
+        appId: body.application_id ?? process.env.VITE_DISCORD_CLIENT_ID ?? "",
+        token: body.token ?? "",
+        userId: outcome.userId,
+        date: outcome.date,
+      }).catch((e) => {
+        console.error("[share] trigger failed", e instanceof Error ? e.message : e);
+      }),
+    );
     return;
   }
 

@@ -33,9 +33,9 @@ export type DrawEnv = {
 export type CardOpts = { puzzleNo?: number; puzzleDate?: string };
 
 // ---- palette (lifted from the app: brand.css / game.ts LEVELS / roster.tsx) ----
-// Card background — a near-black surface (zinc-950) inside a thin zinc-800 border, so
-// the card reads as a distinct framed panel in the channel. (Opaque, not transparent,
-// so the light text stays legible regardless of the viewer's Discord theme.)
+// Card background — a near-black surface (zinc-950), borderless: the rounded corners
+// alone read as the panel edge in the channel. (Opaque, not transparent, so the light
+// text stays legible regardless of the viewer's Discord theme.)
 const BG = "#09090b"; // zinc-950
 // Rounded card corners (corners outside it stay transparent). Kept generous on purpose:
 // Discord re-clips the inline attachment to its own rounded media container whose radius is
@@ -71,17 +71,6 @@ const CAT_COLOR = LEVELS.map((l) => l.color); // yellow, green, blue, purple
 // zinc-900/55 fill. The avatar ring, the unsolved slots and the footer glyph read
 // state at a glance: emerald for a solve, a dimmed zinc-700 for a loss, zinc-600
 // while still playing.
-const CARD_BORDER = ZINC_700; // #3f3f46 — frame around the whole card (recap too)
-// Stroke weight, but tied to card size. The frame is baked in *image* pixels, yet Discord
-// displays every card scaled to fit the message column — and the scale depends on the card's
-// own width, so a fixed stroke lands on a different on-screen thickness per card. A wide 4-up
-// roster (812px) is shrunk far more than a solo card (462px), so a flat 2px reads as ~0.8px on
-// the roster vs ~1.5px on the solo — the busy cards look thin. Scaling the stroke with width
-// makes them all resolve to the same weight on screen. CARD_BORDER_W is the stroke at the
-// narrowest card (~CARD_BORDER_REF_W); wider cards scale up proportionally.
-const CARD_BORDER_W = 2;
-const CARD_BORDER_REF_W = 462; // solo-card width — the narrowest a card gets
-const cardBorderW = (W: number): number => (CARD_BORDER_W * W) / CARD_BORDER_REF_W;
 const TILE_BG = "rgba(24,24,27,0.55)"; // zinc-900/55
 const TILE_BAR_EMPTY_BORDER = "#34343a"; // unsolved slot border (a touch lighter than the recap's)
 const TILE_BAR_LOST_BG = "#161618"; // unsolved slot for a player who's out of guesses
@@ -338,21 +327,6 @@ function fillCardBg(
   ctx.fill();
 }
 
-// The card's zinc-700 frame, shared by the roster and recap cards. Inset the stroke
-// by half its width so it sits fully inside the canvas rather than clipping at the edge.
-function strokeCardBorder(
-  ctx: CanvasRenderingContext2D,
-  W: number,
-  height: number,
-): void {
-  ctx.strokeStyle = CARD_BORDER;
-  const bw = cardBorderW(W);
-  ctx.lineWidth = bw;
-  const inset = bw / 2;
-  roundRect(ctx, inset, inset, W - bw, height - bw, CARD_R - inset);
-  ctx.stroke();
-}
-
 function fitText(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -451,9 +425,8 @@ export async function drawRoster(
 ): Promise<void> {
   const { shown, cols, panelW, W, height } = layout;
 
-  // Rounded near-black card background, ringed by the shared zinc-700 frame.
+  // Rounded near-black card background (borderless — the radius alone frames it).
   fillCardBg(ctx, W, height);
-  strokeCardBorder(ctx, W, height);
 
   // ---- header (shared with the recap): "Now playing" eyebrow + brand mark over the
   // wordmark and a "Puzzle # · date" subline, with the Playing / Solved counts anchored
@@ -1395,6 +1368,4 @@ export async function drawRecap(
     // total points
     drawPts(ctx, r.total, sPtsRight, base);
   });
-
-  strokeCardBorder(ctx, W, height);
 }

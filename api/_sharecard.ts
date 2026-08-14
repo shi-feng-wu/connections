@@ -412,11 +412,17 @@ function drawStats(ctx: CanvasRenderingContext2D, d: ShareCardData): void {
   ctx.textAlign = 'left';
 }
 
+// The card's corner radius — the SAME 30px the roster/recap cards use (src/card-draw.ts
+// CARD_R), for the same reason: Discord re-clips inline media to a fixed-DP rounded mask,
+// which on a high-density phone maps to ~24–36 image px, so a smaller radius gets its corner
+// turn shaved off. Corners outside it stay transparent.
+const CARD_R = 30;
+
 function drawCard(ctx: CanvasRenderingContext2D, d: ShareCardData): void {
-  // ---- surface. Full-bleed, not rounded: Discord clips a quick-link hero to its own embed
-  // container, so transparent corners of ours would just show the chat behind.
+  // ---- surface. Rounded like the family's other cards, transparent past the radius.
   ctx.fillStyle = BG;
-  ctx.fillRect(0, 0, SHARE_CARD_W, SHARE_CARD_H);
+  roundRect(ctx, 0, 0, SHARE_CARD_W, SHARE_CARD_H, CARD_R);
+  ctx.fill();
 
   drawHeader(ctx, d);
   drawStats(ctx, d);

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   fmtClock,
   fmtDateFull,
+  GRID_BOT,
+  GRID_TOP,
   gridMetrics,
   outcomeLabel,
   renderShareCard,
@@ -39,8 +41,9 @@ const WIN: ShareCardData = {
 };
 
 describe("share card render", () => {
-  it("is exactly Discord's 43:24 quick-link ratio", () => {
-    expect(SHARE_CARD_W / SHARE_CARD_H).toBeCloseTo(43 / 24, 10);
+  it("is cropped to the content column: 480px board + a uniform 48px frame", () => {
+    expect(SHARE_CARD_W).toBe(480 + 2 * 48);
+    expect(SHARE_CARD_H).toBe(724);
   });
 
   it("renders a real PNG for a win with a streak", async () => {
@@ -114,27 +117,47 @@ describe("share card render", () => {
     expect((await renderShareCard({ ...WIN, score: null })).equals(base)).toBe(false);
     expect((await renderShareCard({ ...WIN, durationMs: null })).equals(base)).toBe(false);
   });
+
+  it("keeps the score on a FAILED card (losses score partial credit too)", async () => {
+    const fail: ShareCardData = { ...WIN, solved: false, mistakes: 4, score: 240 };
+    expect((await renderShareCard(fail)).equals(await renderShareCard({ ...fail, score: null }))).toBe(
+      false,
+    );
+  });
 });
 
 describe("share card layout", () => {
-  it("keeps the grid inside the frame however long the game ran", () => {
+  it("keeps the grid inside its zone however long the game ran", () => {
     for (let rows = 1; rows <= 8; rows++) {
-      const { size, x, y } = gridMetrics(rows);
-      const h = rows * size + (rows - 1) * 18;
-      expect(y).toBeGreaterThanOrEqual(0);
-      expect(y + h).toBeLessThanOrEqual(SHARE_CARD_H);
-      expect(x + 4 * size + 3 * 18).toBeLessThanOrEqual(SHARE_CARD_W);
-      // The grid is the hero, so tiles must never collapse to specks on a long game.
-      expect(size).toBeGreaterThan(40);
+      const { tileW, tileH, gap, x, y } = gridMetrics(rows);
+      const h = rows * tileH + (rows - 1) * gap;
+      expect(y).toBeGreaterThanOrEqual(GRID_TOP);
+      expect(y + h).toBeLessThanOrEqual(GRID_BOT);
+      expect(x + 4 * tileW + 3 * gap).toBeLessThanOrEqual(SHARE_CARD_W);
+      // The grid is the hero, so tiles must never collapse to slivers on a long game.
+      expect(tileH).toBeGreaterThan(40);
     }
   });
 
-  it("centres the grid vertically", () => {
+  it("centres the grid in the zone between the header rule and the stat row", () => {
     for (const rows of [4, 5, 7]) {
-      const { size, y } = gridMetrics(rows);
-      const h = rows * size + (rows - 1) * 18;
-      expect(Math.abs(y - (SHARE_CARD_H - h - y))).toBeLessThanOrEqual(1);
+      const { tileH, gap, y } = gridMetrics(rows);
+      const h = rows * tileH + (rows - 1) * gap;
+      expect(Math.abs(y - GRID_TOP - (GRID_BOT - y - h))).toBeLessThanOrEqual(1);
     }
+  });
+
+  it("keeps the game's own tile geometry (114-wide tiles, constant 8px gap, 80px height cap)", () => {
+    for (const rows of [1, 4, 5, 6, 7, 8]) {
+      const { tileW, tileH, gap } = gridMetrics(rows);
+      // The app's board: gap-2 is a constant 8px at every size, width is (480 - 3*8)/4,
+      // and only the height flexes. A 4-row card must land the game's exact 114x80 tile.
+      expect(gap).toBe(8);
+      expect(tileW).toBe(114);
+      expect(tileH).toBeLessThanOrEqual(80);
+      expect(tileW).toBeGreaterThan(tileH);
+    }
+    expect(gridMetrics(4).tileH).toBe(80);
   });
 });
 

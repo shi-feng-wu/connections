@@ -1089,6 +1089,12 @@ function State({
         // Bot-less-guild path, so the end states show the recap pitch (GameView only
         // renders it once the run is over, so in-progress states stay clean).
         onAddBot={noop}
+        // Mock share plumbing so the end screen's share menu shows EVERY row for
+        // screenshots (in prod these come gated from App). The handlers just pretend:
+        // Discord-share reports "copied", copy-image reports success, external no-ops.
+        onShareLink={() => Promise.resolve("copied" as const)}
+        onCopyImage={() => Promise.resolve(true)}
+        onOpenExternal={noop}
       />
     </section>
   );

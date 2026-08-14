@@ -3,10 +3,9 @@ import {
   Clock,
   Copy,
   Eraser,
+  Image as ImageIcon,
   Lightbulb,
   LoaderCircle,
-  Send,
-  Share,
   Share2,
   Shuffle as ShuffleIcon,
 } from "lucide-react";
@@ -17,6 +16,7 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
 import { Game, LEVELS, MAX_MISTAKES, shuffle, type Group } from "./game";
@@ -50,7 +50,11 @@ function buildShareText(game: Game): string {
   const mistakes = MAX_MISTAKES - game.mistakesLeft;
   const dots = "⚪".repeat(game.mistakesLeft) + "⚫".repeat(mistakes);
   const title = `Disconnections #${game.puzzle.id} ${game.groupsSolved}/4`;
-  const stats = [dots, fmtClock(game.durationMs), `${game.score.toLocaleString()} pts`].join(" · ");
+  const stats = [
+    dots,
+    fmtClock(game.durationMs),
+    `${game.score.toLocaleString()} pts`,
+  ].join(" · ");
   return `${title}\n${game.shareGrid()}\n${stats}\n${PLAY_URL}`;
 }
 
@@ -88,42 +92,32 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
-// Which platform's native share glyph the action button should wear, so it reads as the
-// familiar icon for the device's own share sheet: a forward arrow on Windows, the
-// box-and-up-arrow on Apple (macOS/iOS), and the connected-nodes share on Android (also the
-// generic default). Cosmetic, so best-effort UA sniffing is fine.
-type SharePlatform = "windows" | "apple" | "android" | "other";
-function detectSharePlatform(): SharePlatform {
-  if (typeof navigator === "undefined") return "other";
-  const data = (navigator as Navigator & { userAgentData?: { platform?: string } })
-    .userAgentData;
-  const hint =
-    `${data?.platform ?? ""} ${navigator.platform ?? ""} ${navigator.userAgent ?? ""}`.toLowerCase();
-  if (/android/.test(hint)) return "android";
-  if (/iphone|ipad|ipod|macintosh|mac os/.test(hint)) return "apple";
-  if (/windows|win32|win64/.test(hint)) return "windows";
-  return "other";
-}
-
-// The Windows share glyph (curved arrow swooshing up out of an open box) — lucide has no
-// match, so it's hand-drawn to mirror the OS icon, at the same weight as the lucide icons
-// it sits beside (stroke 2.5, currentColor).
-function WindowsShareIcon() {
+// Brand glyphs the share menu needs that no icon set carries (logos, not icons): Discord's
+// clyde and X's mark, from simple-icons' official paths (CC0). Filled with currentColor so
+// they sit in the rows' zinc exactly like the lucide strokes beside them.
+function DiscordIcon({ size = 16 }: { size?: number }) {
   return (
     <svg
-      width={18}
-      height={18}
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      fill="currentColor"
       aria-hidden
     >
-      <path d="M4 11.5V20h12.5v-3.5" />
-      <path d="M8 16.5C8 10.5 11 8.5 16.5 8.5" />
-      <path d="M13.5 5 20 8.5 13.5 12" />
+      <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
+    </svg>
+  );
+}
+function XIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden
+    >
+      <path d="M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z" />
     </svg>
   );
 }
@@ -173,6 +167,59 @@ function BreakRow({
   );
 }
 
+// One row of the share menu: the action in words on the left, its glyph right-aligned —
+// the same left-caption/right-mark geometry BreakRow uses, so the two popovers read as
+// siblings. Sized for a thumb (40px min) rather than for the popover's compact type, and
+// hovered mouse-only (HoverButton): the menu outlives a tap, so a CSS :hover would stick to
+// whatever finger last touched it. `pending` swaps the glyph for a spinner and, with
+// `disabled`, blocks a second tap while the first is still working.
+function ShareRow({
+  label,
+  icon,
+  pending,
+  disabled,
+  tabbable,
+  onSelect,
+}: {
+  label: string;
+  icon: ReactNode;
+  pending?: boolean;
+  disabled?: boolean;
+  // The menu stays mounted while closed (it needs both classes for the pop transition), so
+  // its rows are pulled out of the tab order until it opens — .sb-pop's pointer-events:none
+  // only stops the mouse.
+  tabbable?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <HoverButton
+      type="button"
+      role="menuitem"
+      className="flex min-h-10 w-full cursor-pointer items-center justify-between gap-8 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 ease-out active:bg-white/[0.09] disabled:cursor-default disabled:opacity-55"
+      hover="bg-white/[0.06]"
+      disabled={disabled}
+      tabIndex={tabbable ? undefined : -1}
+      onClick={onSelect}
+    >
+      <span className="text-[13.5px] font-semibold leading-none text-zinc-100">
+        {label}
+      </span>
+      <span className="flex-none text-zinc-400">
+        {pending ? (
+          <LoaderCircle
+            size={16}
+            strokeWidth={2.5}
+            className="animate-spin"
+            aria-hidden
+          />
+        ) : (
+          icon
+        )}
+      </span>
+    </HoverButton>
+  );
+}
+
 // End-screen footer. The run summary, two clusters at the far edges with room to breathe:
 // mistake dots (left), and the stats + action (right) — the clock-icon solve-time chip, a
 // hairline divider, the serif score, then the Share button (where the ⓘ used to sit). The
@@ -184,6 +231,11 @@ function BreakRow({
 // score again, or tap/Esc outside, to dismiss. It never opens on hover (this ships as a
 // Discord Activity where CSS :hover sticks after a tap). The Share button pops up on the
 // right as the bar fades in (see endGame); rehydrated finishes render at rest, closed.
+// ONE Share button, not a row of them: every way a result leaves the app (into Discord, as
+// an image, as text, to X, out through the OS sheet) hangs off it in a menu popover — the
+// breakdown's twin, same pop, same dismiss. Which rows exist is decided by what actually
+// works here (see the gates below), so the menu is never a list of dead ends; the two
+// popovers are mutually exclusive, since they'd otherwise overlap over the same score.
 // Losses read the same: partial-credit categories, a 0 speed.
 // `note` is the transient "Couldn’t save that guess" warning for a commit that fails
 // after the game ends (the final guess's commit usually resolves mid-end-choreography):
@@ -196,6 +248,8 @@ function EndSummary({
   note,
   autoOpen,
   onShareLink,
+  onCopyImage,
+  onExternal,
 }: {
   game: Game;
   note?: string | null;
@@ -204,15 +258,25 @@ function EndSummary({
   autoOpen?: boolean;
   // Post the result into Discord as a share card (a quick link: our result image, a
   // description, and a Play button). Present only inside the Activity on the official
-  // daily — everywhere else the footer keeps just the OS-share/Copy button. See App.tsx
-  // shareResult.
+  // daily — everywhere else the menu drops the row. See App.tsx shareResult.
   onShareLink?: () => Promise<ShareOutcome>;
+  // Put the result image (the same PNG the share card carries) on the clipboard, for the
+  // chats Discord's share modal can't reach. Resolves false if the mint or the write
+  // failed. Gated like onShareLink — the image is minted from the server's record — and
+  // the row additionally needs a clipboard that takes images. See App.tsx copyResultImage.
+  onCopyImage?: () => Promise<boolean>;
+  // Open a URL outside the app (the "Post on X" row). Embedded it must route through the
+  // Discord SDK's leave-app consent, so the footer never calls window.open itself.
+  onExternal?: (url: string) => void;
 }) {
   const b = game.scoreBreakdown;
   const won = game.status === "won";
   const perfect = won && game.mistakesLeft === MAX_MISTAKES;
   const label = perfect ? "Perfect" : won ? "Solved" : "Failed";
   const [pinned, setPinned] = useState(false);
+  // Is the share menu up? Never at the same time as the breakdown — they'd stack over the
+  // same corner — so each opener closes the other.
+  const [menuOpen, setMenuOpen] = useState(false);
   // Transient confirmation chip ("Copied!", "Couldn’t share"). One slot, one message.
   const [flash, setFlash] = useState<string | null>(null);
   // A share is a render plus two round-trips, so the button holds a pending state rather
@@ -223,31 +287,40 @@ function EndSummary({
   const autoOpenTimer = useRef<number | null>(null);
   const showNote = note != null;
   // Tapping the score toggles the breakdown popover (tap-only, no hover-open: a tap on
-  // touch would strand a sticky :hover). Suppressed while a save-note shows.
-  const open = pinned && !showNote;
+  // touch would strand a sticky :hover). Suppressed while a save-note shows, and while the
+  // share menu holds the corner (the autoOpen self-reveal can't muscle in either).
+  const open = pinned && !showNote && !menuOpen;
+  const menu = menuOpen && !showNote;
   const shareText = buildShareText(game);
-  // Does a native share sheet exist here? When it does, the action is a Share button →
-  // native sheet. When it doesn't (Linux, Firefox, the Discord iframe — which blocks Web
-  // Share), the same button becomes a plain Copy button — so it always reads as exactly
-  // what it'll do.
-  const canNativeShare =
-    typeof navigator !== "undefined" && typeof navigator.share === "function";
-  // Pick the share glyph to match the device's own share sheet (only shown when a native
-  // sheet exists; otherwise the button is a Copy button).
-  const sharePlatform = detectSharePlatform();
+  // NO native-sheet ("Share…") row: navigator.share is untrustworthy in the one place this
+  // menu ships (the Discord iframe) — on some mobile WebViews the function EXISTS but the
+  // call is killed by the iframe's permissions policy, so a presence check shows a row that
+  // then does nothing (owner-tested, 2026-08-14). Copy image / Copy text are the way out.
+  // Can the clipboard hold a PNG? Safari/Chrome can, Firefox's write() is behind a flag,
+  // and older webviews have no ClipboardItem at all — where it's missing the row is a dead
+  // end, so it doesn't render.
+  const canCopyImage =
+    !!onCopyImage &&
+    typeof ClipboardItem !== "undefined" &&
+    typeof navigator !== "undefined" &&
+    typeof navigator.clipboard?.write === "function";
   // hold the last note text through the face's fade-out, so the words don't vanish
   // a beat before the opacity does.
   const lastNote = useRef("");
   if (note) lastNote.current = note;
 
-  // Tap/Esc outside the footer closes the breakdown.
+  // Tap/Esc outside the footer closes whichever popover is up (breakdown or share menu).
   useEffect(() => {
-    if (!pinned) return;
+    if (!pinned && !menuOpen) return;
+    const closeAll = (): void => {
+      setPinned(false);
+      setMenuOpen(false);
+    };
     const onDown = (e: PointerEvent): void => {
-      if (!ref.current?.contains(e.target as Node)) setPinned(false);
+      if (!ref.current?.contains(e.target as Node)) closeAll();
     };
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") setPinned(false);
+      if (e.key === "Escape") closeAll();
     };
     document.addEventListener("pointerdown", onDown);
     document.addEventListener("keydown", onKey);
@@ -255,7 +328,7 @@ function EndSummary({
       document.removeEventListener("pointerdown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [pinned]);
+  }, [pinned, menuOpen]);
 
   useEffect(
     () => () => {
@@ -275,6 +348,16 @@ function EndSummary({
     };
   }, [autoOpen]);
 
+  // The two popovers share one corner, so each opener closes the other.
+  const toggleBreakdown = (): void => {
+    setMenuOpen(false);
+    setPinned((p) => !p);
+  };
+  const toggleMenu = (): void => {
+    setPinned(false);
+    setMenuOpen((m) => !m);
+  };
+
   const flashMsg = (text: string): void => {
     setFlash(text);
     if (copiedTimer.current != null) clearTimeout(copiedTimer.current);
@@ -285,9 +368,11 @@ function EndSummary({
   };
 
   // Share into Discord. The mint + the native share modal both live in App.tsx (it owns the
-  // SDK and the token); this only drives the pending state and confirms the outcome. A
-  // clipboard fallback flashes "Copied!" exactly like the Copy button, so the two never
-  // disagree about what just happened.
+  // SDK and the token); this only drives the pending state and confirms the outcome. The
+  // menu stays open, pending, while the card mints — closing it would leave a tap with
+  // nothing to show for itself — and shuts once we know what happened. A clipboard fallback
+  // flashes "Copied!" exactly like the Copy rows, so they never disagree about what just
+  // happened.
   const onDiscordShare = (): void => {
     if (!onShareLink || sharing) return;
     setSharing(true);
@@ -298,28 +383,36 @@ function EndSummary({
         else if (outcome === "failed") flashMsg("Couldn’t share");
       })
       .catch(() => flashMsg("Couldn’t share"))
-      .finally(() => setSharing(false));
+      .finally(() => {
+        setSharing(false);
+        setMenuOpen(false);
+      });
   };
 
-  // Native share where it exists (must fire in the gesture, so nothing is awaited before
-  // it; a real failure — not a user-dismiss — falls back to copy). Otherwise the button is
-  // already a Copy button, so this just copies the grid and flashes the check.
-  const onShare = (): void => {
-    // Native OS share sheet where it exists; everywhere it doesn't (Linux, Firefox, and the
-    // Discord activity, which blocks Web Share) the button already reads as Copy, so this
-    // just copies the grid. Native must fire in the gesture, so nothing is awaited first.
-    if (canNativeShare && navigator.share) {
-      navigator.share({ text: shareText }).catch((err: unknown) => {
-        // User dismissed the sheet — not a failure, so don't copy. Match on the error
-        // name alone: the rejection is a DOMException, which isn't `instanceof Error` in
-        // every engine (some webviews), so an instanceof guard would let a dismissal
-        // slip through to the copy fallback.
-        if ((err as { name?: string } | null)?.name === "AbortError") return;
-        void copyToClipboard(shareText).then(flashCopied);
-      });
-      return;
-    }
+  // Copy the result image. onCopyImage builds its clipboard write inside this gesture (see
+  // App.tsx copyResultImage — iOS insists), so nothing may be awaited before calling it;
+  // closing the menu is a state set, which doesn't yield the gesture.
+  const onCopyImageRow = (): void => {
+    if (!onCopyImage) return;
+    setMenuOpen(false);
+    void onCopyImage().then((ok) => flashMsg(ok ? "Copied!" : "Couldn’t copy"));
+  };
+
+  // Copy the grid as text — the fallback that works everywhere, so it's the one row with
+  // no gate on it.
+  const onCopyText = (): void => {
+    setMenuOpen(false);
     void copyToClipboard(shareText).then(flashCopied);
+  };
+
+  // Hand the grid to X's composer, prefilled. Routed out through onExternal because
+  // embedded we can only leave via Discord's own leave-app consent.
+  const onPostToX = (): void => {
+    if (!onExternal) return;
+    setMenuOpen(false);
+    onExternal(
+      `https://x.com/intent/post?text=${encodeURIComponent(shareText)}`,
+    );
   };
 
   return (
@@ -372,8 +465,8 @@ function EndSummary({
             {flash ?? ""}
           </span>
         </div>
-        {/* RIGHT — solve-time · divider · status+score, then the OS-share/Copy button and
-            (inside the Activity) the filled Share-to-Discord button on the far edge. */}
+        {/* RIGHT — solve-time · divider · status+score, then the Share button on the far
+            edge (its menu pops above it). */}
         <div className="flex min-w-0 flex-none items-center gap-3.5 max-[360px]:gap-2.5">
           {/* Score cluster — taps to toggle the breakdown. Wrapped so the popover anchors to
               it (caret points at the score, not the Share button to its right). */}
@@ -384,11 +477,11 @@ function EndSummary({
               tabIndex={0}
               aria-label="Score breakdown"
               aria-expanded={open}
-              onClick={() => setPinned((p) => !p)}
+              onClick={toggleBreakdown}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  setPinned((p) => !p);
+                  toggleBreakdown();
                 }
               }}
             >
@@ -432,9 +525,16 @@ function EndSummary({
               }
             >
               <div className="flex flex-col gap-2">
-                <BreakRow caption={won ? "Solved" : "Categories"} value={`+${b.completion}`} />
+                <BreakRow
+                  caption={won ? "Solved" : "Categories"}
+                  value={`+${b.completion}`}
+                />
                 <BreakRow caption="Speed" value={won ? `+${b.speed}` : "+0"} />
-                <BreakRow caption="Mistakes" value={won ? `−${b.penalty}` : "−0"} neg />
+                <BreakRow
+                  caption="Mistakes"
+                  value={won ? `−${b.penalty}` : "−0"}
+                  neg
+                />
                 {b.hints > 0 && (
                   <BreakRow
                     caption={`Hints (${b.hints})`}
@@ -451,69 +551,83 @@ function EndSummary({
               <span className="sb-pop-caret" aria-hidden />
             </div>
           </div>
-          {/* SHARE / COPY — the same icon button as the in-play Shuffle/Deselect (BTN_ICON),
-              icon-only. Where a native share sheet exists it's a Share button that opens it,
-              wearing that platform's own glyph (Windows forward-arrow / Apple box-and-up-
-              arrow / Android nodes); where it doesn't (incl. the Discord iframe) it's a Copy
-              button that copies the grid. A successful copy flashes the "Copied!" chip. */}
-          <HoverButton
-            data-end="share"
-            className={BTN_ICON}
-            hover="opacity-80"
-            onClick={onShare}
-            aria-label={canNativeShare ? "Share your result" : "Copy your result"}
-            title={canNativeShare ? "Share your result" : "Copy your result"}
-          >
-            {!canNativeShare ? (
-              <Copy size={18} strokeWidth={2.5} aria-hidden />
-            ) : sharePlatform === "windows" ? (
-              <WindowsShareIcon />
-            ) : sharePlatform === "apple" ? (
-              <Share size={18} strokeWidth={2.5} aria-hidden />
-            ) : (
-              // Share2 is right-heavy (one node left, two right), so nudge it left a hair to
-              // sit optically centred in the round button.
+          {/* SHARE — one button on the far edge, wearing the filled treatment (the round
+              twin of BTN_PRIMARY) because it's the end screen's only action, and every way
+              a result leaves the app hangs off it. Wrapped so the menu anchors to the
+              button rather than to the row. */}
+          <div className="relative flex flex-none items-center">
+            <HoverButton
+              data-end="share"
+              className={BTN_ICON_PRIMARY}
+              hover="opacity-85"
+              onClick={toggleMenu}
+              disabled={sharing}
+              aria-haspopup="menu"
+              aria-expanded={menu}
+              aria-label="Share your result"
+              title="Share your result"
+            >
+              {/* Share2 is right-heavy (one node left, two right), so nudge it left a hair
+                  to sit optically centred in the round button. */}
               <Share2
                 size={18}
                 strokeWidth={2.5}
                 className="-translate-x-[0.75px]"
                 aria-hidden
               />
-            )}
-            <span className="sr-only">{canNativeShare ? "Share" : "Copy"}</span>
-          </HoverButton>
-          {/* SHARE TO DISCORD — the primary end-screen action inside the Activity, so it
-              takes the far edge and the filled treatment (the round twin of BTN_PRIMARY)
-              rather than reading as a second, identical icon button. It posts the result as
-              a share card: our spoiler-free grid image with a Play button under it, which is
-              the only way a finished game turns into another player. Absent outside the
-              Activity (the OS-share/Copy button to its left is the whole affordance there).
-              Pending state is a spinner, since minting the card is a real round-trip. */}
-          {onShareLink && (
-            <HoverButton
-              data-end="share-discord"
-              className={BTN_ICON_PRIMARY}
-              hover="opacity-85"
-              onClick={onDiscordShare}
-              disabled={sharing}
-              aria-label="Share your result to Discord"
-              title="Share your result to Discord"
+              <span className="sr-only">Share</span>
+            </HoverButton>
+            {/* SHARE MENU — the breakdown popover's twin (same card, same pop, same
+                dismiss), anchored above the button. Copies lead (they resolve instantly,
+                no round-trip, no leaving the app), then the destinations. Rows only appear
+                where they'd actually work: Discord's share modal and the result image need
+                the Activity and a server record, X needs a way out of the iframe. Copy
+                emoji grid is the floor — it works everywhere, so the menu is never empty.
+                Mounted always; .sb-pop-open drives the pop (see index.css), so closed rows
+                leave the tab order by hand. */}
+            <div
+              role="menu"
+              aria-hidden={!menu}
+              aria-label="Share your result"
+              className={
+                "sb-pop absolute bottom-full right-0 z-30 mb-2.5 flex w-max min-w-[190px] flex-col rounded-xl border border-white/12 bg-[#1c1c1e] p-1.5 shadow-[0_12px_34px_rgba(0,0,0,0.55)] " +
+                (menu ? "sb-pop-open" : "")
+              }
             >
-              {sharing ? (
-                <LoaderCircle size={18} strokeWidth={2.5} className="animate-spin" aria-hidden />
-              ) : (
-                // Send is right-heavy (the plane points up-right), so nudge it a hair to sit
-                // optically centred in the round button.
-                <Send
-                  size={17}
-                  strokeWidth={2.5}
-                  className="-translate-x-[0.5px] translate-y-[0.5px]"
-                  aria-hidden
+              {canCopyImage && (
+                <ShareRow
+                  label="Copy image"
+                  icon={<ImageIcon size={16} strokeWidth={2.5} aria-hidden />}
+                  tabbable={menu}
+                  onSelect={onCopyImageRow}
                 />
               )}
-              <span className="sr-only">Share to Discord</span>
-            </HoverButton>
-          )}
+              <ShareRow
+                label="Copy emoji grid as text"
+                icon={<Copy size={16} strokeWidth={2.5} aria-hidden />}
+                tabbable={menu}
+                onSelect={onCopyText}
+              />
+              {onShareLink && (
+                <ShareRow
+                  label="Share to Discord"
+                  icon={<DiscordIcon />}
+                  pending={sharing}
+                  disabled={sharing}
+                  tabbable={menu}
+                  onSelect={onDiscordShare}
+                />
+              )}
+              {onExternal && (
+                <ShareRow
+                  label="Post on X"
+                  icon={<XIcon />}
+                  tabbable={menu}
+                  onSelect={onPostToX}
+                />
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -548,7 +662,8 @@ const TILE_TEXT = "block w-full text-center text-[clamp(9px,3vw,17px)]";
 // Shared by the plain solved bar and the SpoilerBar so the two never drift.
 const BAR_CAT =
   "text-balance font-extrabold uppercase tracking-tight text-[clamp(12px,3.4vw,16px)] leading-tight";
-const BAR_MEMBERS = "text-balance uppercase text-[clamp(10px,3vw,13px)] leading-tight";
+const BAR_MEMBERS =
+  "text-balance uppercase text-[clamp(10px,3vw,13px)] leading-tight";
 
 // Tile word, auto-fitted to the tile like NYT Connections: short words render at the
 // responsive ceiling; a word that would touch the edges has its font scaled down
@@ -610,19 +725,31 @@ function FitText({ text }: { text: string }) {
 // not text. The word stays the card's identity everywhere; only these faces render
 // the image. Routed through the same-origin /api/card-image proxy so it loads inside
 // Discord's iframe CSP (external NYT hosts are blocked there) and in a plain browser.
-const cardImageSrc = (url: string): string => `/api/card-image?u=${encodeURIComponent(url)}`;
+const cardImageSrc = (url: string): string =>
+  `/api/card-image?u=${encodeURIComponent(url)}`;
 
 // One tile's face: the card image if this word has one, else the auto-fit word. The
 // glyph SVGs are bare black paths, so they read on the light/colored faces as-is and
 // invert to white on the dark selected tile — matching NYT.
-function TileFace({ word, src, selected }: { word: string; src?: string; selected: boolean }) {
+function TileFace({
+  word,
+  src,
+  selected,
+}: {
+  word: string;
+  src?: string;
+  selected: boolean;
+}) {
   if (!src) return <FitText text={word} />;
   return (
     <img
       src={cardImageSrc(src)}
       alt={word}
       draggable={false}
-      className={"pointer-events-none h-[60%] w-[72%] object-contain" + (selected ? " invert" : "")}
+      className={
+        "pointer-events-none h-[60%] w-[72%] object-contain" +
+        (selected ? " invert" : "")
+      }
     />
   );
 }
@@ -637,8 +764,15 @@ function TileFace({ word, src, selected }: { word: string; src?: string; selecte
 // viewport — so the strip keeps the same proportions, and the same balance against
 // the title, on mobile and desktop alike (both pin --tile-h at 80px). Sizing off vw
 // instead made glyphs shrink on narrow screens and threw the balance off.
-function MemberFaces({ members, images }: { members: string[]; images?: Record<string, string> }) {
-  if (!images || !members.every((m) => images[m])) return <>{members.join(", ")}</>;
+function MemberFaces({
+  members,
+  images,
+}: {
+  members: string[];
+  images?: Record<string, string>;
+}) {
+  if (!images || !members.every((m) => images[m]))
+    return <>{members.join(", ")}</>;
   return (
     <span className="mt-[calc(var(--tile-h)*0.05)] flex items-center justify-center gap-[calc(var(--tile-h)*0.13)]">
       {members.map((m) => (
@@ -816,6 +950,8 @@ export function Board({
   onHint,
   onFinish,
   onShareLink,
+  onCopyImage,
+  onExternal,
   initialRevealed = [],
 }: {
   game: Game;
@@ -828,9 +964,13 @@ export function Board({
   // in standalone/practice, where the reveal is purely local. See doHint.
   onHint?: (level: number) => void;
   onFinish: () => void;
-  // Post the finished result to Discord as a share card. Forwarded to the end footer;
-  // absent outside the Activity / off the daily, where the footer shows only Copy.
+  // Post the finished result to Discord as a share card. Forwarded to the end footer's
+  // share menu; absent outside the Activity / off the daily, where that row is dropped.
   onShareLink?: () => Promise<ShareOutcome>;
+  // Put the result image on the clipboard (gated like onShareLink) and open a URL outside
+  // the app — the end footer's other two share routes. See EndSummary.
+  onCopyImage?: () => Promise<boolean>;
+  onExternal?: (url: string) => void;
   // seeds revealed-on-loss bars when rehydrating a finished game (preview harness).
   initialRevealed?: number[];
 }) {
@@ -963,7 +1103,9 @@ export function Board({
     const m = new Map<string, { left: number; top: number }>();
     boardRef.current
       ?.querySelectorAll<HTMLElement>("[data-flip]")
-      .forEach((e) => m.set(e.dataset.flip!, { left: e.offsetLeft, top: e.offsetTop }));
+      .forEach((e) =>
+        m.set(e.dataset.flip!, { left: e.offsetLeft, top: e.offsetTop }),
+      );
     return m;
   }
   function playFlip(
@@ -1140,7 +1282,11 @@ export function Board({
     onHint?.(h.level);
     rerenderSync();
     tileByWord(h.word)?.animate(
-      [{ transform: "scale(1)" }, { transform: "scale(1.09)" }, { transform: "scale(1)" }],
+      [
+        { transform: "scale(1)" },
+        { transform: "scale(1.09)" },
+        { transform: "scale(1)" },
+      ],
       { duration: 360, easing: SPRING },
     );
     setHintSR(`${h.word} is in the ${LEVELS[h.level].key} group`);
@@ -1359,7 +1505,8 @@ export function Board({
     // Entrance flourish, layered on the bar's fade-up: the mistake dots ride in on the left
     // (their play spot) while the Share button pops up on the right. Fired here (not in
     // EndSummary) so it plays only on a live finish; a rehydrated game renders at rest.
-    const shareEl = tailRef.current?.querySelector<HTMLElement>('[data-end="share"]');
+    const shareEl =
+      tailRef.current?.querySelector<HTMLElement>('[data-end="share"]');
     shareEl?.animate(
       [
         { opacity: 0, transform: "scale(.8)" },
@@ -1533,7 +1680,10 @@ export function Board({
               >
                 <div className={BAR_CAT}>{g.category}</div>
                 <div className={BAR_MEMBERS}>
-                  <MemberFaces members={g.members} images={game.puzzle.images} />
+                  <MemberFaces
+                    members={g.members}
+                    images={game.puzzle.images}
+                  />
                 </div>
               </div>
             );
@@ -1589,7 +1739,11 @@ export function Board({
                       setHover((h) => (h === w ? null : h));
                   }}
                 >
-                  <TileFace word={w} src={game.puzzle.images?.[w]} selected={sel} />
+                  <TileFace
+                    word={w}
+                    src={game.puzzle.images?.[w]}
+                    selected={sel}
+                  />
                 </button>
               );
             })}
@@ -1727,6 +1881,8 @@ export function Board({
         note={hint}
         autoOpen={freshFinish.current}
         onShareLink={onShareLink}
+        onCopyImage={onCopyImage}
+        onExternal={onExternal}
       />
     );
   }

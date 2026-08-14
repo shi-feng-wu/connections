@@ -4,6 +4,7 @@
     "api/join.ts": { "includeFiles": "api/_assets/**" },
     "api/refresh-card.ts": { "includeFiles": "api/_assets/**" },
     "api/share-link.ts": { "includeFiles": "api/_assets/**" },
+    "api/share-image.ts": { "includeFiles": "api/_assets/**" },
     "api/cron-recap.ts": { "includeFiles": "api/_assets/**", "maxDuration": 300 }
   },
   "crons": [

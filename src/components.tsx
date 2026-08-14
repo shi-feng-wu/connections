@@ -508,6 +508,7 @@ export function GameView({
   onHint,
   onFinish,
   onShareLink,
+  onCopyImage,
   chat,
   onOpenExternal,
   initialRevealed,
@@ -536,6 +537,9 @@ export function GameView({
   // Post the finished result to Discord as a share card (mint + native share modal). App
   // supplies it only inside the Activity on the official daily; the preview/landing omit it.
   onShareLink?: () => Promise<ShareOutcome>;
+  // Copy the finished result as a PNG (the share card's image) to the clipboard. Same gate
+  // as onShareLink — it's minted from the server's record of this player's daily.
+  onCopyImage?: () => Promise<boolean>;
   // The player↔dev chat (the footer's "Feedback" page): its bound api plus the unread/isDev
   // badge state. Omitted by the dev preview / landing, where the page falls back to a
   // local-only form.
@@ -662,6 +666,10 @@ export function GameView({
                       onFinish();
                     }}
                     onShareLink={onShareLink}
+                    onCopyImage={onCopyImage}
+                    // The same opener the info footer uses — the board's "Post on X" row
+                    // just needs a way out of the iframe, not its own plumbing.
+                    onExternal={onOpenExternal}
                     initialRevealed={initialRevealed}
                   />
                 </div>

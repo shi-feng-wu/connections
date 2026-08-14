@@ -17,11 +17,12 @@
   at the very top. Group everything that ships together into one release.
 -->
 
-## v2.2.0 — Aug 11, 2026
+## v2.2.0 — Aug 14, 2026
 
 ### Added
 
-- Share your result as a card. Finish the daily, hit the Share button, and pick a chat: your end screen goes out as a card with a Play button under it, so anyone who sees it can jump straight into today's puzzle. Same grid, dots, time, score and streak you see when you finish, and just as spoiler-free: colored squares only, no words.
+- /share now posts as an image by default.
+- New share menu post game, with options to share as text, image, to Discord or Twitter.
 
 ## v2.1.0 — Aug 11, 2026
 
@@ -33,8 +34,7 @@
 
 ### Changed
 
-- /disable-posts is now /mute and /enable-posts is now /unmute. Same thing they always did: mute stops the cards and recaps in a channel, unmute turns them back on. Both need the Manage Channels permission, and the old names keep working for a bit.
-- /unmute now works in servers without the bot too, since those channels get posts now.
+- /disable-posts is now /mute and /enable-posts is now /unmute. Same thing they always did: mute stops the cards and recaps in a channel, unmute turns them back on. Both need the Manage Channels permission.
 
 ### Removed
 

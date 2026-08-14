@@ -787,6 +787,52 @@ export function App({
     return (await copyToClipboard(minted.url)) ? "copied" : "failed";
   }
 
+  // The share loop's other half, for the chats Discord's picker can't reach: the result as
+  // a PNG on the clipboard, ready to paste into iMessage, a group DM, anywhere. Same image
+  // the share card carries, rendered server-side from this player's own committed record
+  // (/api/share-image — the client never supplies a grid), so it's spoiler-free by
+  // construction.
+  //
+  // The ClipboardItem is constructed SYNCHRONOUSLY inside the tap, with the fetch's PROMISE
+  // as its payload — that's the whole trick. iOS WebKit only honours a clipboard write that
+  // starts in the user gesture, and awaiting the render (a second or two) spends the
+  // gesture, so a write issued after it throws NotAllowedError. A promised blob keeps the
+  // write inside the gesture and lets the image arrive late; Chrome/Firefox take the same
+  // shape, so there's one path, not three.
+  function copyResultImage(): Promise<boolean> {
+    const g = gameRef.current;
+    const accessToken = accessTokenRef.current;
+    if (!g || !accessToken) return Promise.resolve(false);
+    try {
+      return navigator.clipboard
+        .write([
+          new ClipboardItem({
+            "image/png": fetch("/api/share-image", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ date: g.puzzle.date, accessToken }),
+              signal: timeoutSignal(20_000),
+            }).then((r) => {
+              // A refusal answers JSON ({ok:false}, e.g. the record isn't finished yet),
+              // which would otherwise land on the clipboard as a PNG-typed text blob —
+              // so anything that isn't really an image rejects, and the row says so.
+              if (
+                !r.ok ||
+                !(r.headers.get("content-type") ?? "").includes("image/png")
+              )
+                throw new Error("no-image");
+              return r.blob();
+            }),
+          }),
+        ])
+        .then(() => true)
+        .catch(() => false);
+    } catch {
+      // Constructing the ClipboardItem itself can throw on engines that half-support it.
+      return Promise.resolve(false);
+    }
+  }
+
   // Record how this player arrived: Discord hands the client the sharer's id (referrerId)
   // and whatever we stamped on the link at mint time (customId) when the Activity is opened
   // from a shared quick link. Fire-and-forget at boot, first-writer-wins server-side, no
@@ -1769,9 +1815,13 @@ export function App({
         onCommit={commitGuess}
         onHint={commitHint}
         onFinish={onFinish}
-        // The end screen's Share-to-Discord button, only where it can work: inside the
-        // Activity, on the official daily (a practice replay has no record to mint from).
+        // The end screen's share menu. Both server-minted routes are gated the same way —
+        // inside the Activity, on the official daily (a practice replay has no record to
+        // mint from); the menu drops the rows it isn't given. Post-on-X always works.
         onShareLink={isEmbedded && isDailyRef.current ? shareResult : undefined}
+        onCopyImage={
+          isEmbedded && isDailyRef.current ? copyResultImage : undefined
+        }
         chat={chatBundle}
         onOpenExternal={openExternal}
         initialRevealed={revealedLevelsOf(gameRef.current)}

@@ -1860,9 +1860,20 @@ export function App({
         // The end screen's share menu. Both server-minted routes are gated the same way —
         // inside the Activity, on the official daily (a practice replay has no record to
         // mint from); the menu drops the rows it isn't given. Post-on-X always works.
+        //
+        // Copy image is additionally OFF in the DESKTOP APP: image clipboard writes go
+        // through Electron's clipboard-sanitized-write permission, which Discord's shell
+        // denies — the write rejects after a successful render (owner-tested 2026-08-14:
+        // works on discord.com in a browser, rejects in the app, server 200s throughout;
+        // text writes are exempt, which is why Copy emoji grid works everywhere). The
+        // app's UA carries an "Electron/" token; browser clients never do.
         onShareLink={isEmbedded && isDailyRef.current ? shareResult : undefined}
         onCopyImage={
-          isEmbedded && isDailyRef.current ? copyResultImage : undefined
+          isEmbedded &&
+          isDailyRef.current &&
+          !/electron\//i.test(navigator.userAgent)
+            ? copyResultImage
+            : undefined
         }
         chat={chatBundle}
         onOpenExternal={openExternal}

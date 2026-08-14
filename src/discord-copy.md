@@ -120,11 +120,11 @@ ran out of guesses
 
 ## share-card.title
 
-{name} played Disconnections #{puzzle}
+Disconnections #{puzzle}
 
 ## share-card.description
 
-Four groups hiding in sixteen words. Play today’s puzzle and see how you do.
+Four groups hiding in sixteen words. Can you find them?
 
 ## reply-dm.subject
 

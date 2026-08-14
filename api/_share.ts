@@ -180,8 +180,12 @@ export async function mintQuickLink(
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       custom_id: opts.customId,
-      title: opts.title,
-      description: opts.description,
+      // Quick-link copy limits are MUCH tighter than embeds — Discord 400s the whole mint
+      // past them (observed live 2026-08-14: title 1-32, description 1-64). Clamp here so a
+      // future copy edit (or a long interpolated value) degrades to a truncated line instead
+      // of killing every share.
+      title: opts.title.slice(0, 32),
+      description: opts.description.slice(0, 64),
       image: `data:image/png;base64,${opts.png.toString('base64')}`,
     }),
   });

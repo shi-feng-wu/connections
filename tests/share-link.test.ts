@@ -15,6 +15,8 @@ import {
   shareMessage,
   shareResultPhrase,
 } from "../api/_share";
+import { COPY } from "../src/discord-copy";
+import { fill } from "../src/copy-util";
 
 // The MINT half of the share loop (api/share-link.ts + api/_share.ts): turning a finished
 // daily into a Discord quick link. What's pinned here is everything that decides WHETHER a
@@ -336,7 +338,7 @@ describe("quick-links POST", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const out = await mintQuickLink("app1", "tok_abc", {
-      title: "Alice played Disconnections #1170",
+      title: "Disconnections #1170",
       description: "Four groups hiding in sixteen words.",
       customId: shareCustomId(UID, DATE),
       png,
@@ -353,6 +355,33 @@ describe("quick-links POST", () => {
     expect(sent.custom_id).toBe(`${UID}/20260811`);
     expect(sent.title).toContain("#1170");
     expect(sent.image).toBe(`data:image/png;base64,${png.toString("base64")}`);
+  });
+
+  it("clamps title/description to Discord's quick-link limits (1-32 / 1-64)", async () => {
+    // Discord 400s the WHOLE mint past these (observed live 2026-08-14) — the clamp turns a
+    // long line into a truncated one instead of a dead share button.
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify({ link_id: "lnk_8" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const out = await mintQuickLink("app1", "tok", {
+      title: "x".repeat(50),
+      description: "y".repeat(100),
+      customId: "c",
+      png,
+    });
+    expect(out.ok).toBe(true);
+    const sent = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(sent.title).toHaveLength(32);
+    expect(sent.description).toHaveLength(64);
+  });
+
+  it("ships share-card copy that fits the quick-link limits without clamping", () => {
+    // The clamp is the safety net; the real copy must fit whole. Worst case: a 5-digit
+    // puzzle number.
+    const title = fill(COPY["share-card.title"], { name: "x".repeat(32), puzzle: 99999 });
+    expect(title.length).toBeLessThanOrEqual(32);
+    expect(COPY["share-card.description"].length).toBeLessThanOrEqual(64);
   });
 
   it("hands Discord's own error text back so a broken contract is diagnosable", async () => {

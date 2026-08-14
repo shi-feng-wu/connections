@@ -113,16 +113,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       fetchOwnScore(db, user.id, date),
       fetchStreak(db, user.id),
     ]);
-    const png = await renderShareCard({
-      puzzleNo: puzzle.id,
-      puzzleDate: date,
-      grid: game.history,
-      solved: game.status === 'won',
-      mistakes: mistakesOf(game),
-      streak,
-      score,
-      durationMs,
-    });
+    // hero: Discord scales the quick-link image to the embed's width and crops to its wide
+    // fixed-ratio box, so the mint ships the card centred on the 43:24 canvas — the bare
+    // portrait (what /api/share-image serves for the clipboard) would lose its header and
+    // stats to the crop.
+    const png = await renderShareCard(
+      {
+        puzzleNo: puzzle.id,
+        puzzleDate: date,
+        grid: game.history,
+        solved: game.status === 'won',
+        mistakes: mistakesOf(game),
+        streak,
+        score,
+        durationMs,
+      },
+      { hero: true },
+    );
 
     const minted = await mintQuickLink(appId, accessToken, {
       title: fill(COPY['share-card.title'], { name: user.name, puzzle: puzzle.id }),

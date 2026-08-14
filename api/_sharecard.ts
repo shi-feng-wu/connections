@@ -39,7 +39,15 @@ import { LEVELS, MAX_MISTAKES } from '../src/game.js';
 // is also what keeps the card modest in chat.
 const PAD = 48;
 export const SHARE_CARD_W = 480 + 2 * PAD;
-export const SHARE_CARD_H = 724;
+export const SHARE_CARD_H = 720;
+
+// The QUICK-LINK HERO frame. Discord scales a hero image to fill the embed's width and
+// CROPS its height to a fixed wide box (observed live 2026-08-14: the portrait card showed
+// only its middle 44% — the mid-grid slice — header and stats gone). So the mint ships the
+// card composited centred on this 43:24 canvas, dark margins either side; the clipboard
+// copy keeps the bare portrait, which stands alone where it's pasted.
+export const SHARE_HERO_W = 1290;
+export const SHARE_HERO_H = 720;
 
 // ---- palette (the app's own tokens: brand.css / game.ts LEVELS / season.tsx) ----
 const BG = '#09090b'; // zinc-950 — the card surface
@@ -95,7 +103,7 @@ const RULE_Y = TITLE_BASE + 22; // the lockup sits close over its rule, as the a
 
 // Stat row pinned at the bottom, the way the end footer sits under the board. Sized to seat
 // dots + flame + clock + score inside the 480 column with the app's own crowding, not less.
-const STAT_CY = 606; // the row's vertical centre
+const STAT_CY = 602; // the row's vertical centre
 const DOT_R = 10;
 const DOT_GAP = 10; // the app's footer ratio: gap = dot radius (gap-1.75 on h-3.5 dots)
 const CLOCK_ICON = 23;
@@ -452,10 +460,29 @@ function drawCard(ctx: CanvasRenderingContext2D, d: ShareCardData): void {
 
 // Render the share card to a PNG. Network-free (no avatars, no remote images), so it never
 // blocks on a CDN the way the roster card can.
-export async function renderShareCard(d: ShareCardData): Promise<Buffer> {
+//
+// `hero: true` composites the card centred on the 43:24 quick-link canvas (dark margins,
+// full-bleed — Discord's own mask rounds the hero's frame). The card's transparent rounded
+// corners land on the same BG fill, so the composite is seamless. Default is the bare
+// portrait, which is what the clipboard copy wants.
+export async function renderShareCard(
+  d: ShareCardData,
+  opts: { hero?: boolean } = {},
+): Promise<Buffer> {
   ensureFonts();
   const canvas = createCanvas(SHARE_CARD_W, SHARE_CARD_H);
   const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
   drawCard(ctx, d);
-  return canvas.toBuffer('image/png');
+  if (!opts.hero) return canvas.toBuffer('image/png');
+
+  const hero = createCanvas(SHARE_HERO_W, SHARE_HERO_H);
+  const hctx = hero.getContext('2d') as unknown as CanvasRenderingContext2D;
+  hctx.fillStyle = BG;
+  hctx.fillRect(0, 0, SHARE_HERO_W, SHARE_HERO_H);
+  hctx.drawImage(
+    canvas as unknown as CanvasImageSource,
+    Math.round((SHARE_HERO_W - SHARE_CARD_W) / 2),
+    Math.round((SHARE_HERO_H - SHARE_CARD_H) / 2),
+  );
+  return hero.toBuffer('image/png');
 }

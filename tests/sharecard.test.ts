@@ -9,6 +9,8 @@ import {
   renderShareCard,
   SHARE_CARD_H,
   SHARE_CARD_W,
+  SHARE_HERO_H,
+  SHARE_HERO_W,
   type ShareCardData,
 } from "../api/_sharecard";
 
@@ -41,9 +43,19 @@ const WIN: ShareCardData = {
 };
 
 describe("share card render", () => {
-  it("is cropped to the content column: 480px board + a uniform 48px frame", () => {
+  it("portrait card is the content column; the hero is Discord's 43:24 box", () => {
     expect(SHARE_CARD_W).toBe(480 + 2 * 48);
-    expect(SHARE_CARD_H).toBe(724);
+    expect(SHARE_CARD_H).toBe(720);
+    // Discord scales the quick-link hero to the embed width and crops to this ratio — a
+    // portrait mint loses its header/stats to the crop (observed live 2026-08-14).
+    expect(SHARE_HERO_W / SHARE_HERO_H).toBeCloseTo(43 / 24, 10);
+    expect(SHARE_HERO_H).toBe(SHARE_CARD_H);
+  });
+
+  it("renders the hero as a distinct, valid PNG (the mint's format)", async () => {
+    const hero = await renderShareCard(WIN, { hero: true });
+    expect(png(hero)).toBe(true);
+    expect(hero.equals(await renderShareCard(WIN))).toBe(false);
   });
 
   it("renders a real PNG for a win with a streak", async () => {

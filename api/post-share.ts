@@ -140,19 +140,22 @@ async function postShare(job: ShareJob): Promise<void> {
   // the key went missing underneath us; a permanently broken image is worse than yesterday's card,
   // so check rather than assume.
   if (process.env.INTERNAL_SECRET) {
-    // A bare image embed: no title, no description, no url of our own — Discord renders the picture
-    // and nothing else. Its proxy fetches /i/<token>.png server-side (once, then cached), so this
-    // PATCH carries a few hundred bytes no matter how many people open the channel.
+    // The message IS the link, nothing else — the exact shape a player pasting the url produces.
+    // Discord unfurls a lone image link into the full-size standalone media preview and hides the
+    // link text; an explicit {embeds:[{image}]} instead renders in the EMBED layout's smaller
+    // media box, which made /share output visibly smaller than a pasted link beside it (owner
+    // call, 2026-08-14: they must look identical). The proxy still fetches /i/<token>.png once
+    // server-side, so this PATCH carries a few dozen bytes no matter who scrolls past.
     const ok = await patchOriginal(
       url,
-      { embeds: [{ image: { url: sharePngUrl(userId, date) } }] },
-      "image embed",
+      { content: sharePngUrl(userId, date) },
+      "image link",
     );
     if (ok) {
-      console.log("[post-share] posted image embed", { user: userId, date });
+      console.log("[post-share] posted image link", { user: userId, date });
       return;
     }
-    // Discord refused the embed — the message is still ours to fill, so fall through to the card
+    // Discord refused the edit — the message is still ours to fill, so fall through to the card
     // /share used to post rather than leaving a dead "thinking…".
   } else {
     console.error("[post-share] no INTERNAL_SECRET to sign the card url; falling back to the card");

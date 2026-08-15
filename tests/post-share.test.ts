@@ -171,8 +171,9 @@ const job = (extra: Record<string, unknown> = {}) => ({
 const calls = (): [string, RequestInit][] => (globalThis.fetch as any).mock.calls;
 const lastEdit = (): [string, RequestInit] => calls()[calls().length - 1];
 const payloadOf = (init: RequestInit): any => JSON.parse(init.body as string);
-// The card url out of an embed edit, e.g. https://disconnections.app/i/<token>.png
-const embedUrl = (init: RequestInit): string => payloadOf(init).embeds[0].image.url;
+// The card url out of a link edit, e.g. https://disconnections.app/i/<token>.png — the
+// message content IS the url, the exact shape a player pasting the link produces.
+const linkUrl = (init: RequestInit): string => payloadOf(init).content;
 
 describe("api/post-share", () => {
   beforeEach(() => {
@@ -239,10 +240,12 @@ describe("api/post-share", () => {
     // No bytes: this is a link, not an upload.
     expect(init.body).not.toBeInstanceOf(FormData);
     expect(typeof init.body).toBe("string");
-    // Image only — no title, description, or url of our own, so Discord draws just the picture.
-    expect(payloadOf(init)).toEqual({ embeds: [{ image: { url: expect.any(String) } }] });
+    // The content is the bare link and nothing else: Discord unfurls a lone image link into
+    // the SAME full-size standalone preview a pasted link gets (an explicit embed renders in
+    // the embed layout's smaller media box — the mismatch the owner rejected).
+    expect(payloadOf(init)).toEqual({ content: expect.any(String) });
 
-    const link = embedUrl(init);
+    const link = linkUrl(init);
     expect(link.startsWith(CARD_URL_PREFIX)).toBe(true);
     expect(link.endsWith(".png")).toBe(true);
     // The url is one /api/share-png will actually serve: its token verifies, and it names exactly
@@ -301,7 +304,7 @@ describe("api/post-share", () => {
       await call(AUTH, job({ grid: [[0, 1, 2, 3]], solved: false, score: 99_999, mistakes: 4 }));
       // Identical: the url names (user, date) and nothing else, so every field the request tried to
       // supply was ignored.
-      expect(embedUrl(calls()[1][1])).toBe(embedUrl(calls()[0][1]));
+      expect(linkUrl(calls()[1][1])).toBe(linkUrl(calls()[0][1]));
     });
 
     it("touches nothing when the job has no interaction token to edit", async () => {

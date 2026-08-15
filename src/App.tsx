@@ -729,25 +729,31 @@ export function App({
   }
 
   // ——— the share loop ———
-  // Turn a finished daily into a shareable result and hand it to Discord's own picker. Two
-  // paths, in this order (owner call, 2026-08-14):
+  // Turn a finished daily into a shareable result and hand it to Discord's own picker. Three
+  // paths, in this order (owner calls, 2026-08-14):
   //
-  //   1. THE PLAIN PICTURE, preferred. /api/share-moment renders the portrait card from this
-  //      player's own committed record (the client never supplies a grid), uploads it to
-  //      Discord, and answers with the ephemeral CDN url that
-  //      discordSdk.commands.openShareMomentDialog takes. Whatever chat they pick gets the
-  //      image as their own message — no embed frame, no our-voice copy, no button. It reads
-  //      like a person sharing a screenshot, which is the thing people actually forward.
-  //   2. THE QUICK LINK, fallback. The v1 path: /api/share-link mints a 30-day link and
+  //   1. THE /share INTERACTION, preferred. discordSdk.commands.shareInteraction("share")
+  //      opens a channel picker and invokes our /share command in whatever chat the player
+  //      picks — the bot posts the bare permanent /i/<token>.png link with the "X used
+  //      /share" attribution line, which renders IDENTICALLY to /share and to a pasted link
+  //      (the parity the owner wants across every surface). SHIPPED-BUT-UNDOCUMENTED SDK
+  //      command: present and typed in 2.5.0, absent from the reference docs, so client
+  //      support is unknown — a rejection falls straight through to the next rung.
+  //   2. THE PLAIN PICTURE. /api/share-moment renders the portrait card from this player's
+  //      own committed record (the client never supplies a grid), uploads it to Discord, and
+  //      answers with the ephemeral CDN url that openShareMomentDialog takes. The picked
+  //      chat gets the image as the player's OWN message (1x-sized so the attachment box
+  //      displays it at unfurl parity).
+  //   3. THE QUICK LINK. The v1 path: /api/share-link mints a 30-day link and
   //      discordSdk.commands.shareLink posts it as a rich embed with a Play button. Kept
-  //      because clients that predate the share-moment RPC still need a working Share, and
+  //      because clients that predate the newer RPCs still need a working Share, and
   //      because the quick link is the only path Discord stamps with the sharer — referral
   //      attribution (/api/referral) survives there and nowhere else.
   //
-  // Fallbacks past that: a host that can run neither RPC (the dev standalone) gets the quick
-  // link's URL on the clipboard instead; if even that fails, the footer says so. A dismissed
-  // picker is NOT a failure — the player saw it and backed out, and copying behind their back
-  // would be wrong.
+  // Fallbacks past that: a host that can run none of the RPCs (the dev standalone) gets the
+  // quick link's URL on the clipboard instead; if even that fails, the footer says so. A
+  // dismissed picker is NOT a failure — the player saw it and backed out, and copying behind
+  // their back would be wrong.
   async function shareResult(): Promise<ShareOutcome> {
     const accessToken = accessTokenRef.current;
     const g = gameRef.current;
@@ -780,9 +786,23 @@ export function App({
       return once();
     };
 
-    // 1. The picture. The RPC check comes BEFORE the POST: on a client without the dialog the
-    // upload would be spent for nothing, and the quick link is one round trip away anyway.
     const sdk = sdkRef.current;
+
+    // 1. The /share interaction: the bot posts the permanent link in the picked channel —
+    // pixel-identical to /share and a paste. Resolved at all = the picker ran (success:false
+    // is a dismissal, same contract as shareLink below); any rejection means the client
+    // doesn't speak this undocumented RPC, and the ladder continues unbothered.
+    if (typeof sdk?.commands?.shareInteraction === "function") {
+      try {
+        await sdk.commands.shareInteraction({ command: "share" });
+        return "shared";
+      } catch {
+        /* client refused the command — drop to the picture */
+      }
+    }
+
+    // 2. The picture. The RPC check comes BEFORE the POST: on a client without the dialog the
+    // upload would be spent for nothing, and the quick link is one round trip away anyway.
     if (typeof sdk?.commands?.openShareMomentDialog === "function") {
       const moment = await post<{ ok?: boolean; url?: string; reason?: string }>(
         "/api/share-moment",
@@ -805,7 +825,7 @@ export function App({
       // {ok:false} (unfinished, credentials missing) or a dead request: fall through.
     }
 
-    // 2. The quick link, unchanged: mint, native share modal, clipboard behind that.
+    // 3. The quick link, unchanged: mint, native share modal, clipboard behind that.
     const minted = await post<{
       ok?: boolean;
       link_id?: string;

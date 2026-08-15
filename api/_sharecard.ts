@@ -521,9 +521,16 @@ const CARD_SCALE = 2;
 // Render the share card to a PNG. Network-free (no avatars, no remote images), so it never
 // blocks on a CDN the way the roster card can. `hero: true` renders the crop-safe wide
 // banner the quick-link mint ships; default is the bare portrait for the clipboard copy.
+//
+// `scale` overrides CARD_SCALE for the one surface where SMALLER is correct: the
+// share-moment ATTACHMENT. Attachments display at natural size up to a box that is LARGER
+// than the link-unfurl box, so a 2x attachment rendered visibly bigger than /share and a
+// pasted link beside it. Discord's own proxy serves the unfurl of this card at exactly
+// 576x720 (measured 2026-08-14), so a 1x upload makes the attachment's natural size land
+// on the same displayed size as the unfurl — all three surfaces finally match.
 export async function renderShareCard(
   d: ShareCardData,
-  opts: { hero?: boolean } = {},
+  opts: { hero?: boolean; scale?: number } = {},
 ): Promise<Buffer> {
   ensureFonts();
   if (opts.hero) {
@@ -532,9 +539,10 @@ export async function renderShareCard(
     drawHero(ctx, d);
     return canvas.toBuffer('image/png');
   }
-  const canvas = createCanvas(SHARE_CARD_W * CARD_SCALE, SHARE_CARD_H * CARD_SCALE);
+  const scale = opts.scale ?? CARD_SCALE;
+  const canvas = createCanvas(SHARE_CARD_W * scale, SHARE_CARD_H * scale);
   const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
-  ctx.scale(CARD_SCALE, CARD_SCALE);
+  ctx.scale(scale, scale);
   drawCard(ctx, d);
   return canvas.toBuffer('image/png');
 }

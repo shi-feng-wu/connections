@@ -111,16 +111,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       fetchOwnScore(db, user.id, date),
       fetchStreak(db, user.id),
     ]);
-    const png = await renderShareCard({
-      puzzleNo: puzzle.id,
-      puzzleDate: date,
-      grid: game.history,
-      solved: game.status === 'won',
-      mistakes: mistakesOf(game),
-      streak,
-      score,
-      durationMs,
-    });
+    // scale 1: an ATTACHMENT displays at natural size inside a box larger than the
+    // link-unfurl box, so the default 2x render showed bigger than /share and a pasted
+    // permanent link. 1x is exactly the size Discord's proxy serves those unfurls at
+    // (576x720, measured), which makes all three surfaces display the same.
+    const png = await renderShareCard(
+      {
+        puzzleNo: puzzle.id,
+        puzzleDate: date,
+        grid: game.history,
+        solved: game.status === 'won',
+        mistakes: mistakesOf(game),
+        streak,
+        score,
+        durationMs,
+      },
+      { scale: 1 },
+    );
 
     const uploaded = await uploadAttachment(appId, botToken, png, `disconnections-${date}.png`);
     if (!uploaded.ok) {

@@ -939,8 +939,13 @@ export function App({
   // rewards attached — v1 measures the loop, nothing more. Nothing to send on a normal
   // launch (both null), so the common case costs one comparison.
   function logReferral(sdk: DiscordSDK): void {
-    const referrerId = sdk.referrerId ?? null;
-    const customId = sdk.customId ?? null;
+    // An absent launch param reaches us as the literal string "undefined" (Discord stringifies
+    // it into the iframe URL), so "no launch params" has to be tested for, not assumed from
+    // null. The server re-checks — this rung just keeps the request off the ordinary boot path.
+    const present = (v: string | null): string | null =>
+      v && v !== "undefined" && v !== "null" ? v : null;
+    const referrerId = present(sdk.referrerId ?? null);
+    const customId = present(sdk.customId ?? null);
     if (!referrerId && !customId) return;
     void fetch("/api/referral", {
       method: "POST",

@@ -76,6 +76,19 @@ describe("resolveReferral", () => {
     });
   });
 
+  it("reads a stringified missing param as absence, not as a campaign arrival", () => {
+    // Discord puts the literal text "undefined" in the iframe URL when there is no launch param.
+    // Recording it wrote a null-referrer squatter row for every ordinary boot, and the primary
+    // key on referred_user_id then locked that player out of their real attribution forever.
+    for (const junk of ["undefined", "null", "NaN", "none", "  ", "UNDEFINED"]) {
+      expect(resolveReferral(REFERRED, { customId: junk })).toEqual({ ok: false, reason: "none" });
+    }
+    // A referrer_id that survives still counts — the placeholder only clears the free text.
+    const r = resolveReferral(REFERRED, { referrerId: SHARER, customId: "undefined" });
+    expect(r.ok && r.row.custom_id).toBe(null);
+    expect(r.ok && r.row.referrer_user_id).toBe(SHARER);
+  });
+
   it("refuses a referrer that isn't a Discord snowflake", () => {
     // A forged id must not land in the table as if it were a person; the custom_id still does.
     const r = resolveReferral(REFERRED, { referrerId: "<script>", customId: "promo" });

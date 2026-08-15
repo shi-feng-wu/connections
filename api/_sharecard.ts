@@ -509,6 +509,15 @@ function drawHero(ctx: CanvasRenderingContext2D, d: ShareCardData): void {
   });
 }
 
+// The portrait ships at 2x its layout size. Discord displays an inline image at NATURAL
+// size until it exceeds the surface's max box — and the attachment box and the link-unfurl
+// box have different caps, so a 576x720 card rendered natural-size on one surface and
+// scaled on the other showed at two different sizes side by side (observed live
+// 2026-08-14). At 2x every surface is past its cap and scales down to its own box, so the
+// displayed sizes converge — and the card reads retina-crisp instead of upscaled. The hero
+// already exceeds every cap at 1x.
+const CARD_SCALE = 2;
+
 // Render the share card to a PNG. Network-free (no avatars, no remote images), so it never
 // blocks on a CDN the way the roster card can. `hero: true` renders the crop-safe wide
 // banner the quick-link mint ships; default is the bare portrait for the clipboard copy.
@@ -517,11 +526,15 @@ export async function renderShareCard(
   opts: { hero?: boolean } = {},
 ): Promise<Buffer> {
   ensureFonts();
-  const canvas = opts.hero
-    ? createCanvas(SHARE_HERO_W, SHARE_HERO_H)
-    : createCanvas(SHARE_CARD_W, SHARE_CARD_H);
+  if (opts.hero) {
+    const canvas = createCanvas(SHARE_HERO_W, SHARE_HERO_H);
+    const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
+    drawHero(ctx, d);
+    return canvas.toBuffer('image/png');
+  }
+  const canvas = createCanvas(SHARE_CARD_W * CARD_SCALE, SHARE_CARD_H * CARD_SCALE);
   const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
-  if (opts.hero) drawHero(ctx, d);
-  else drawCard(ctx, d);
+  ctx.scale(CARD_SCALE, CARD_SCALE);
+  drawCard(ctx, d);
   return canvas.toBuffer('image/png');
 }

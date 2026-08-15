@@ -52,13 +52,23 @@ export function mergePlayer(
   return { players: [...players, p], changed: true };
 }
 
+// Both cards ship at 2x their layout size (the share card's convention, adopted 2026-08-14):
+// Discord displays an image at min(natural, surface box), so a card under the box rendered
+// soft on retina and, for the solo roster, small outright. At 2x the box always wins and the
+// pixels are dense enough for high-DPI. Avatars are fetched at size=64 for 32px slots, which
+// is exactly the 2x physical resolution — no fetch change needed. Measured cost (M-series):
+// 12-player roster 12→41ms, recap 16→64ms per render — noise on the webhook-edit path and
+// absorbed as throughput by the recap cron's work queue.
+const CARD_SCALE = 2;
+
 export async function renderRoster(players: CardPlayer[], opts: CardOpts = {}): Promise<Buffer> {
   ensureFonts();
   // Measure on a scratch context (header width sets the card's floor), size, then draw.
   const measure = createCanvas(4, 4).getContext('2d') as unknown as CanvasRenderingContext2D;
   const layout = cardLayout(measure, players, opts);
-  const canvas = createCanvas(layout.W, layout.height);
+  const canvas = createCanvas(layout.W * CARD_SCALE, layout.height * CARD_SCALE);
   const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
+  ctx.scale(CARD_SCALE, CARD_SCALE);
   await drawRoster(ctx, players, opts, layout, {
     loadImg: async (url) => {
       try {
@@ -78,8 +88,9 @@ export async function renderRoster(players: CardPlayer[], opts: CardOpts = {}): 
 export async function renderRecap(data: RecapData): Promise<Buffer> {
   ensureFonts();
   const layout = recapLayout(data);
-  const canvas = createCanvas(layout.W, layout.height);
+  const canvas = createCanvas(layout.W * CARD_SCALE, layout.height * CARD_SCALE);
   const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
+  ctx.scale(CARD_SCALE, CARD_SCALE);
   await drawRecap(ctx, data, layout, {
     loadImg: async (url) => {
       try {

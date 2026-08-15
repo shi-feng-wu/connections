@@ -729,7 +729,7 @@ export function App({
   }
 
   // ——— the share loop ———
-  // Turn a finished daily into a shareable result and hand it to Discord's own picker. Four
+  // Turn a finished daily into a shareable result and hand it to Discord's own picker. Three
   // paths, in this order (owner calls, 2026-08-14):
   //
   //   1. THE /share INTERACTION, preferred. discordSdk.commands.shareInteraction("share")
@@ -739,15 +739,12 @@ export function App({
   //      (the parity the owner wants across every surface). SHIPPED-BUT-UNDOCUMENTED SDK
   //      command: present and typed in 2.5.0, absent from the reference docs, so client
   //      support is unknown — a rejection falls straight through to the next rung.
-  //   2. THE PLAYER-AUTHORED LINK. shareLink without a link_id: the modal prefills the
-  //      permanent /i/ url as an editable message the player sends themselves — their own
-  //      message, unfurl-rendered like /share and pastes, referrer_id attribution attached.
-  //   3. THE PLAIN PICTURE. /api/share-moment renders the portrait card from this player's
+  //   2. THE PLAIN PICTURE. /api/share-moment renders the portrait card from this player's
   //      own committed record (the client never supplies a grid), uploads it to Discord, and
   //      answers with the ephemeral CDN url that openShareMomentDialog takes. The picked
   //      chat gets the image as the player's OWN message (1x-sized so the attachment box
   //      displays it at unfurl parity).
-  //   4. THE QUICK LINK. The v1 path: /api/share-link mints a 30-day link and
+  //   3. THE QUICK LINK. The v1 path: /api/share-link mints a 30-day link and
   //      discordSdk.commands.shareLink posts it as a rich embed with a Play button. Kept
   //      because clients that predate the newer RPCs still need a working Share, and
   //      because the quick link is the only path Discord stamps with the sharer — referral
@@ -804,34 +801,13 @@ export function App({
       }
     }
 
-    // 2. The player-authored link: shareLink WITHOUT a link_id (it's optional — no custom
-    // quick link, no purple panel). The modal opens with the permanent /i/<token>.png url
-    // prefilled as an editable message; the player picks a chat and sends it THEMSELVES.
-    // What posts is their own message carrying the image link (unfurls to the card at the
-    // same size as /share and pastes) plus Discord's generic activity link — which stamps
-    // referrer_id, so referral attribution rides the primary flow again. Resolved at all =
-    // the picker ran; dismissal is not failure (same contract as the mint flow below).
-    if (typeof sdk?.commands?.shareLink === "function") {
-      const perm = await post<{ ok?: boolean; url?: string; reason?: string }>(
-        "/api/share-url",
-      );
-      if (perm?.ok && perm.url) {
-        try {
-          await sdk.commands.shareLink({
-            message: perm.url,
-            // The same "<sharer>/<yyyymmdd>" custom_id the quick-link mint stamps, so
-            // /api/referral parses arrivals from either flow identically.
-            custom_id: `${meRef.current.id}/${g.puzzle.date.replace(/-/g, "")}`,
-          });
-          return "shared";
-        } catch {
-          /* modal unavailable on this client — drop to the picture */
-        }
-      }
-    }
-
-    // 3. The picture. The RPC check comes BEFORE the POST: on a client without the dialog the
+    // 2. The picture. The RPC check comes BEFORE the POST: on a client without the dialog the
     // upload would be spent for nothing, and the quick link is one round trip away anyway.
+    //
+    // (A shareLink-without-link_id rung lived here for one deploy: the modal prefills an
+    // editable message, but Discord CODE-ESCAPES any url in it when posting — deliberate
+    // anti-phishing, so the permanent link can never unfurl from a prefill. Removed rather
+    // than gated; see c0718e7 for the experiment.)
     if (typeof sdk?.commands?.openShareMomentDialog === "function") {
       const moment = await post<{ ok?: boolean; url?: string; reason?: string }>(
         "/api/share-moment",
@@ -854,7 +830,7 @@ export function App({
       // {ok:false} (unfinished, credentials missing) or a dead request: fall through.
     }
 
-    // 4. The quick link, unchanged: mint, native share modal, clipboard behind that.
+    // 3. The quick link, unchanged: mint, native share modal, clipboard behind that.
     const minted = await post<{
       ok?: boolean;
       link_id?: string;

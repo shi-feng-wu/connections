@@ -111,10 +111,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       fetchOwnScore(db, user.id, date),
       fetchStreak(db, user.id),
     ]);
-    // scale 1: an ATTACHMENT displays at natural size inside a box larger than the
-    // link-unfurl box, so the default 2x render showed bigger than /share and a pasted
-    // permanent link. 1x is exactly the size Discord's proxy serves those unfurls at
-    // (576x720, measured), which makes all three surfaces display the same.
+    // scale 0.5 (288x360): the ONLY size that makes the attachment display match the
+    // unfurls. An attachment renders at min(natural, attachment box) and the attachment box
+    // is larger than the unfurl box, so any upload past the boxes lands at the bigger box
+    // (the 2x and even 1x uploads both did — the proxy's 576x720 webp is the RETINA serving
+    // of a ~288pt unfurl display, not its display size). At 288x360 natural the attachment
+    // renders point-for-point where the unfurls do. Cost, accepted by the owner: 1x density,
+    // so text is a touch softer on retina than the proxy's 2x unfurls.
     const png = await renderShareCard(
       {
         puzzleNo: puzzle.id,
@@ -126,7 +129,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         score,
         durationMs,
       },
-      { scale: 1 },
+      { scale: 0.5 },
     );
 
     const uploaded = await uploadAttachment(appId, botToken, png, `disconnections-${date}.png`);

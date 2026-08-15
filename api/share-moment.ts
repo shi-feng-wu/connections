@@ -111,26 +111,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       fetchOwnScore(db, user.id, date),
       fetchStreak(db, user.id),
     ]);
-    // scale 0.5 (288x360): the ONLY size that makes the attachment display match the
-    // unfurls. An attachment renders at min(natural, attachment box) and the attachment box
-    // is larger than the unfurl box, so any upload past the boxes lands at the bigger box
-    // (the 2x and even 1x uploads both did — the proxy's 576x720 webp is the RETINA serving
-    // of a ~288pt unfurl display, not its display size). At 288x360 natural the attachment
-    // renders point-for-point where the unfurls do. Cost, accepted by the owner: 1x density,
-    // so text is a touch softer on retina than the proxy's 2x unfurls.
-    const png = await renderShareCard(
-      {
-        puzzleNo: puzzle.id,
-        puzzleDate: date,
-        grid: game.history,
-        solved: game.status === 'won',
-        mistakes: mistakesOf(game),
-        streak,
-        score,
-        durationMs,
-      },
-      { scale: 0.5 },
-    );
+    // Default 2x: this route is a FALLBACK rung now (clients without shareInteraction or the
+    // shareLink modal), and chasing pixel parity with the unfurl surfaces proved impossible —
+    // attachments render at fixed natural size, unfurls in a responsive box, so no dimensions
+    // match at every window width (0.5x/1x/2x all tried live, 2026-08-14). So the attachment
+    // is its best native self instead: crisp at the attachment box, like any uploaded image.
+    const png = await renderShareCard({
+      puzzleNo: puzzle.id,
+      puzzleDate: date,
+      grid: game.history,
+      solved: game.status === 'won',
+      mistakes: mistakesOf(game),
+      streak,
+      score,
+      durationMs,
+    });
 
     const uploaded = await uploadAttachment(appId, botToken, png, `disconnections-${date}.png`);
     if (!uploaded.ok) {

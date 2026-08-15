@@ -1,21 +1,27 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// api/post-share.ts is the /share RENDER, split out of /api/interactions the same way the "who's
-// playing" card is (api/post-card.ts) — the latency-critical interactions function must never carry
-// @napi-rs/canvas. /api/interactions defers the /share reply and calls this with the invoker's id
-// and the interaction token; this function replays the game, draws the portrait card, and edits the
-// deferred message into the picture.
+// api/post-share.ts is the /share ANSWER, split out of /api/interactions the same way the "who's
+// playing" card is (api/post-card.ts) — the latency-critical interactions function can't be held up
+// by DB work. /api/interactions defers the /share reply and calls this with the invoker's id and the
+// interaction token; this function replays the game and edits the deferred message into a picture of
+// it.
 //
-// What's pinned here: the INTERNAL_SECRET gate (a forged call must not be able to spend someone's
+// The picture is a LINK, not an upload: a bare image embed pointing at the player's PERMANENT card
+// url (https://disconnections.app/i/<token>.png — api/share-png), which Discord's proxy fetches from
+// our origin once and then serves to every viewer. Nothing is rendered here, so there is no PNG in
+// this file's assertions; what's pinned instead is that the url is the RIGHT one — it round-trips
+// through parseSharePngToken back to exactly this (user, date).
+//
+// What else is pinned: the INTERNAL_SECRET gate (a forged call must not be able to spend someone's
 // interaction token), the replay gate (the result comes from the player's OWN progress record, never
-// from the request), the happy-path edit contract (a multipart PATCH to the @original webhook URL
-// carrying real PNG bytes), and — the promise that /share never gets WORSE than it was — the
-// degradation to the pre-image Components V2 emoji card when the picture can't be produced.
+// from the request, and a /share for a result that doesn't exist must not emit a url that 404s into
+// a broken image), the edit contract (a JSON PATCH to the @original webhook URL, no attachment), and
+// — the promise that /share never gets WORSE than it was — the degradation to the pre-image
+// Components V2 emoji card when the embed can't be posted.
 //
-// Harness follows tests/share-moment.test.ts: Supabase is shimmed onto in-memory tables, the render
-// is REAL (so the PNG assertion checks actual bytes) but interposable so a failure can be forced,
-// and Discord is a stubbed global fetch.
+// Harness follows tests/share-moment.test.ts: Supabase is shimmed onto in-memory tables and Discord
+// is a stubbed global fetch.
 
 // ---- in-memory tables + the Supabase-builder shim over them (only the chains we use) ----
 type Row = Record<string, any>;
@@ -42,21 +48,38 @@ class Q {
   }
 }
 
-function mkDb(seed: Partial<Store> = {}): { db: SupabaseClient; store: Store } {
+// `touched`/`rpcs` record which tables and RPCs a run actually read. The embed path is supposed to
+// look up NOTHING beyond the replay (whoever opens the url makes /api/share-png fetch the stats
+// itself), so "what did we query" is part of the contract, not just an implementation detail.
+function mkDb(seed: Partial<Store> = {}): {
+  db: SupabaseClient;
+  store: Store;
+  touched: string[];
+  rpcs: string[];
+} {
   const store: Store = { progress: seed.progress ?? [], scores: seed.scores ?? [] };
+  const touched: string[] = [];
+  const rpcs: string[] = [];
   const db = {
-    from: (t: keyof Store) => new Q(store, t),
-    // fetchStreak's user_streak RPC. "No such function" keeps the streak off the card
-    // deliberately, rather than by an accidental TypeError the best-effort catch would swallow.
-    rpc: async () => ({ data: null, error: { code: "42883" } }),
+    from: (t: keyof Store) => {
+      touched.push(t);
+      return new Q(store, t);
+    },
+    // fetchStreak's user_streak RPC. "No such function" keeps the streak off a card deliberately,
+    // rather than by an accidental TypeError the best-effort catch would swallow.
+    rpc: async (name: string) => {
+      rpcs.push(name);
+      return { data: null, error: { code: "42883" } };
+    },
   } as unknown as SupabaseClient;
-  return { db, store };
+  return { db, store, touched, rpcs };
 }
 
 const UID = "111222333444555666";
 const DATE = "2026-08-11";
 const TOKEN = "interaction_tok_abc";
 const ORIGINAL_URL = `https://discord.com/api/v10/webhooks/app1/${TOKEN}/messages/@original`;
+const CARD_URL_PREFIX = "https://disconnections.app/i/";
 
 const PUZZLE = {
   id: 1170,
@@ -78,12 +101,10 @@ const WON = [
 ];
 
 // Reassigned per test (see beforeEach); the hoisted mock factories close over it.
-let route: { db: SupabaseClient; store: Store; renderThrows: boolean } = {
-  ...mkDb(),
-  renderThrows: false,
-};
-// The background work handed to waitUntil. The handler ACKs its internal caller before rendering,
-// so the test has to drain these before asserting on what Discord received.
+type Route = ReturnType<typeof mkDb> & { onWork?: () => void };
+let route: Route = mkDb();
+// The background work handed to waitUntil. The handler ACKs its internal caller before touching the
+// DB, so the test has to drain these before asserting on what Discord received.
 const pending: Promise<unknown>[] = [];
 
 vi.mock("@vercel/functions", () => ({
@@ -91,27 +112,24 @@ vi.mock("@vercel/functions", () => ({
     pending.push(p);
   },
 }));
-vi.mock("../api/_admin.js", () => ({ admin: () => route.db }));
+// admin() is the first thing the background job does, which makes it the one deterministic seam for
+// "the environment changed underneath the job" (see the missing-key test below).
+vi.mock("../api/_admin.js", () => ({
+  admin: () => {
+    route.onWork?.();
+    return route.db;
+  },
+}));
 vi.mock("../api/_puzzles.js", () => ({
   fetchPuzzle: async () => PUZZLE,
   todayET: () => DATE,
   isValidDate: (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d),
 }));
-// The real renderer, interposed: the happy path draws an actual PNG (which is what makes the byte
-// assertions meaningful), and a test can force the "canvas blew up" branch without stubbing the
-// drawing out of every other case.
-vi.mock("../api/_sharecard.js", async () => {
-  const actual = await vi.importActual<typeof import("../api/_sharecard")>("../api/_sharecard.js");
-  return {
-    ...actual,
-    renderShareCard: async (...args: Parameters<typeof actual.renderShareCard>) => {
-      if (route.renderThrows) throw new Error("canvas exploded");
-      return actual.renderShareCard(...args);
-    },
-  };
-});
 
 const { default: handler } = await import("../api/post-share");
+// The real verifier, unmocked: the whole point of the assertion is that the url we posted is one
+// /api/share-png would actually accept.
+const { parseSharePngToken } = await import("../api/_share");
 
 type Res = { statusCode: number; body: any; headers: Record<string, string> };
 async function call(
@@ -136,7 +154,7 @@ async function call(
     },
   };
   await handler({ method, headers, body } as any, res);
-  // Drain the background render before asserting on the Discord edit.
+  // Drain the background work before asserting on the Discord edit.
   await Promise.all(pending.splice(0));
   return res;
 }
@@ -152,11 +170,13 @@ const job = (extra: Record<string, unknown> = {}) => ({
 
 const calls = (): [string, RequestInit][] => (globalThis.fetch as any).mock.calls;
 const lastEdit = (): [string, RequestInit] => calls()[calls().length - 1];
+const payloadOf = (init: RequestInit): any => JSON.parse(init.body as string);
+// The card url out of an embed edit, e.g. https://disconnections.app/i/<token>.png
+const embedUrl = (init: RequestInit): string => payloadOf(init).embeds[0].image.url;
 
 describe("api/post-share", () => {
   beforeEach(() => {
-    const { db, store } = mkDb();
-    route = { db, store, renderThrows: false };
+    route = mkDb();
     pending.length = 0;
     process.env.INTERNAL_SECRET = "s3cret";
     process.env.VITE_DISCORD_CLIENT_ID = "app1";
@@ -195,7 +215,7 @@ describe("api/post-share", () => {
       expect(calls()).toHaveLength(0);
     });
 
-    it("ACKs its caller immediately, before the render", async () => {
+    it("ACKs its caller immediately, before the work", async () => {
       route.store.progress.push({ user_id: UID, puzzle_date: DATE, guesses: WON, hints: [] });
       const r = await call(AUTH, job());
       expect(r.statusCode).toBe(200);
@@ -204,30 +224,39 @@ describe("api/post-share", () => {
     });
   });
 
-  // The picture is the point of this route: a multipart PATCH of the deferred interaction response.
-  it("edits the deferred message into the portrait card", async () => {
+  // The picture is the point of this route: a JSON PATCH of the deferred interaction response
+  // carrying a bare image embed that points at the player's permanent card url.
+  it("edits the deferred message into an embed of the permanent card url", async () => {
     route.store.progress.push({ user_id: UID, puzzle_date: DATE, guesses: WON, hints: [] });
-    route.store.scores.push({ user_id: UID, puzzle_date: DATE, score: 412, duration_ms: 134_000 });
     await call(AUTH, job());
 
     expect(calls()).toHaveLength(1);
     const [url, init] = lastEdit();
     expect(url).toBe(ORIGINAL_URL);
     expect(init.method).toBe("PATCH");
-    // No Content-Type of ours — fetch writes the multipart boundary itself.
-    expect((init.headers as Record<string, string> | undefined)?.["Content-Type"]).toBeUndefined();
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
 
-    const form = init.body as FormData;
-    expect(form).toBeInstanceOf(FormData);
-    const payload = JSON.parse(form.get("payload_json") as string);
-    expect(payload).toEqual({ attachments: [{ id: 0, filename: `disconnections-${DATE}.png` }] });
+    // No bytes: this is a link, not an upload.
+    expect(init.body).not.toBeInstanceOf(FormData);
+    expect(typeof init.body).toBe("string");
+    // Image only — no title, description, or url of our own, so Discord draws just the picture.
+    expect(payloadOf(init)).toEqual({ embeds: [{ image: { url: expect.any(String) } }] });
 
-    const file = form.get("files[0]") as File;
-    expect(file.name).toBe(`disconnections-${DATE}.png`);
-    expect(file.type).toBe("image/png");
-    const bytes = Buffer.from(await file.arrayBuffer());
-    expect(bytes.subarray(0, 4)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47])); // \x89PNG
-    expect(bytes.length).toBeGreaterThan(1000);
+    const link = embedUrl(init);
+    expect(link.startsWith(CARD_URL_PREFIX)).toBe(true);
+    expect(link.endsWith(".png")).toBe(true);
+    // The url is one /api/share-png will actually serve: its token verifies, and it names exactly
+    // this player and date.
+    const token = link.slice(CARD_URL_PREFIX.length, -".png".length);
+    expect(parseSharePngToken(token)).toEqual({ userId: UID, date: DATE });
+  });
+
+  it("looks up nothing but the replay — the url's reader fetches the stats itself", async () => {
+    route.store.progress.push({ user_id: UID, puzzle_date: DATE, guesses: WON, hints: [] });
+    route.store.scores.push({ user_id: UID, puzzle_date: DATE, score: 412, duration_ms: 134_000 });
+    await call(AUTH, job());
+    expect(route.touched).toEqual(["progress"]); // no scores row, no streak
+    expect(route.rpcs).toEqual([]);
   });
 
   it("falls back to the app id in the environment when the job doesn't carry one", async () => {
@@ -237,9 +266,10 @@ describe("api/post-share", () => {
   });
 
   // The result is replayed from the player's own append-only record — the same one /api/score
-  // scores from — so an internal call can't invent one, and can't dress up someone else's.
+  // scores from — so an internal call can't invent one, and can't dress up someone else's. A url
+  // for a result that doesn't exist would 404 into a broken image, so it must never be emitted.
   describe("replay gate", () => {
-    it("never posts a picture for a game the player didn't finish", async () => {
+    it("never emits a url for a game the player didn't finish", async () => {
       route.store.progress.push({
         user_id: UID,
         puzzle_date: DATE,
@@ -248,32 +278,30 @@ describe("api/post-share", () => {
       });
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       await call(AUTH, job());
-      // One edit, and it is NOT an image: the deferred message is resolved with the apology copy
+      // One edit, and it carries no picture: the deferred message is resolved with the apology copy
       // rather than left hanging as a dead "thinking…".
       expect(calls()).toHaveLength(1);
       const [url, init] = lastEdit();
       expect(url).toBe(ORIGINAL_URL);
-      expect(init.body).not.toBeInstanceOf(FormData);
-      expect(JSON.parse(init.body as string).content).toBeTruthy();
+      expect(payloadOf(init).embeds).toBeUndefined();
+      expect(payloadOf(init).content).toBeTruthy();
       expect(String(warn.mock.calls[0])).toContain("[post-share]");
     });
 
-    it("never posts a picture for a game that was never played", async () => {
+    it("never emits a url for a game that was never played", async () => {
       vi.spyOn(console, "warn").mockImplementation(() => {});
       await call(AUTH, job());
-      expect((lastEdit()[1].body as unknown) instanceof FormData).toBe(false);
+      expect(payloadOf(lastEdit()[1]).embeds).toBeUndefined();
+      expect(JSON.stringify(calls())).not.toContain(CARD_URL_PREFIX);
     });
 
-    it("draws only what the named player's own record says, never a grid off the request", async () => {
+    it("points only at the named player's own result, never at a grid off the request", async () => {
       route.store.progress.push({ user_id: UID, puzzle_date: DATE, guesses: WON, hints: [] });
-      const bytes = async (i: number): Promise<Buffer> => {
-        const form = (calls()[i][1].body as FormData).get("files[0]") as File;
-        return Buffer.from(await form.arrayBuffer());
-      };
       await call(AUTH, job());
       await call(AUTH, job({ grid: [[0, 1, 2, 3]], solved: false, score: 99_999, mistakes: 4 }));
-      // Byte-identical: every field the request tried to supply was ignored.
-      expect(Buffer.compare(await bytes(1), await bytes(0))).toBe(0);
+      // Identical: the url names (user, date) and nothing else, so every field the request tried to
+      // supply was ignored.
+      expect(embedUrl(calls()[1][1])).toBe(embedUrl(calls()[0][1]));
     });
 
     it("touches nothing when the job has no interaction token to edit", async () => {
@@ -292,12 +320,12 @@ describe("api/post-share", () => {
   });
 
   // /share must never get WORSE than it was: before the picture it posted a Components V2 card of
-  // emoji squares, and that card is what a failed render degrades to.
+  // emoji squares, and that card is what a failed embed degrades to.
   describe("fallback to the emoji card", () => {
     const assertEmojiCard = (init: RequestInit): void => {
       expect(init.method).toBe("PATCH");
       expect(init.body).not.toBeInstanceOf(FormData);
-      const payload = JSON.parse(init.body as string);
+      const payload = payloadOf(init);
       expect(payload.flags).toBe(1 << 15); // IS_COMPONENTS_V2
       expect(payload.components[0].type).toBe(17); // CONTAINER
       // The grid of colour squares the card has always carried.
@@ -306,27 +334,9 @@ describe("api/post-share", () => {
       expect(text).toContain("Disconnections #1170");
     };
 
-    it("posts the emoji card when the render throws", async () => {
+    it("posts the emoji card when Discord refuses the embed", async () => {
       route.store.progress.push({ user_id: UID, puzzle_date: DATE, guesses: WON, hints: [] });
       route.store.scores.push({ user_id: UID, puzzle_date: DATE, score: 412, duration_ms: 134_000 });
-      route.renderThrows = true;
-      const err = vi.spyOn(console, "error").mockImplementation(() => {});
-      await call(AUTH, job());
-
-      expect(calls()).toHaveLength(1);
-      const [url, init] = lastEdit();
-      expect(url).toBe(ORIGINAL_URL);
-      assertEmojiCard(init);
-      // The stat line keeps the time + points the inline card used to show.
-      const payload = JSON.parse(init.body as string);
-      const stats = JSON.stringify(payload.components[0].components);
-      expect(stats).toContain("2:14"); // 134s
-      expect(stats).toContain("412 pts");
-      expect(String(err.mock.calls[0])).toContain("[post-share]");
-    });
-
-    it("posts the emoji card when Discord refuses the attachment", async () => {
-      route.store.progress.push({ user_id: UID, puzzle_date: DATE, guesses: WON, hints: [] });
       const fetchMock = vi
         .fn<typeof fetch>()
         .mockResolvedValueOnce(new Response('{"message":"Invalid Form Body","code":50035}', { status: 400 }))
@@ -336,15 +346,41 @@ describe("api/post-share", () => {
       await call(AUTH, job());
 
       expect(calls()).toHaveLength(2);
-      expect(calls()[0][1].body).toBeInstanceOf(FormData); // the picture was attempted first
+      expect(String(calls()[0][1].body)).toContain(CARD_URL_PREFIX); // the embed was attempted first
       assertEmojiCard(calls()[1][1]);
+      // The stat line keeps the time + points the inline card used to show — fetched HERE, on the
+      // fallback path only, which is why the scores row is read at all in this test.
+      const stats = JSON.stringify(payloadOf(calls()[1][1]).components[0].components);
+      expect(stats).toContain("2:14"); // 134s
+      expect(stats).toContain("412 pts");
+      expect(route.touched).toContain("scores");
       // Discord's own text is the only diagnosis available without live credentials.
       expect(err.mock.calls.flat().join(" ")).toContain("50035");
     });
 
+    it("posts the emoji card, and no url, when there's no key to sign one with", async () => {
+      route.store.progress.push({ user_id: UID, puzzle_date: DATE, guesses: WON, hints: [] });
+      // The route's own auth needed INTERNAL_SECRET to let this call in, so the only way to reach
+      // the edit without one is for it to vanish mid-flight — which is exactly the deploy hazard the
+      // guard exists for. Dropping it as the background job opens the DB puts it deterministically
+      // before the url would be minted. An unsigned url is worse than yesterday's card: it would
+      // never verify, so the embed would be a permanently broken image.
+      route.onWork = () => {
+        delete process.env.INTERNAL_SECRET;
+      };
+      const err = vi.spyOn(console, "error").mockImplementation(() => {});
+      await call(AUTH, job());
+
+      expect(calls()).toHaveLength(1); // the embed was never even attempted
+      const [url, init] = lastEdit();
+      expect(url).toBe(ORIGINAL_URL);
+      assertEmojiCard(init);
+      expect(JSON.stringify(calls())).not.toContain(CARD_URL_PREFIX);
+      expect(String(err.mock.calls[0])).toContain("[post-share]");
+    });
+
     it("gives up quietly, and greppably, when even the fallback edit fails", async () => {
       route.store.progress.push({ user_id: UID, puzzle_date: DATE, guesses: WON, hints: [] });
-      route.renderThrows = true;
       vi.stubGlobal(
         "fetch",
         vi
@@ -356,6 +392,7 @@ describe("api/post-share", () => {
       // No throw escapes: the handler already ACKed, and there is nothing left to try.
       const r = await call(AUTH, job());
       expect(r.statusCode).toBe(200);
+      expect(calls()).toHaveLength(2); // embed refused, then the fallback card refused
       const logged = warn.mock.calls.flat().join(" ");
       expect(logged).toContain("[post-share]");
       expect(logged).toContain("10015");

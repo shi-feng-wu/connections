@@ -95,6 +95,19 @@ export function sharePngToken(userId: string, date: string): string {
   return `${userId}.${date.replace(/-/g, '')}.${sharePngSig(userId, date)}`;
 }
 
+// Where those tokens live. Absolute and hard-coded on purpose: the url is handed to OTHER
+// people's clients (a clipboard paste, a Discord embed Discord's proxy fetches server-side), so
+// it can never be relative, and a preview deployment must still emit the production origin —
+// a link that outlives the deploy that minted it is the entire point of this pair.
+const SHARE_PNG_ORIGIN = 'https://disconnections.app';
+
+// The permanent url for one player's result. The single place the origin/path/extension are
+// assembled, so /api/share-url (the end screen's "Copy link") and /api/post-share (the /share
+// command's embed) can never drift apart on the shape /api/share-png is rewritten to serve.
+export function sharePngUrl(userId: string, date: string): string {
+  return `${SHARE_PNG_ORIGIN}/i/${sharePngToken(userId, date)}.png`;
+}
+
 // Inverse of sharePngToken. Null for anything that isn't one of ours — a wrong shape, a date
 // that isn't a real puzzle day, or a signature that doesn't re-derive. The comparison is
 // constant-time over the raw signature bytes, so a forger learns nothing from how long a 404

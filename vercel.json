@@ -7,7 +7,6 @@
     "api/share-image.ts": { "includeFiles": "api/_assets/**" },
     "api/share-png.ts": { "includeFiles": "api/_assets/**" },
     "api/share-moment.ts": { "includeFiles": "api/_assets/**" },
-    "api/post-share.ts": { "includeFiles": "api/_assets/**" },
     "api/cron-recap.ts": { "includeFiles": "api/_assets/**", "maxDuration": 300 }
   },
   "crons": [

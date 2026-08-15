@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { admin } from './_admin.js';
 import { fetchDiscordUser } from './_discord.js';
 import { isValidDate, todayET } from './_puzzles.js';
-import { replayFinished, sharePngToken } from './_share.js';
+import { replayFinished, sharePngUrl } from './_share.js';
 
 // "What is MY permanent link?" — the authed half of the permanent-card pair. Answers with
 // https://disconnections.app/i/<token>.png, which /api/share-png re-renders forever (see
@@ -22,8 +22,6 @@ import { replayFinished, sharePngToken } from './_share.js';
 // the client branches on one contract for every share path. The grid is never taken from the
 // request: identity comes from the Discord token and the result is replayed from that user's
 // own append-only record, so nobody can mint a link to a game they didn't play.
-
-const SHARE_PNG_ORIGIN = 'https://disconnections.app';
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
@@ -63,10 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
-    res.status(200).json({
-      ok: true,
-      url: `${SHARE_PNG_ORIGIN}/i/${sharePngToken(user.id, date)}.png`,
-    });
+    res.status(200).json({ ok: true, url: sharePngUrl(user.id, date) });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : 'error' });
   }

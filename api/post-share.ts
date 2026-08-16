@@ -5,7 +5,6 @@ import { IS_COMPONENTS_V2, shareCard } from "../src/discord-messages.js";
 import type { Game } from "../src/game.js";
 import { interactionMessageUrl } from "./_livecard.js";
 import { isValidDate } from "./_puzzles.js";
-import { PLAY_CUSTOM_ID } from "./_recap.js";
 import { fetchOwnScore, replayFinished, sharePngUrl } from "./_share.js";
 
 // The /share ANSWER, split out of /api/interactions exactly the way the "who's playing" card is
@@ -27,20 +26,7 @@ import { fetchOwnScore, replayFinished, sharePngUrl } from "./_share.js";
 //     still resolves months later, and anyone can lift the url out of the message and paste it
 //     anywhere. That's the share loop the attachment quietly dead-ended.
 // The visual is unchanged where it matters: an image-only embed is chrome-free — just the picture,
-// none of the title/description furniture a quick-link embed carries.
-//
-// AND A PLAY BUTTON UNDER IT (2026-08-15). The picture alone was a dead end for the one person the
-// share exists to reach: someone in the channel who does NOT already play. Clicking the image opens
-// Discord's media viewer, not us, and the url it wraps goes to a browser — asking a reader to leave
-// Discord in order to come back into it. The button is the same `connections_play` the "who's
-// playing" card and the recap have carried all along, so /api/interactions already answers it with
-// LAUNCH_ACTIVITY: one tap, the Activity opens in that channel, nobody leaves the app.
-//
-// It costs the message's parity with a PASTED link, which cannot carry components (Discord won't
-// let us decorate someone else's message) — the owner's 2026-08-14 call that the two look identical
-// is knowingly traded here for the only native conversion affordance we have. The unfurl itself is
-// untouched: content is still the bare url, so the picture renders at exactly the size it always
-// did, and the button is a row beneath it rather than a change to the card.
+// none of the title/description/button furniture a quick-link embed carries.
 //
 // Authenticated by INTERNAL_SECRET (the post-card idiom), NOT the Discord signature — that was
 // already verified upstream, and the secret proves the call came from our own function. The same
@@ -95,16 +81,9 @@ async function patchOriginal(url: string, payload: object, what: string): Promis
   return true;
 }
 
-// The one row every /share message carries, whichever branch built it: the Activity launcher. Its
-// custom_id is the shared `connections_play` — routeInteraction already turns that into
-// LAUNCH_ACTIVITY for the card and the recap, so this button needs nothing new on the handler side.
-// A plain ActionRow is legal at the top level of a Components V2 message too, which is why the
-// fallback can append it to shareCard's container without the builder knowing.
-const playRow = { type: 1, components: [{ type: 2, style: 1, label: COPY["button.play"], custom_id: PLAY_CUSTOM_ID }] };
-
 // The pre-image /share message: the Components V2 emoji-square card, built by the SAME builder the
 // inline reply used (src/discord-messages.ts shareCard), so the fallback is bit-for-bit the message
-// /share posted before this change — plus the play row, which every share surface now carries.
+// /share posted before this change.
 async function patchFallbackCard(
   url: string,
   game: Game,
@@ -112,7 +91,7 @@ async function patchFallbackCard(
 ): Promise<void> {
   await patchOriginal(
     url,
-    { flags: IS_COMPONENTS_V2, components: [...shareCard(game, opts), playRow] },
+    { flags: IS_COMPONENTS_V2, components: shareCard(game, opts) },
     "fallback card",
   );
 }
@@ -167,13 +146,9 @@ async function postShare(job: ShareJob): Promise<void> {
     // media box, which made /share output visibly smaller than a pasted link beside it (owner
     // call, 2026-08-14: they must look identical). The proxy still fetches /i/<token>.png once
     // server-side, so this PATCH carries a few dozen bytes no matter who scrolls past.
-    //
-    // The components row rides alongside and does NOT disturb that: Discord unfurls off `content`,
-    // so the preview is byte-identical to the pasted-link one and the button lands in its own row
-    // underneath.
     const ok = await patchOriginal(
       url,
-      { content: sharePngUrl(userId, date), components: [playRow] },
+      { content: sharePngUrl(userId, date) },
       "image link",
     );
     if (ok) {

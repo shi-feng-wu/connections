@@ -20,11 +20,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // — the promise that /share never gets WORSE than it was — the degradation to the pre-image
 // Components V2 emoji card when the embed can't be posted.
 //
-// Since 2026-08-15 both branches also carry the Activity launcher — the row that gives a reader who
-// doesn't already play a way in that doesn't leave Discord. It is pinned against routeInteraction
-// here rather than by eye: a button whose custom_id the router doesn't recognise is a dead button,
-// and the two live in different files.
-//
 // Harness follows tests/share-moment.test.ts: Supabase is shimmed onto in-memory tables and Discord
 // is a stubbed global fetch.
 
@@ -245,18 +240,10 @@ describe("api/post-share", () => {
     // No bytes: this is a link, not an upload.
     expect(init.body).not.toBeInstanceOf(FormData);
     expect(typeof init.body).toBe("string");
-    // The CONTENT is still the bare link and nothing else — Discord unfurls a lone image link
-    // into the SAME full-size standalone preview a pasted link gets (an explicit embed renders
-    // in the embed layout's smaller media box — the mismatch the owner rejected), and it unfurls
-    // off content, so the picture is unchanged by anything below.
-    // What IS new (2026-08-15) is one row under it: the Activity launcher, because the picture
-    // alone gave a reader who doesn't play no way in that didn't leave Discord.
-    expect(payloadOf(init)).toEqual({
-      content: expect.any(String),
-      components: [
-        { type: 1, components: [{ type: 2, style: 1, label: "Play now!", custom_id: "connections_play" }] },
-      ],
-    });
+    // The content is the bare link and nothing else: Discord unfurls a lone image link into
+    // the SAME full-size standalone preview a pasted link gets (an explicit embed renders in
+    // the embed layout's smaller media box — the mismatch the owner rejected).
+    expect(payloadOf(init)).toEqual({ content: expect.any(String) });
 
     const link = linkUrl(init);
     expect(link.startsWith(CARD_URL_PREFIX)).toBe(true);
@@ -265,21 +252,6 @@ describe("api/post-share", () => {
     // this player and date.
     const token = link.slice(CARD_URL_PREFIX.length, -".png".length);
     expect(parseSharePngToken(token)).toEqual({ userId: UID, date: DATE });
-  });
-
-  // The button is only worth a row if pressing it opens the game. routeInteraction owns that half,
-  // so take the custom_id the message actually shipped and put it through the real router — a
-  // rename on either side breaks here instead of shipping a button that does nothing.
-  it("posts a launcher the interaction router actually answers", async () => {
-    const { routeInteraction } = await import("../api/interactions");
-    route.store.progress.push({ user_id: UID, puzzle_date: DATE, guesses: WON, hints: [] });
-    await call(AUTH, job());
-
-    const row = payloadOf(lastEdit()[1]).components[0];
-    const customId = row.components[0].custom_id;
-    expect(routeInteraction({ type: 3, data: { custom_id: customId } } as never)).toEqual({
-      type: 12, // LAUNCH_ACTIVITY — the Activity opens in the channel, nobody leaves Discord
-    });
   });
 
   it("looks up nothing but the replay — the url's reader fetches the stats itself", async () => {
@@ -363,12 +335,6 @@ describe("api/post-share", () => {
       const text = JSON.stringify(payload.components[0].components);
       expect(text).toMatch(/🟨|🟩|🟦|🟪/);
       expect(text).toContain("Disconnections #1170");
-      // Degrading the picture must not degrade the way in: the launcher rides on this branch too,
-      // as a top-level ActionRow beside the container (legal in a V2 message).
-      expect(payload.components[1]).toEqual({
-        type: 1,
-        components: [{ type: 2, style: 1, label: "Play now!", custom_id: "connections_play" }],
-      });
     };
 
     it("posts the emoji card when Discord refuses the embed", async () => {

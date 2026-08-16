@@ -27,19 +27,9 @@ function snowflake(v: unknown): string | null {
   return typeof v === 'string' && /^\d{5,25}$/.test(v) ? v : null;
 }
 
-// A launch param that isn't there arrives as the LITERAL text "undefined" — Discord's client
-// stringifies the absent value into the iframe URL, and the SDK hands it through as a string.
-// Treated as real, it makes every ordinary boot look like a campaign arrival: a row with no
-// referrer, and because referred_user_id is the primary key that squatter PERMANENTLY blocks the
-// player's real attribution the first time a friend's link actually brings them in. (4,951 such
-// rows in the first 26h after the loop shipped — 2026-08-15.) Placeholders are absence.
-const PLACEHOLDER = new Set(['undefined', 'null', 'nan', 'none']);
-
 // Free text off the URL, so it's length-capped before it reaches the DB.
 function shortText(v: unknown, max: number): string | null {
-  if (typeof v !== 'string') return null;
-  const s = v.trim();
-  return s && !PLACEHOLDER.has(s.toLowerCase()) ? s.slice(0, max) : null;
+  return typeof v === 'string' && v ? v.slice(0, max) : null;
 }
 
 export type ReferralInput = { referrerId?: unknown; customId?: unknown; linkId?: unknown };

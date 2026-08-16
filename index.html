@@ -3,12 +3,69 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Disconnections</title>
+    <title>Disconnections · The daily puzzle, played together</title>
     <!-- Self-hosted fonts (see src/index.css). Google Fonts is blocked inside the
          Discord Activity sandbox, so the @font-face src points at our own origin;
          preload to cut the score/wordmark serif's flash-of-fallback. -->
     <link rel="preload" href="/fonts/newsreader.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/libre-franklin.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- Indexing + link-unfurl metadata. This same document is what the Discord Activity
+         iframe loads, so everything from here to the closing head tag must stay INERT: no scripts
+         that run, no resources the boot path depends on. The canonical url also collapses
+         the /b/<nonce> cache-bust paths (vercel.json rewrites them to this same file, see
+         the watchdog's recover()) onto the one real page, so a crawler that follows one
+         doesn't index a throwaway nonce url. -->
+    <meta
+      name="description"
+      content="A daily word puzzle for Discord servers. Launch it in a channel or call, watch each other's grids fill in live, and race the clock on our own puzzles."
+    />
+    <link rel="canonical" href="https://disconnections.app/" />
+    <meta name="theme-color" content="#000000" />
+    <!-- No favicon yet on purpose: the identity is the Newsreader wordmark alone until a real
+         mark is designed; placeholder lettermarks were considered and rejected. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://disconnections.app/" />
+    <meta property="og:site_name" content="Disconnections" />
+    <meta property="og:title" content="Disconnections · The daily puzzle, played together" />
+    <meta
+      property="og:description"
+      content="A daily word puzzle for Discord servers. Launch it in a channel or call, watch each other's grids fill in live, and race the clock on our own puzzles."
+    />
+    <meta property="og:image" content="https://disconnections.app/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Disconnections. The daily puzzle, played together." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Disconnections · The daily puzzle, played together" />
+    <meta
+      name="twitter:description"
+      content="A daily word puzzle for Discord servers. Launch it in a channel or call, watch each other's grids fill in live, and race the clock on our own puzzles."
+    />
+    <meta name="twitter:image" content="https://disconnections.app/og.png" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "VideoGame",
+        "name": "Disconnections",
+        "url": "https://disconnections.app/",
+        "image": "https://disconnections.app/og.png",
+        "description": "A daily word puzzle for Discord servers. Launch it in a channel or call, watch each other's grids fill in live, and race the clock on our own puzzles.",
+        "genre": ["Word game", "Puzzle"],
+        "playMode": "MultiPlayer",
+        "gamePlatform": ["Discord"],
+        "applicationCategory": "Game",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "author": {
+          "@type": "Organization",
+          "name": "Disconnections",
+          "url": "https://disconnections.app/"
+        }
+      }
+    </script>
     <!-- Pre-React boot spinner. Inline and fully self-contained — its own @keyframes + an explicit
          black background, so it does NOT depend on the async /assets CSS or on React having mounted.
          On a slow mobile Discord webview the content-hashed module graph can take seconds to evaluate;
@@ -203,6 +260,24 @@
          area when the webview extends under it (viewport-fit=cover above); GameView's
          mobile min-h calc mirrors both paddings — keep them in sync. -->
     <div id="app" class="mx-auto flex min-h-dvh w-full max-w-[940px] flex-col px-4 pb-[max(1.5rem,var(--saib))] pt-[max(0.75rem,var(--sait))] min-[800px]:pt-0 min-[800px]:pb-0 [&>*]:my-auto"><div id="cx-boot"><i></i></div></div>
+    <!-- Crawl fallback. The landing page is rendered by React, so a fetcher that doesn't run
+         JS sees an empty #app; this gives it the hero pitch and a real link to follow. Never
+         shown to a player: the Activity webview always has JS. -->
+    <noscript>
+      <div style="margin: 0 auto; max-width: 46rem; padding: 3rem 0">
+        <h1>The daily puzzle, played together.</h1>
+        <p>
+          Launch it in a Discord channel or call and everyone gets the same daily board. Watch
+          each other's grids fill in live, race the clock, and climb your server's season
+          leaderboard.
+        </p>
+        <p>
+          <a href="https://discord.com/oauth2/authorize?client_id=1510529051805093973"
+            >Add Disconnections to Discord</a
+          >
+        </p>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

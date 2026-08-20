@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
-import { fetchPuzzle, isValidDate, todayET, FIRST_DATE } from "../api/_puzzles";
+import { etDate, fetchPuzzle, isValidDate, nextRolloverMs, todayET, FIRST_DATE } from "../api/_puzzles";
 
 // fetchPuzzle is a two-layer read-through (L1 in-memory Map → L2 Supabase
 // `daily_puzzles`) with NO origin: a date either has an ingested row or it is
@@ -104,5 +104,35 @@ describe("date bounds", () => {
     expect(isValidDate("not-a-date")).toBe(false);
     expect(isValidDate("2199-01-01")).toBe(false); // future
     expect(isValidDate(todayET())).toBe(FIRST_DATE <= todayET());
+  });
+});
+
+// The public /api/today route caches to exactly this instant, so an off-by-an-hour here
+// is an edge cache serving yesterday's board. Asserted against etDate itself (the day
+// rule) rather than against a hardcoded UTC offset.
+describe("nextRolloverMs", () => {
+  // A plain day, a spring-forward day (23h) and a fall-back day (25h), sampled at a few
+  // hours across each so the bisection is exercised from both ends of the day.
+  const days = ["2026-08-20", "2027-03-14", "2027-11-07"];
+  const hours = [0, 30, 300, 700, 1400, 1439]; // minutes past midnight UTC
+
+  it("lands on the instant the ET puzzle day changes", () => {
+    for (const d of days) {
+      for (const m of hours) {
+        const now = Date.parse(`${d}T00:00:00Z`) + m * 60_000;
+        const at = nextRolloverMs(now);
+        expect(at).toBeGreaterThan(now);
+        // the last second of the day still reads as today; the rollover itself doesn't
+        expect(etDate(new Date(at - 1000))).toBe(etDate(new Date(now)));
+        expect(etDate(new Date(at))).not.toBe(etDate(new Date(now)));
+      }
+    }
+  });
+
+  it("never hands out a cache window longer than a calendar day", () => {
+    for (const d of days) {
+      const now = Date.parse(`${d}T06:00:00Z`);
+      expect(nextRolloverMs(now) - now).toBeLessThanOrEqual(25 * 3600_000);
+    }
   });
 });

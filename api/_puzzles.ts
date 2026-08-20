@@ -69,13 +69,39 @@ export async function fetchPuzzle(dateStr: string, dbOverride?: SupabaseClient |
 const atNoonUTC = (d: string): number => Date.parse(`${d}T12:00:00Z`);
 const ymd = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 
+const ET_DATE = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/New_York',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+// The puzzle day an instant belongs to. THE day-keying rule — every other
+// day-derived value below is built from this one function, never from a second
+// copy of the timezone arithmetic.
+export function etDate(at: Date = new Date()): string {
+  return ET_DATE.format(at);
+}
+
 export function todayET(): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
+  return etDate();
+}
+
+// The UTC instant at which todayET() flips to the next date — the moment today's
+// board stops being today's (midnight ET, i.e. 04:00 UTC on EDT / 05:00 on EST).
+// Bisected from etDate() itself rather than computed from an offset table, so
+// there is exactly one copy of the day rule and DST is handled by construction.
+// The 26h upper bound clears any calendar day (23–25h long).
+export function nextRolloverMs(now: number = Date.now()): number {
+  const today = etDate(new Date(now));
+  let lo = now;
+  let hi = now + 26 * 3600_000;
+  while (hi - lo > 1000) {
+    const mid = lo + Math.floor((hi - lo) / 2);
+    if (etDate(new Date(mid)) === today) lo = mid;
+    else hi = mid;
+  }
+  return hi;
 }
 
 // The ET calendar day before today. Anchoring at noon UTC keeps a 1h DST shift

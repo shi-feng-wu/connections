@@ -96,7 +96,9 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 // Brand glyphs the share menu needs that no icon set carries (logos, not icons): Discord's
 // clyde and X's mark, from simple-icons' official paths (CC0). Filled with currentColor so
 // they sit in the rows' zinc exactly like the lucide strokes beside them.
-function DiscordIcon({ size = 16 }: { size?: number }) {
+// Exported so the landing page's "Play in Discord" button draws the SAME official mark
+// (there is one Discord glyph in this app, not two that can drift).
+export function DiscordIcon({ size = 16 }: { size?: number }) {
   return (
     <svg
       width={size}

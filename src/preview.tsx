@@ -40,7 +40,8 @@ import {
   disablePostsMessage,
 } from "./discord-messages";
 import { Game, MAX_MISTAKES, type Puzzle } from "./game";
-import { DemoBoard, DemoGame, DemoRoster, Landing } from "./landing";
+import { DemoBoard, DemoGame, DemoRoster } from "./demo-scenes";
+import { Landing } from "./landing";
 import type { BoardRow, SelfStanding } from "./leaderboard";
 import { PipThumbnail } from "./pip";
 import type { PlayerState } from "./player";
@@ -1432,15 +1433,15 @@ const CARDS = (
     <Card label="Discord card · single player" players={CARD_SOLO} />
   </>
 );
-// The plain-browser landing page. Its demo board self-plays on a loop, so the
-// full stacked page hosts a second live driver beside #simulate — fine for
-// eyeballing; isolate with #landing for clean screenshots.
+// The plain-browser landing page. In production it fetches today's board from
+// /api/today; under plain `vite dev` there are no functions, so seed it with this
+// harness's sample puzzle and the page renders a real, playable board either way.
 const LANDING = (
   <section key="landing" className="w-full max-w-[940px] px-4">
     <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
       Landing page · plain browser visit
     </div>
-    <Landing />
+    <Landing puzzle={puzzle} />
   </section>
 );
 

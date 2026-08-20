@@ -7,7 +7,7 @@ import {
   Lightbulb,
   Link as LinkIcon,
   LoaderCircle,
-  Share2,
+  Share as ShareIcon,
   Shuffle as ShuffleIcon,
 } from "lucide-react";
 import {
@@ -170,7 +170,10 @@ function BreakRow({
 
 // One row of the share menu: the action in words on the left, its glyph right-aligned —
 // the same left-caption/right-mark geometry BreakRow uses, so the two popovers read as
-// siblings. Sized for a thumb (40px min) rather than for the popover's compact type, and
+// siblings. px-2 inside the card's own p-1.5 puts the label on the breakdown's 14px content
+// inset, so the two cards' contents line up edge for edge; the row keeps its 40px minimum
+// height regardless (the breakdown's compact stat rhythm is too small to tap), which is the
+// one place the two deliberately part company. Sized for a thumb rather than for type, and
 // hovered mouse-only (HoverButton): the menu outlives a tap, so a CSS :hover would stick to
 // whatever finger last touched it. `pending` swaps the glyph for a spinner and, with
 // `disabled`, blocks a second tap while the first is still working.
@@ -196,7 +199,7 @@ function ShareRow({
     <HoverButton
       type="button"
       role="menuitem"
-      className="flex min-h-10 w-full cursor-pointer items-center justify-between gap-8 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 ease-out active:bg-white/[0.09] disabled:cursor-default disabled:opacity-55"
+      className="flex min-h-10 w-full cursor-pointer items-center justify-between gap-8 rounded-lg px-2 py-2 text-left transition-colors duration-150 ease-out active:bg-white/[0.09] disabled:cursor-default disabled:opacity-55"
       hover="bg-white/[0.06]"
       disabled={disabled}
       tabIndex={tabbable ? undefined : -1}
@@ -485,12 +488,12 @@ function EndSummary({
         </div>
         {/* RIGHT — solve-time · divider · status+score, then the Share button on the far
             edge (its menu pops above it). */}
-        <div className="flex min-w-0 flex-none items-center gap-3.5 max-[360px]:gap-2.5">
+        <div className="flex min-w-0 flex-none items-center gap-3.5 max-[360px]:gap-2">
           {/* Score cluster — taps to toggle the breakdown. Wrapped so the popover anchors to
               it (caret points at the score, not the Share button to its right). */}
           <div className="relative flex min-w-0 items-center self-stretch">
             <div
-              className="flex min-w-0 cursor-pointer items-center gap-3.5 self-stretch select-none max-[360px]:gap-2.5"
+              className="flex min-w-0 cursor-pointer items-center gap-3.5 self-stretch select-none max-[360px]:gap-2"
               role="button"
               tabIndex={0}
               aria-label="Score breakdown"
@@ -538,8 +541,7 @@ function EndSummary({
               role="region"
               aria-label="Score breakdown"
               className={
-                "sb-pop absolute bottom-full right-0 z-30 mb-2.5 w-max min-w-[178px] rounded-xl border border-white/12 bg-[#1c1c1e] px-3.5 py-2.5 shadow-[0_12px_34px_rgba(0,0,0,0.55)] " +
-                (open ? "sb-pop-open" : "")
+                SB_POP + "px-3.5 py-2.5 " + (open ? "sb-pop-open" : "")
               }
             >
               <div className="flex flex-col gap-2">
@@ -569,14 +571,16 @@ function EndSummary({
               <span className="sb-pop-caret" aria-hidden />
             </div>
           </div>
-          {/* SHARE — one button on the far edge, wearing the filled treatment (the round
-              twin of BTN_PRIMARY) because it's the end screen's only action, and every way
-              a result leaves the app hangs off it. Wrapped so the menu anchors to the
-              button rather than to the row. */}
+          {/* SHARE — one button on the far edge, wearing the filled treatment (the labelled
+              twin of BTN_PRIMARY, the same pill the in-play Submit wears) because it's the
+              end screen's only action, and every way a result leaves the app hangs off it.
+              It carries the word as well as the glyph: this is the surface's primary move,
+              so it reads as a button rather than as one more stat mark. Wrapped so the menu
+              anchors to the button rather than to the row. */}
           <div className="relative flex flex-none items-center">
             <HoverButton
               data-end="share"
-              className={BTN_ICON_PRIMARY}
+              className={BTN_SHARE}
               hover="opacity-85"
               onClick={toggleMenu}
               disabled={sharing}
@@ -585,19 +589,22 @@ function EndSummary({
               aria-label="Share your result"
               title="Share your result"
             >
-              {/* Share2 is right-heavy (one node left, two right), so nudge it left a hair
-                  to sit optically centred in the round button. */}
-              <Share2
-                size={18}
+              {/* Below 360px the stats leave the pill about 65px, so the glyph drops and
+                  the word stays — the opposite of Submit's narrow-width collapse, since
+                  here the word is the point. */}
+              <ShareIcon
+                size={16}
                 strokeWidth={2.5}
-                className="-translate-x-[0.75px]"
+                className="max-[359px]:hidden"
                 aria-hidden
               />
-              <span className="sr-only">Share</span>
+              <span>Share</span>
             </HoverButton>
-            {/* SHARE MENU — the breakdown popover's twin (same card, same pop, same
-                dismiss), anchored above the button. Copies lead (they resolve instantly,
-                no round-trip, no leaving the app), then the destinations. Rows only appear
+            {/* SHARE MENU — the breakdown popover's twin (SB_POP's card, the same pop, the
+                same caret pointing back down at what opened it, the same dismiss), anchored
+                above the button instead of the score. Discord leads: it's where the result
+                is worth the most (an attributed quick link back into the game) and where
+                nearly every player already is; the copies follow. Rows only appear
                 where they'd actually work: Discord's share modal, the result image, and the
                 permanent card link all need the Activity and a server record, X needs a way
                 out of the iframe. Copy emoji grid is the floor — it works everywhere, so the
@@ -609,10 +616,19 @@ function EndSummary({
               aria-hidden={!menu}
               aria-label="Share your result"
               className={
-                "sb-pop absolute bottom-full right-0 z-30 mb-2.5 flex w-max min-w-[190px] flex-col rounded-xl border border-white/12 bg-[#1c1c1e] p-1.5 shadow-[0_12px_34px_rgba(0,0,0,0.55)] " +
-                (menu ? "sb-pop-open" : "")
+                SB_POP + "flex flex-col p-1.5 " + (menu ? "sb-pop-open" : "")
               }
             >
+              {onShareLink && (
+                <ShareRow
+                  label="Share to Discord"
+                  icon={<DiscordIcon />}
+                  pending={sharing}
+                  disabled={sharing}
+                  tabbable={menu}
+                  onSelect={onDiscordShare}
+                />
+              )}
               {canCopyImage && (
                 <ShareRow
                   label="Copy image"
@@ -635,16 +651,6 @@ function EndSummary({
                   onSelect={onCopyLinkRow}
                 />
               )}
-              {onShareLink && (
-                <ShareRow
-                  label="Share to Discord"
-                  icon={<DiscordIcon />}
-                  pending={sharing}
-                  disabled={sharing}
-                  tabbable={menu}
-                  onSelect={onDiscordShare}
-                />
-              )}
               {onExternal && (
                 <ShareRow
                   label="Post on X"
@@ -653,6 +659,7 @@ function EndSummary({
                   onSelect={onPostToX}
                 />
               )}
+              <span className="sb-pop-caret" aria-hidden />
             </div>
           </div>
         </div>
@@ -842,10 +849,21 @@ const BTN_ICON =
   "inline-flex h-[42px] w-[42px] flex-none items-center justify-center cursor-pointer rounded-full border border-zinc-600 text-zinc-100 transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
 const BTN_PRIMARY =
   "inline-flex h-[42px] items-center justify-center cursor-pointer rounded-full px-5.5 border border-zinc-100 bg-zinc-100 text-zinc-900 font-semibold text-sm transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
-// BTN_PRIMARY's round, icon-only twin — the filled counterpart to BTN_ICON, for the one
-// end-screen action that outranks the rest (Share to Discord).
-const BTN_ICON_PRIMARY =
-  "inline-flex h-[42px] w-[42px] flex-none items-center justify-center cursor-pointer rounded-full border border-zinc-100 bg-zinc-100 text-zinc-900 transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
+// BTN_PRIMARY's labelled twin for the one end-screen action that outranks the rest — the
+// same filled pill as Submit, with the share glyph ahead of the word. Padding and gap step
+// down on the narrow layouts the end footer already tightens for, so the word survives the
+// 320px Android floor instead of collapsing back to a bare glyph.
+const BTN_SHARE =
+  "inline-flex h-[42px] flex-none items-center justify-center gap-2 cursor-pointer rounded-full px-4.5 border border-zinc-100 bg-zinc-100 text-zinc-900 font-semibold text-sm transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default max-[420px]:gap-1.5 max-[420px]:px-3 max-[359px]:px-2.5";
+
+// The end footer's two popovers — the score breakdown and the share menu — wear ONE card;
+// they differ only in what they hold (stat rows vs tap rows) and so in their padding. The
+// chrome lives here rather than being typed twice, so the fill, border, radius, shadow and
+// anchor can't drift apart on one of them. Motion, pointer-events gating and the caret are
+// .sb-pop / .sb-pop-open / .sb-pop-caret in index.css; each popover appends its own padding
+// and its own open flag (they open from different state, and never at the same time).
+const SB_POP =
+  "sb-pop absolute bottom-full right-0 z-30 mb-2.5 w-max min-w-[178px] rounded-xl border border-white/12 bg-[#1c1c1e] shadow-[0_12px_34px_rgba(0,0,0,0.55)] ";
 
 const SPRING = "cubic-bezier(.34,1.56,.64,1)";
 const GLIDE = "cubic-bezier(.22,.61,.36,1)";

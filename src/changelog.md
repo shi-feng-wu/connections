@@ -17,14 +17,6 @@
   at the very top. Group everything that ships together into one release.
 -->
 
-## v2.2.1 — Aug 20, 2026
-
-### Changed
-
-- The Share button at the end of a game now says "Share" next to its icon, so it's easier to spot.
-- Share to Discord is now the first option in the share menu, above the copy options.
-- The share menu now matches the look of the score card, down to the little pointer back at the button you opened it from.
-
 ## v2.2.0 — Aug 14, 2026
 
 ### Added

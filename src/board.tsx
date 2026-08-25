@@ -842,8 +842,14 @@ const TILE_SELECTED = " bg-[#4a4f5a] text-white";
 // in className since :active clears reliably on touchend.
 const BTN_ICON =
   "inline-flex h-[42px] w-[42px] flex-none items-center justify-center cursor-pointer rounded-full border border-zinc-600 text-zinc-100 transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
+// The primary pill's SHAPE, without its skin. Exported because the landing page's "Play in
+// Discord" button is the same pill in Discord's Blurple (the one colour in this app we don't
+// choose), and it has to sit at the same height and radius as every button the game shows —
+// it's the game's own footer it lands beside.
+export const BTN_SHAPE =
+  "inline-flex h-[42px] items-center justify-center cursor-pointer rounded-full px-5.5 font-semibold text-sm transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
 const BTN_PRIMARY =
-  "inline-flex h-[42px] items-center justify-center cursor-pointer rounded-full px-5.5 border border-zinc-100 bg-zinc-100 text-zinc-900 font-semibold text-sm transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
+  BTN_SHAPE + " border border-zinc-100 bg-zinc-100 text-zinc-900";
 // BTN_PRIMARY's round, icon-only twin — the filled counterpart to BTN_ICON, for the one
 // end-screen action that outranks the rest (Share to Discord).
 const BTN_ICON_PRIMARY =

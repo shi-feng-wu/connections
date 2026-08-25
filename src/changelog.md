@@ -17,16 +17,6 @@
   at the very top. Group everything that ships together into one release.
 -->
 
-## v2.3.0 — Aug 20, 2026
-
-### Added
-
-- The website now plays today's puzzle right in the browser, so a link you send to someone can be tried before they open Discord. Browser runs stay on that device: they don't submit a score or touch your server's leaderboard.
-
-### Changed
-
-- The website is the puzzle now. Beside it a single leaderboard row follows your own run, filling in as you solve and showing your time when you finish, with a note about where your server's real leaderboard lives. The old auto-playing demo is gone.
-
 ## v2.2.0 — Aug 14, 2026
 
 ### Added

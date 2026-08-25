@@ -1323,7 +1323,7 @@ const onlyTurnover = pick === "turnover";
 // #landing isolates the public landing page (src/landing.tsx) — what a plain
 // browser visit to the production deployment gets instead of the game.
 const onlyLanding = pick === "landing";
-// #demo isolates JUST the self-playing board (landing.tsx DemoBoard), full-bleed and
+// #demo isolates JUST the self-playing board (demo-scenes.tsx DemoBoard), full-bleed and
 // centered on the dark stage — the clean source for recording a gameplay demo video
 // (the Discord activity store preview, à la Wordle). No page chrome, no labels.
 const onlyDemo = pick === "demo";
@@ -1436,6 +1436,11 @@ const CARDS = (
 // The plain-browser landing page. In production it fetches today's board from
 // /api/today; under plain `vite dev` there are no functions, so seed it with this
 // harness's sample puzzle and the page renders a real, playable board either way.
+//
+// The section box mirrors index.html's #app (max-w-940 + px-4), because the page is now the
+// GAME's shell — it switches to the two-column rail at DESKTOP_BP off the WINDOW width, and
+// picks its own 480/860 cap inside this box. Widen or narrow the harness window (not this
+// wrapper) to check the breakpoint; #landing isolates it for clean screenshots.
 const LANDING = (
   <section key="landing" className="w-full max-w-[940px] px-4">
     <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-amber-400">
@@ -1529,7 +1534,7 @@ const STANDINGS = (
   </div>
 );
 
-// The self-playing LIVE room (landing.tsx DemoRoster): players' grids fill in and
+// The self-playing LIVE room (demo-scenes.tsx DemoRoster): players' grids fill in and
 // their rows reorder past each other tick by tick — scene B of the preview reel
 // (the live multiplayer hook Wordle can't show). Bare/centered for a clean capture.
 const ROOM = (

@@ -1151,18 +1151,32 @@ export function Board({
   //     press-pop) reports its settled layout slot, not its in-flight position —
   //     a second solve measuring the board while the first is still sliding gets
   //     clean numbers instead of garbage. This is what makes concurrent FLIPs safe.
-  //   • offsets are relative to boardRef (the positioned offsetParent), so the
-  //     desktop scale-to-fit transform on an ancestor cancels out: the delta and
-  //     the translate that inverts it live in the same pre-scale space.
-  // boardRef must stay `position: relative` for the offsetParent to be shared
-  // across the grid AND the solved stack (cross-container gather depends on it).
+  //   • offsets are measured against boardRef, so the desktop scale-to-fit
+  //     transform on an ancestor cancels out: the delta and the translate that
+  //     inverts it live in the same pre-scale space.
+  // boardPos SUMS the offsetParent chain up to boardRef rather than reading a
+  // bare offsetLeft/offsetTop: tiles in the grid and tiles in a forming slot have
+  // DIFFERENT offsetParents (the grid is `relative` for the hover halo), and raw
+  // offsets read grid-local for one and board-local for the other. Mixing those
+  // spaces made every cross-container gather start ~a-bar-height off (the tiles
+  // "snap, then glide" bug) — and it also charges the grid's own shift (a new bar
+  // above it) to the survivors, which used to snap down uncompensated.
+  function boardPos(e: HTMLElement): { left: number; top: number } {
+    let left = 0;
+    let top = 0;
+    let n: HTMLElement | null = e;
+    while (n && n !== boardRef.current) {
+      left += n.offsetLeft;
+      top += n.offsetTop;
+      n = n.offsetParent as HTMLElement | null;
+    }
+    return { left, top };
+  }
   function recordRects(): Map<string, { left: number; top: number }> {
     const m = new Map<string, { left: number; top: number }>();
     boardRef.current
       ?.querySelectorAll<HTMLElement>("[data-flip]")
-      .forEach((e) =>
-        m.set(e.dataset.flip!, { left: e.offsetLeft, top: e.offsetTop }),
-      );
+      .forEach((e) => m.set(e.dataset.flip!, boardPos(e)));
     return m;
   }
   function playFlip(
@@ -1183,8 +1197,9 @@ export function Board({
         // a row. translate-only here; the press-pop is scale-only (no m41/m42).
         const tr = getComputedStyle(e).transform;
         const m = tr && tr !== "none" ? new DOMMatrixReadOnly(tr) : null;
-        const dx = b.left - e.offsetLeft + (m ? m.m41 : 0);
-        const dy = b.top - e.offsetTop + (m ? m.m42 : 0);
+        const cur = boardPos(e);
+        const dx = b.left - cur.left + (m ? m.m41 : 0);
+        const dy = b.top - cur.top + (m ? m.m42 : 0);
         if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
           proms.push(
             e.animate(
@@ -1667,9 +1682,11 @@ export function Board({
           so it holds even where :has isn't supported. */}
       <div
         className={
-          // `relative` makes this the shared offsetParent for every [data-flip]
-          // element in both the solved stack and the grid, so the layout-coordinate
-          // FLIP (recordRects/playFlip) reads one consistent space across them.
+          // `relative` makes this the root that boardPos sums offsets up to, so
+          // the layout-coordinate FLIP (recordRects/playFlip) reads one board-
+          // relative space across the solved stack AND the grid — even though the
+          // grid is itself positioned (for the hover halo) and would otherwise
+          // give its tiles a different offsetParent.
           "relative flex flex-col" +
           (solvedLevels.current.length ? " gap-2" : "")
         }

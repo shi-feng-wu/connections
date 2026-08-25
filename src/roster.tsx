@@ -259,6 +259,25 @@ function ScoreNum({ value, run }: { value: number; run: boolean }) {
   return <>{useCountUp(value, run)}</>;
 }
 
+// The geometry of ONE row, in the pieces that have to line up column by column. Broken out
+// and exported because the public landing page (src/landing.tsx) draws rows of its own — the
+// visitor, and the empty seats waiting under them — and a hand-copied set of these classes
+// would drift the first time this row is retuned. Every size steps at min-[800px]
+// (DESKTOP_BP), like the rest of the rail.
+export const ROW = {
+  // the row shell; each caller appends its own background (yours is lit, everyone else's isn't)
+  shell:
+    "relative flex flex-none items-center gap-2 rounded-[9px] px-2.5 py-2 min-[800px]:gap-2.75 min-[800px]:px-3 min-[800px]:py-2.25",
+  // the avatar's BOX only — so a photo, an initial or a silhouette all occupy the same slot
+  avatar: "h-6.5 w-6.5 flex-none rounded-full min-[800px]:h-8 min-[800px]:w-8",
+  // the mini board's 4×4 track grid (see MiniBoard for why the tracks are integer px)
+  mini: "grid flex-none gap-[1px] grid-cols-[repeat(4,6px)] grid-rows-[repeat(4,6px)] min-[800px]:grid-cols-[repeat(4,7px)] min-[800px]:grid-rows-[repeat(4,7px)]",
+  // the name cell — takes the slack, and clips under a right-edge fade rather than an ellipsis
+  name: "min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[13px] [mask-image:linear-gradient(to_right,#000_calc(100%_-_12px),transparent)]",
+  // the status column: ONE width in every state, so the dots to its left never jitter
+  status: "flex w-[72px] flex-none items-center gap-1.5 min-[800px]:w-[74px]",
+} as const;
+
 // Colored initial circle. `online` adds a steady emerald presence ring (live view only)
 // when the player is currently in the Activity; your own row gets a white ring that
 // overrides it (you're always online, so the two never stack). Both rings are
@@ -290,7 +309,8 @@ function Avatar({
   return (
     <div
       className={
-        "relative grid h-6.5 w-6.5 flex-none place-items-center rounded-full text-[11px] font-extrabold text-[#0c0c0c] select-none min-[800px]:h-8 min-[800px]:w-8 min-[800px]:text-[13px]" +
+        "relative grid place-items-center text-[11px] font-extrabold text-[#0c0c0c] select-none min-[800px]:text-[13px] " +
+        ROW.avatar +
         ring
       }
       style={{ background: colorFor(p.userId) }}
@@ -352,7 +372,7 @@ function MiniBoard({
     // not `1fr` — at this size `1fr` tracks compute to fractional widths (5.375px) that round
     // unevenly to device pixels, drifting the last column. Whole-pixel tracks render perfectly
     // even. The board's intrinsic size (27px / 31px) sits flush with the avatar beside it.
-    <div className="grid flex-none gap-[1px] grid-cols-[repeat(4,6px)] grid-rows-[repeat(4,6px)] min-[800px]:grid-cols-[repeat(4,7px)] min-[800px]:grid-rows-[repeat(4,7px)]">
+    <div className={ROW.mini}>
       {levels.map((lvl, i) => (
         <div
           key={`s${lvl}`}
@@ -383,7 +403,10 @@ function MiniBoard({
   );
 }
 
-function Mistakes({ p, mistake }: { p: PlayerState; mistake: boolean }) {
+// Guesses left, as dots. Takes the COUNT rather than a PlayerState so the landing page can
+// draw the same dots for a run that has no player record behind it (and `left={0}` is exactly
+// the spent-looking row an empty seat wants).
+export function Mistakes({ left, mistake }: { left: number; mistake?: boolean }) {
   return (
     <span className="inline-flex flex-none items-center gap-[3px]">
       {Array.from({ length: MAX_MISTAKES }, (_, i) => (
@@ -391,9 +414,9 @@ function Mistakes({ p, mistake }: { p: PlayerState; mistake: boolean }) {
           key={i}
           className={
             "h-1.75 w-1.75 rounded-full " +
-            (i < p.mistakesLeft ? "bg-zinc-300" : "bg-zinc-700") +
+            (i < left ? "bg-zinc-300" : "bg-zinc-700") +
             // the dot that just got spent (index === the new mistakesLeft) flares and drains.
-            (mistake && i === p.mistakesLeft ? " animate-dot-drain" : "")
+            (mistake && i === left ? " animate-dot-drain" : "")
           }
         />
       ))}
@@ -450,7 +473,7 @@ function Status({ p, won }: { p: PlayerState; won: boolean }) {
   // (the icons are desktop-only) next to the time. A per-state width (finished
   // rows used to run 6px wider) made the mistake dots column jitter left/right
   // from row to row depending on who had finished.
-  const box = "flex w-[72px] flex-none items-center gap-1.5 min-[800px]:w-[74px]";
+  const box = ROW.status;
   // mobile stand-in for the ✓/✗: the run's score, bright on a win, dim on a loss
   const pts = p.done && (
     <span
@@ -491,7 +514,7 @@ function Status({ p, won }: { p: PlayerState; won: boolean }) {
 // leaderboard's gap-1.5 + pl-1 totals 10px, so mr-0.5 tops up this row's gap-2; on
 // desktop the row's wider gap-2.75 overshoots the leaderboard's gap-2 by 3px, so
 // -mr-0.75 trims it back. Net: switching Live ↔ Season/All-time never nudges the row.
-function Rank({ rank }: { rank: number }) {
+export function Rank({ rank }: { rank: number }) {
   if (rank === 1)
     return (
       <div className="mr-0.5 w-5.5 flex-none text-center text-[13px] tabular-nums min-[800px]:-mr-0.75">
@@ -539,7 +562,8 @@ const RosterRow = memo(function RosterRow({
       ref={rowRef}
       data-flip-row={p.userId}
       className={
-        "relative flex flex-none items-center gap-2 rounded-[9px] px-2.5 py-2 min-[800px]:gap-2.75 min-[800px]:px-3 min-[800px]:py-2.25 " +
+        ROW.shell +
+        " " +
         (you ? "bg-zinc-100/10" : "bg-zinc-900/60") +
         rowAnim
       }
@@ -556,13 +580,12 @@ const RosterRow = memo(function RosterRow({
           name cell) — the "…" glyph cost ~2 characters of room on narrow phones. */}
       <span
         className={
-          "min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[13px] [mask-image:linear-gradient(to_right,#000_calc(100%_-_12px),transparent)] " +
-          (you ? "font-bold text-zinc-100" : "text-zinc-300")
+          ROW.name + " " + (you ? "font-bold text-zinc-100" : "text-zinc-300")
         }
       >
         {p.name}
       </span>
-      <Mistakes p={p} mistake={!!ev?.mistake} />
+      <Mistakes left={p.mistakesLeft} mistake={!!ev?.mistake} />
       <FinalScore p={p} won={!!ev?.won} />
       <Status p={p} won={!!ev?.won} />
     </div>
@@ -579,11 +602,19 @@ export type RosterScope = "channel" | "server";
 // pseudo extends the HIT AREA to ~44px without moving a pixel of the layout: it's
 // part of the button, so taps on it land. ±8px horizontally stays inside the gap-4
 // between tabs, so neighbouring targets touch but never overlap.
+// Split in two: TAB_LOOK is the LOOK (type, tracking, the active tab's underline), TAB adds
+// what only a real control needs — the pointer cursor and that ::before hit area. The public
+// landing page (src/landing.tsx) wears the tab row but has no second list to switch to, so it
+// renders the same row as static text; a pointer cursor over unpressable words is a promise
+// the page can't keep.
+export const TAB_LOOK =
+  "relative inline-flex items-center gap-1.5 bg-transparent px-0 pt-0.5 pb-1.75 font-sans text-[11px] font-bold uppercase tracking-[0.07em] transition-opacity duration-150 ease-out";
 const TAB =
-  "relative inline-flex cursor-pointer items-center gap-1.5 bg-transparent px-0 pt-0.5 pb-1.75 font-sans text-[11px] font-bold uppercase tracking-[0.07em] transition-opacity duration-150 ease-out before:absolute before:-inset-x-2 before:-inset-y-[9px] before:content-['']";
-const TAB_ON =
+  TAB_LOOK +
+  " cursor-pointer before:absolute before:-inset-x-2 before:-inset-y-[9px] before:content-['']";
+export const TAB_ON =
   " text-zinc-100 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-zinc-300 after:content-['']";
-const TAB_OFF = " text-zinc-600";
+export const TAB_OFF = " text-zinc-600";
 
 // Subtle tab heading that flips between the live room and (when there are scored
 // rows) the cumulative season / all-time standings — the latter two share the exact

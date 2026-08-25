@@ -285,17 +285,24 @@ export function DayTurnover({
 // desktop only; hidden on mobile, where Discord shows its own activity header above the
 // board — which is why no transient feedback routes through here anymore: everything
 // lives on the Submit pill / end footer (visible at every width) instead.
-function Header({
+// Exported for the public landing page (src/landing.tsx), which is this same shell with the
+// rail's list standing in for a room it hasn't got — so it wears the real masthead rather than
+// a lookalike. `puzzle` is optional there and only there: that page paints its layout before
+// /api/today answers, and a dateline for a board we haven't been handed yet would be a guess.
+export function Header({
   puzzle,
   className = "",
 }: {
-  puzzle: Puzzle;
+  puzzle?: Puzzle;
   className?: string;
 }) {
-  const dateLabel = new Date(`${puzzle.date}T00:00:00`).toLocaleDateString(
-    "en-US",
-    { year: "numeric", month: "long", day: "numeric" },
-  );
+  const dateLabel = puzzle
+    ? new Date(`${puzzle.date}T00:00:00`).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
+    : null;
   return (
     <header
       className={
@@ -313,14 +320,16 @@ function Header({
           puzzle number; the column bottom-aligns with the wordmark via the header's items-end.
           Semibold to match the design file: its mh-date declares font-weight 400 but only
           loads Newsreader 600/700, so it renders at 600 (we ship the full 400–700 range). */}
-      <div className="flex flex-col items-end gap-[3px] text-right">
-        <span className="whitespace-nowrap font-display text-[15px] font-semibold leading-[1.05] text-zinc-300">
-          {dateLabel}
-        </span>
-        <span className="whitespace-nowrap text-[10px] font-semibold uppercase leading-none tracking-[0.08em] tabular-nums text-zinc-600">
-          No. {puzzle.id}
-        </span>
-      </div>
+      {puzzle && (
+        <div className="flex flex-col items-end gap-[3px] text-right">
+          <span className="whitespace-nowrap font-display text-[15px] font-semibold leading-[1.05] text-zinc-300">
+            {dateLabel}
+          </span>
+          <span className="whitespace-nowrap text-[10px] font-semibold uppercase leading-none tracking-[0.08em] tabular-nums text-zinc-600">
+            No. {puzzle.id}
+          </span>
+        </div>
+      )}
     </header>
   );
 }
@@ -334,19 +343,27 @@ function Header({
 // The unread dot rides the hamburger. Discord draws its own activity bar above us, so this
 // stays slim; on a very narrow phone the wordmark ellipsizes before it can shove the
 // dateline/menu off (min-w-0 + truncate), while the right cluster holds its size (flex-none).
-function MobileMasthead({
+//
+// Exported for the landing page, which renders it WITHOUT a menu (`onOpenMenu` omitted): a
+// browser tab has no Discord chrome overhead, so this compact lockup is the only thing telling
+// a visitor what they're looking at — but the info pages behind the hamburger are the
+// Activity's, not the public site's. `puzzle` is optional for the same reason it is on Header.
+export function MobileMasthead({
   puzzle,
   hasNew,
   onOpenMenu,
 }: {
-  puzzle: Puzzle;
-  hasNew: boolean;
-  onOpenMenu: () => void;
+  puzzle?: Puzzle;
+  hasNew?: boolean;
+  onOpenMenu?: () => void;
 }) {
-  const dateLabel = new Date(`${puzzle.date}T00:00:00`).toLocaleDateString(
-    "en-US",
-    { year: "numeric", month: "long", day: "numeric" },
-  );
+  const dateLabel = puzzle
+    ? new Date(`${puzzle.date}T00:00:00`).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
+    : null;
   return (
     <header className="mb-2.5 flex flex-none items-center justify-between gap-3 border-b border-white/[0.08] pb-2.5 min-[800px]:hidden">
       {/* left lockup — the serif wordmark alone (scaled down from the desktop masthead) */}
@@ -357,27 +374,31 @@ function MobileMasthead({
       </div>
       {/* right cluster — the dateline (serif date over uppercase No.) then the menu */}
       <div className="flex flex-none items-center gap-2.5">
-        <div className="flex flex-col items-end gap-[2px] text-right">
-          <span className="whitespace-nowrap font-display text-[12.5px] font-semibold leading-[1.05] text-zinc-300">
-            {dateLabel}
-          </span>
-          <span className="whitespace-nowrap text-[9px] font-semibold uppercase leading-none tracking-[0.08em] tabular-nums text-zinc-600">
-            No. {puzzle.id}
-          </span>
-        </div>
-        <HoverButton
-          onClick={onOpenMenu}
-          hover="opacity-70"
-          aria-label="Open menu"
-          // ::before pads the 36px box out to a ~44px hit area (touch app) without
-          // moving the layout — same trick as the roster tabs.
-          className="relative grid h-9 w-9 flex-none cursor-pointer place-items-center rounded-lg text-zinc-300 transition-opacity before:absolute before:-inset-1 before:content-[''] active:opacity-60"
-        >
-          <Menu size={20} strokeWidth={2.2} aria-hidden />
-          {hasNew && (
-            <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[#8fb356] ring-2 ring-black" />
-          )}
-        </HoverButton>
+        {puzzle && (
+          <div className="flex flex-col items-end gap-[2px] text-right">
+            <span className="whitespace-nowrap font-display text-[12.5px] font-semibold leading-[1.05] text-zinc-300">
+              {dateLabel}
+            </span>
+            <span className="whitespace-nowrap text-[9px] font-semibold uppercase leading-none tracking-[0.08em] tabular-nums text-zinc-600">
+              No. {puzzle.id}
+            </span>
+          </div>
+        )}
+        {onOpenMenu && (
+          <HoverButton
+            onClick={onOpenMenu}
+            hover="opacity-70"
+            aria-label="Open menu"
+            // ::before pads the 36px box out to a ~44px hit area (touch app) without
+            // moving the layout — same trick as the roster tabs.
+            className="relative grid h-9 w-9 flex-none cursor-pointer place-items-center rounded-lg text-zinc-300 transition-opacity before:absolute before:-inset-1 before:content-[''] active:opacity-60"
+          >
+            <Menu size={20} strokeWidth={2.2} aria-hidden />
+            {hasNew && (
+              <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[#8fb356] ring-2 ring-black" />
+            )}
+          </HoverButton>
+        )}
       </div>
     </header>
   );

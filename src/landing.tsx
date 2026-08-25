@@ -1,877 +1,518 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Board } from "./board";
 import {
-  cardLayout,
-  type CardPlayer,
-  drawRecap,
-  drawRoster,
-  type RecapData,
-  recapLayout,
-} from "./card-draw";
-import { GameView } from "./components";
-import { Game, type Puzzle } from "./game";
-import type { PlayerState } from "./player";
-import { Roster, type RosterView } from "./roster";
-import type { Standings } from "./season";
+  useCallback,
+  useEffect,
+  useState,
+  type AnchorHTMLAttributes,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import { Check, X } from "lucide-react";
+import { Board, BTN_SHAPE, DiscordIcon, type BoardSnapshot } from "./board";
+import { Header, MobileMasthead } from "./components";
+import { Game, LEVELS, MAX_MISTAKES, type Puzzle } from "./game";
+import { Mistakes, Rank, ROW, TAB_LOOK, TAB_OFF, TAB_ON } from "./roster";
 
-// The public landing page, shown when the production deployment is opened in a
-// plain browser (the GitHub README links here). The game itself stays
-// Discord-only — /api/puzzle rejects unauthenticated reads — so this page sells
-// the project instead, with the real components demoing themselves: the Board
-// self-plays a made-up puzzle, the Roster replays a simulated room, and the
-// Discord cards are drawn by the same canvas code the bot ships as PNGs.
+// The public landing page: what a plain browser visit to the deployment gets, since the
+// Activity itself only boots inside Discord (App.tsx renders this when the boot path finds no
+// frame_id).
+//
+// The page IS the game. Same shell as the Activity's GameView (components.tsx): today's real
+// board on the left, the players rail on the right, the same masthead, the same tab row, rows
+// of the same geometry. There is no hero, no feature grid and no screenshot of the thing you
+// could simply be handed — a daily puzzle argues for itself in about ten seconds, and every
+// claim a pitch would have made is on screen being true instead.
+//
+// Two things differ from the Activity, and only two:
+//
+//   1. NOTHING LEAVES THE BROWSER. The board is today's real puzzle, fetched from /api/today
+//      (the one unauthenticated puzzle route), but the run is written to localStorage and
+//      nowhere else: no score submitted, no progress row, no card posted. A browser solve is a
+//      taste, and the leaderboard it doesn't count towards is the reason to open Discord.
+//
+//   2. THE RAIL IS THE PITCH. A web page has no room attached to it, so the ranked list holds
+//      the only player this page can honestly show — you, rank 1, fed by the run beside it —
+//      over EMPTY SEATS. The seats are the whole argument: this is a leaderboard and it has
+//      room on it, which lands in a way a sentence about multiplayer doesn't. The button under
+//      them is where the other rows come from. When multiplayer stops being a Discord-only
+//      thing, that block is the placeholder to replace and the rest of the page already fits.
 
 const GITHUB = "https://github.com/shi-feng-wu/connections";
 const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID as string | undefined;
-// Discord's app-install dialog. Without a client id (bare dev preview) fall
-// back to the repo so the button never 404s.
-const INSTALL = CLIENT_ID
-  ? `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}`
+
+// The CTA is a Discord QUICK LINK in the exact shape the app mints for shared results
+// (api/_share.ts quickLinkUrl): /activities/<app id> with a custom_id ride-along. This
+// one is static and has no sharer, which is a case the inbound half already handles —
+// /api/referral records a sharer-less custom_id verbatim with referrer_user_id null,
+// so arrivals from this page land in `referrals` as countable campaign rows. The tag
+// has to look like a real campaign, not a placeholder: "undefined"/"null"/"none" are
+// dropped there on purpose. Without a client id (a bare preview build) fall back to
+// the repo so the button never dead-ends.
+const CAMPAIGN = "web-landing";
+const PLAY_IN_DISCORD = CLIENT_ID
+  ? `https://discord.com/activities/${CLIENT_ID}?custom_id=${CAMPAIGN}`
   : GITHUB;
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-const noop = (): void => {};
-const reducedMotion = (): boolean =>
-  matchMedia("(prefers-reduced-motion: reduce)").matches;
+// ——— Local-only solve state ———————————————————————————————————————————
+// Keyed by puzzle DAY (the `connections:` prefix every other client key uses), so
+// reopening the tab resumes the same run and tomorrow's board starts clean. This is
+// the ONLY place a web solve is recorded; nothing leaves the browser.
+const KEY_PREFIX = "connections:web:";
+const storeKey = (date: string): string => KEY_PREFIX + date;
 
-// Stand-in "Discord photo": data-URI silhouette, so the demos render offline.
-const pfp = (bg: string): string =>
-  "data:image/svg+xml," +
-  encodeURIComponent(
-    `<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'><rect width='64' height='64' fill='${bg}'/><circle cx='32' cy='25' r='13' fill='#ffffff'/><rect x='12' y='42' width='40' height='26' rx='13' fill='#ffffff'/></svg>`,
-  );
-
-// ——— Self-playing board ———————————————————————————————————————————————
-// A made-up, Discord-flavored puzzle (no NYT data): the demo solves itself on
-// the REAL Board component, so the pop→gather→morph choreography on this page
-// is the actual game code, not a replica.
-const DEMO_PUZZLE: Puzzle = {
-  id: 424242, // never a real NYT id, so its spoiler/localStorage keys can't collide
-  date: "2026-01-01",
-  editor: "",
-  groups: [
-    {
-      level: 0,
-      category: "HEARD ON DISCORD",
-      members: ["SERVER", "NITRO", "EMOTE", "PING"],
-    },
-    {
-      level: 1,
-      category: "THINGS THAT STREAM",
-      members: ["RIVER", "LAVA", "TEARS", "TWITCH"],
-    },
-    {
-      level: 2,
-      category: "GROUP ___",
-      members: ["CHAT", "CALL", "THERAPY", "PROJECT"],
-    },
-    {
-      level: 3,
-      category: "___BOARD",
-      members: ["KEY", "LEADER", "SURF", "DASH"],
-    },
-  ],
-  layout: [
-    "KEY",
-    "RIVER",
-    "CHAT",
-    "NITRO",
-    "TWITCH",
-    "SERVER",
-    "LEADER",
-    "CALL",
-    "PING",
-    "THERAPY",
-    "LAVA",
-    "SURF",
-    "PROJECT",
-    "EMOTE",
-    "TEARS",
-    "DASH",
-  ],
+type SavedRun = {
+  guesses?: unknown;
+  hints?: unknown;
+  startedAt?: number;
+  updatedAt?: number;
 };
 
-// The win screen blurs the last category as a spoiler unless it's been seen;
-// a non-interactive demo could never tap to reveal, so mark the demo puzzle's
-// categories seen up front (same key Board persists to).
-try {
-  localStorage.setItem(`conn-spoiler-${DEMO_PUZZLE.id}`, "[0,1,2,3]");
-} catch {
-  /* storage blocked — the demo just shows the covered bar */
-}
-
-// Drives the real Board through a full solve by clicking its DOM (the same
-// technique as the preview harness's Simulate playground): select a group with
-// a human-ish stagger, submit, wait for the morph, repeat; hold the end screen,
-// then remount and loop. The wrapper is pointer-events-none, so visitors can
-// watch but not play.
-export function DemoBoard() {
-  const [key, setKey] = useState(0);
-  const ref = useRef<HTMLDivElement>(null);
-  // Reduced motion: skip the driver entirely and show the finished board.
-  const still = useMemo(reducedMotion, []);
-  const game = useMemo(() => {
-    const g = new Game(DEMO_PUZZLE);
-    if (still) {
-      for (const grp of DEMO_PUZZLE.groups) {
-        g.clear();
-        for (const m of grp.members) g.toggle(m);
-        g.submit();
-      }
-    }
-    return g;
-  }, [key, still]);
-
-  useEffect(() => {
-    if (still) return;
-    let alive = true;
-    const root = ref.current;
-    const tile = (w: string): HTMLElement | null | undefined =>
-      root?.querySelector<HTMLElement>(`[data-flip="${CSS.escape(w)}"]`);
-    const submitBtn = (): HTMLButtonElement | undefined =>
-      [...(root?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
-        (b) => b.textContent?.trim() === "Submit",
-      );
-    const tilesLeft = (): number =>
-      root?.querySelectorAll('[data-flip]:not([data-flip^="bar-"])').length ?? 0;
-    const until = async (cond: () => boolean, timeout = 6000): Promise<void> => {
-      const start = performance.now();
-      while (alive && !cond() && performance.now() - start < timeout)
-        await sleep(80);
-    };
-
-    void (async () => {
-      await sleep(1400); // let the page reveal land before the demo starts
-      for (const grp of DEMO_PUZZLE.groups) {
-        if (!alive) return;
-        const before = tilesLeft();
-        for (const w of grp.members) {
-          tile(w)?.click();
-          await sleep(170);
-        }
-        await sleep(420); // beat between "found them" and submitting
-        await until(() => submitBtn() != null && !submitBtn()!.disabled);
-        submitBtn()?.click();
-        await until(() => tilesLeft() <= before - 4); // group accepted + removed
-        await sleep(820);
-      }
-      await sleep(5200); // hold the end screen, then start over
-      if (alive) setKey((k) => k + 1);
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [key, still]);
-
-  return (
-    <div
-      ref={ref}
-      aria-hidden
-      data-demo-board
-      className="pointer-events-none select-none"
-    >
-      <Board key={key} game={game} onPresence={noop} onFinish={noop} />
-    </div>
-  );
-}
-
-// ——— Self-playing room ————————————————————————————————————————————————
-// The real Roster replaying a scripted morning in a room: grids fill in tick by
-// tick, players finish (or run out of guesses) and take their ranks, then the
-// rail flips to the Season standings before the day restarts.
-const TICK_MS = 1500;
-type RoomSeed = {
-  id: string;
-  name: string;
-  avatar?: string;
-  order: [number, number, number, number]; // solve order (group levels)
-  solveTicks: number[]; // tick at which each group lands (ascending; 4 = win)
-  mistakeTicks: number[]; // ticks that cost a guess (4 of them = loss)
-  base: number; // head start in seconds, so live times differ
-};
-const ROOM: RoomSeed[] = [
-  {
-    id: "d-jun",
-    name: "Jun Park",
-    avatar: pfp("#2f6fed"),
-    order: [0, 1, 2, 3],
-    solveTicks: [1, 3, 5, 7],
-    mistakeTicks: [4],
-    base: 51,
-  },
-  {
-    id: "d-aria",
-    name: "Aria Voss",
-    avatar: pfp("#d9457a"),
-    order: [3, 0, 1, 2],
-    solveTicks: [2, 4, 7, 9],
-    mistakeTicks: [],
-    base: 38,
-  },
-  {
-    id: "d-theo",
-    name: "Theo Lindqvist",
-    order: [1, 0, 3, 2],
-    solveTicks: [3, 6, 9, 12],
-    mistakeTicks: [5, 8],
-    base: 24,
-  },
-  {
-    id: "d-mei",
-    name: "Mei Tanaka",
-    avatar: pfp("#1f9e6a"),
-    order: [0, 2, 1, 3],
-    solveTicks: [4, 8, 11, 13],
-    mistakeTicks: [2],
-    base: 12,
-  },
-  {
-    id: "d-yuki",
-    name: "Yuki Sato",
-    order: [2, 0, 1, 3],
-    solveTicks: [5, 10],
-    mistakeTicks: [3, 6, 9, 12], // fourth mistake ends the run
-    base: 5,
-  },
-  {
-    id: "d-omar",
-    name: "Omar Haddad",
-    avatar: pfp("#e0a32e"),
-    order: [1, 3, 0, 2],
-    solveTicks: [6, 11, 14],
-    mistakeTicks: [8],
-    base: 0,
-  },
-];
-const ROOM_TICKS = 15; // past the last scripted event
-const SEASON_AT = ROOM_TICKS + 1; // flip the rail to Season standings…
-const RESET_AT = SEASON_AT + 4; // …hold a few beats, then start the day over
-
-function roomAtTick(t: number, cycleStart: number): PlayerState[] {
-  return ROOM.map((p, i) => {
-    const solvedLevels = p.order.slice(
-      0,
-      p.solveTicks.filter((s) => s <= t).length,
+function saveRun(game: Game): void {
+  const date = game.puzzle.date;
+  try {
+    localStorage.setItem(
+      storeKey(date),
+      JSON.stringify({
+        guesses: game.guesses,
+        hints: game.hintedLevels,
+        startedAt: game.startedAt,
+        updatedAt: Date.now(),
+      } satisfies SavedRun),
     );
-    const mistakes = p.mistakeTicks.filter((m) => m <= t).length;
-    const lostAt = p.mistakeTicks.length === 4 ? p.mistakeTicks[3] : Infinity;
-    const wonAt = p.solveTicks.length === 4 ? p.solveTicks[3] : Infinity;
-    const doneAt = Math.min(lostAt, wonAt);
-    const done = t >= doneAt ? (wonAt <= lostAt ? "won" : "lost") : null;
-    const startedAt = cycleStart - p.base * 1000;
-    return {
-      userId: p.id,
-      name: p.name,
-      avatar: p.avatar,
-      mistakesLeft: 4 - mistakes,
-      solvedCount: solvedLevels.length,
-      solvedLevels,
-      // a light flicker of the "picking" ring across the still-playing rows
-      picking: !done && (t + i) % 3 === 1,
-      online: true,
-      done,
-      startedAt,
-      finishedAt: done ? startedAt + (p.base + doneAt * 1.5) * 1000 + 60_000 : null,
-    };
-  });
+    // Yesterday's run is dead weight the moment the day rolls; drop every other day's.
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k?.startsWith(KEY_PREFIX) && k !== storeKey(date)) localStorage.removeItem(k);
+    }
+  } catch {
+    /* private mode / storage off — the run just won't survive a reload */
+  }
 }
 
-// Season / all-time standings behind the rail's other tabs (and the demo's
-// season flip). Static mock — the shape the room_board SQL returns.
-const row = (
-  id: string,
-  name: string,
-  avatar: string | undefined,
-  total: number,
-  plays: number,
-  wins: number,
-  avg: number,
-  streak: number,
-) => ({
-  user_id: id,
-  name,
-  avatar: avatar ?? null,
-  total,
-  plays,
-  wins,
-  win_pct: Math.round((wins / plays) * 100),
-  avg_mistakes: avg,
-  streak,
-});
-const DEMO_SEASON: Standings = {
-  board: [
-    row("d-aria", "Aria Voss", pfp("#d9457a"), 11715, 7, 6, 1.6, 9),
-    row("d-jun", "Jun Park", pfp("#2f6fed"), 11430, 7, 6, 1.1, 6),
-    row("d-theo", "Theo Lindqvist", undefined, 10660, 7, 5, 1.4, 7),
-    row("d-mei", "Mei Tanaka", pfp("#1f9e6a"), 9520, 6, 5, 1.8, 5),
-    row("d-omar", "Omar Haddad", pfp("#e0a32e"), 8485, 7, 4, 2.0, 2),
-    row("d-yuki", "Yuki Sato", undefined, 7110, 6, 3, 2.3, 0),
-  ],
-  self: null,
-};
-const DEMO_ALLTIME: Standings = {
-  board: [
-    row("d-jun", "Jun Park", pfp("#2f6fed"), 181200, 150, 118, 1.5, 6),
-    row("d-aria", "Aria Voss", pfp("#d9457a"), 178450, 142, 121, 1.4, 9),
-    row("d-mei", "Mei Tanaka", pfp("#1f9e6a"), 140100, 121, 92, 1.7, 5),
-    row("d-theo", "Theo Lindqvist", undefined, 135870, 138, 84, 1.6, 7),
-    row("d-omar", "Omar Haddad", pfp("#e0a32e"), 122500, 130, 78, 2.1, 2),
-    row("d-yuki", "Yuki Sato", undefined, 96300, 96, 61, 2.3, 0),
-  ],
-  self: null,
-};
+// Replay the saved guesses through the real rules, the same way the Activity rehydrates
+// an abandoned game (App.tsx): the guess list is the record, Game.fromGuesses is the
+// only thing that reads it, so a hand-edited entry can't invent a state the rules
+// don't allow.
+function restoreRun(puzzle: Puzzle): Game {
+  let saved: SavedRun | null = null;
+  try {
+    const raw = localStorage.getItem(storeKey(puzzle.date));
+    saved = raw ? (JSON.parse(raw) as SavedRun) : null;
+  } catch {
+    /* unreadable → start fresh */
+  }
+  const game = Game.fromGuesses(puzzle, saved?.guesses ?? [], saved?.startedAt, saved?.hints);
+  // A finished run reopened later must show the time it was solved in, not the
+  // wall clock since it started (mirrors App.tsx's rehydrate).
+  if (game.status !== "playing" && saved?.startedAt && saved?.updatedAt) {
+    game.durationMs = Math.max(1000, saved.updatedAt - saved.startedAt);
+  }
+  return game;
+}
 
-export function DemoRoster() {
-  const still = useMemo(reducedMotion, []);
-  // Freeze a mid-race frame under reduced motion; otherwise tick the script.
-  const [tick, setTick] = useState(still ? 9 : 0);
-  const [view, setView] = useState<RosterView>("live");
-  const cycleStart = useRef(Date.now());
-
-  useEffect(() => {
-    if (still) return;
-    const id = setInterval(() => {
-      setTick((t) => {
-        const next = t + 1;
-        if (next === SEASON_AT) setView("season");
-        if (next >= RESET_AT) {
-          setView("live");
-          cycleStart.current = Date.now();
-          return 0;
-        }
-        return next;
-      });
-    }, TICK_MS);
-    return () => clearInterval(id);
-  }, [still]);
-
-  const players = useMemo(
-    () => roomAtTick(tick, cycleStart.current),
-    [tick],
-  );
-
+// ——— Mouse-only hover ——————————————————————————————————————————————————
+// The anchor twin of HoverButton: this page is also served inside touch contexts,
+// where CSS :hover sticks after a tap and strands the transition. Hover classes go on
+// only while a real mouse is over the link.
+function HoverLink({
+  hover = "",
+  className = "",
+  children,
+  ...rest
+}: AnchorHTMLAttributes<HTMLAnchorElement> & { hover?: string }) {
+  const [over, setOver] = useState(false);
   return (
-    // Fixed-height flex column — the rail's own panel mode: both tab panels are
-    // flex-1/min-h-0, so the Live list fills the box exactly (382px = tabs + 6
-    // rows, measured) and the taller Season table scrolls internally instead of
-    // growing the page. The flip can't move anything.
-    <div
-      aria-hidden
-      data-demo-roster
-      className="pointer-events-none flex h-[382px] flex-col select-none"
+    <a
+      {...rest}
+      className={className + (over ? " " + hover : "")}
+      onPointerEnter={(e: ReactPointerEvent<HTMLAnchorElement>) => {
+        if (e.pointerType === "mouse") setOver(true);
+      }}
+      onPointerLeave={(e: ReactPointerEvent<HTMLAnchorElement>) => {
+        if (e.pointerType === "mouse") setOver(false);
+      }}
     >
-      <Roster
-        players={players}
-        selfId=""
-        view={view}
-        onViewChange={noop}
-        season={DEMO_SEASON}
-        allTime={DEMO_ALLTIME}
-      />
+      {children}
+    </a>
+  );
+}
+
+// Discord's Blurple, and the mark in white on it — the treatment Discord's brand
+// guidelines ask for. The glyph itself is the app's existing official path (the share
+// menu's DiscordIcon), used as-is: never restyled, never recoloured beyond the
+// approved white-on-Blurple pairing. The pill is the game's own BTN_SHAPE, so it stands
+// exactly as tall as the board's Submit beside it and only the colour is Discord's.
+const BLURPLE = "#5865F2";
+
+function PlayInDiscord({ label }: { label: string }) {
+  return (
+    <HoverLink
+      href={PLAY_IN_DISCORD}
+      hover="opacity-88"
+      className={BTN_SHAPE + " gap-2.5 text-white"}
+      style={{ background: BLURPLE }}
+    >
+      <DiscordIcon size={18} />
+      {label}
+    </HoverLink>
+  );
+}
+
+// ——— Your row ——————————————————————————————————————————————————————————
+// The real rail (src/roster.tsx) is live, per-server and per-channel, so most of it can't
+// exist on a page with no server attached. One row of it can: the visitor's own. It's the
+// real thing's row geometry (roster's ROW/Rank/Mistakes, so the two can't drift) reading the
+// same local run as the board beside it, so nothing here is invented. No cast of sample
+// players, and no invented identity either: the page has nobody signed in, so the avatar is a
+// plain silhouette and the name is "You".
+//
+// It moves on GAME EVENTS only (a solve, a mistake, the finish) — never on a clock. The time
+// cell holds a dash until the run ends and then shows what the solve took. That is deliberate:
+// a 1Hz tick is this repo's known source of idle jank, which is why roster.tsx keeps its
+// running clock in a single leaf component (LiveTime) and why that component isn't imported
+// here.
+
+// What the row draws. A subset of Game, so the row can render before a puzzle has
+// even arrived and can be compared cheaply between updates.
+type SelfRow = {
+  // group levels solved by deduction, in solve order (each paints a full-width bar)
+  solvedLevels: number[];
+  mistakesLeft: number;
+  done: "won" | "lost" | null;
+  // set only once the run is over — there is no live clock on this page
+  durationMs: number | null;
+};
+
+const IDLE_ROW: SelfRow = {
+  solvedLevels: [],
+  mistakesLeft: MAX_MISTAKES,
+  done: null,
+  durationMs: null,
+};
+
+// `deducedLevels`, not `solved`: a loss back-fills the unsolved groups, and the row
+// must not paint four bars for a board you didn't crack (the same distinction the
+// live roster and /api/roster draw).
+const rowOf = (game: Game): SelfRow => ({
+  solvedLevels: game.deducedLevels,
+  mistakesLeft: game.mistakesLeft,
+  done: game.status === "playing" ? null : game.status,
+  durationMs: game.durationMs,
+});
+
+const sameRow = (a: SelfRow, b: SelfRow): boolean =>
+  a.mistakesLeft === b.mistakesLeft &&
+  a.done === b.done &&
+  a.durationMs === b.durationMs &&
+  a.solvedLevels.length === b.solvedLevels.length &&
+  a.solvedLevels.every((l, i) => l === b.solvedLevels[i]);
+
+// m:ss (h:mm:ss past an hour), same shape as the roster's finished times.
+function mmss(ms: number): string {
+  const total = Math.round(ms / 1000);
+  const s = String(total % 60).padStart(2, "0");
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}
+
+// Stand-in for a Discord photo. Nobody is signed in on this page, so this can't be a
+// picture of anyone: a neutral silhouette, no identity colour and no initials of a
+// name we'd have to make up. It wears the roster's own "this row is you" ring, dimmed
+// — in the roster that ring picks you out of a crowd, and here there is no crowd, so
+// at full white it just shouted over the rank chip.
+function SelfAvatar() {
+  return (
+    <div
+      className={
+        "relative overflow-hidden bg-zinc-800 shadow-[0_0_0_2px_#09090b,0_0_0_3px_rgba(244,244,245,0.32)] " +
+        ROW.avatar
+      }
+    >
+      <svg viewBox="0 0 64 64" className="h-full w-full" aria-hidden focusable="false">
+        <circle cx="32" cy="25" r="12.5" fill="#8b8b94" />
+        <rect x="12" y="43" width="40" height="28" rx="14" fill="#8b8b94" />
+      </svg>
     </div>
   );
 }
 
-// ——— Self-playing desktop view ————————————————————————————————————————
-// The real GameView (board + live roster rail, the 50/50 desktop layout) driving
-// itself: the board self-solves while the room's rows reorder past each other beside
-// it. Used to record the 16:9 Discord activity "Video Preview" — gameplay AND live
-// multiplayer in one frame. Not on the landing page itself; harness/recording only.
-export function DemoGame() {
-  const still = useMemo(reducedMotion, []);
-  const ref = useRef<HTMLDivElement>(null);
-  const [key, setKey] = useState(0);
-  const game = useMemo(() => new Game(DEMO_PUZZLE), [key]);
-  const cycleStart = useRef(Date.now());
-  const [tick, setTick] = useState(0);
-  const players = useMemo(() => roomAtTick(tick, cycleStart.current), [tick]);
+// The row is a picture; this is the same state as a sentence, for screen readers.
+function say(row: SelfRow): string {
+  const n = row.solvedLevels.length;
+  const time = row.durationMs != null ? ` in ${mmss(row.durationMs)}` : "";
+  if (row.done === "won") return `You, rank 1. Solved${time}.`;
+  if (row.done === "lost") return `You, rank 1. Out with ${n} of 4 groups${time}.`;
+  if (n === 0 && row.mistakesLeft === MAX_MISTAKES) return "You, rank 1. Not started.";
+  return `You, rank 1. ${n} of 4 groups, ${row.mistakesLeft} guesses left.`;
+}
 
-  // Snappy, recording-only pacing so a full solve + several roster reshuffles fit a
-  // short clip at NATURAL speed — no post-hoc speed-up, no frame interpolation.
-  const ROOM_TICK = 800;
+function SelfRowView({ row }: { row: SelfRow }) {
+  const solved = row.solvedLevels;
+  return (
+    <div className={ROW.shell + " bg-zinc-100/10"}>
+      <span className="sr-only">{say(row)}</span>
+      <Rank rank={1} />
+      <SelfAvatar />
+      {/* the row's mini board: one solid bar per solved group, the rest still cream */}
+      <div aria-hidden className={ROW.mini}>
+        {solved.map((lvl) => (
+          <div
+            key={lvl}
+            className="col-span-4 rounded-[1px]"
+            style={{ background: LEVELS[lvl].color }}
+          />
+        ))}
+        {Array.from({ length: (4 - solved.length) * 4 }, (_, i) => (
+          <div key={i} className="rounded-[1px] bg-[#e8eaee]" />
+        ))}
+      </div>
+      <span aria-hidden className={ROW.name + " font-bold text-zinc-100"}>
+        You
+      </span>
+      <Mistakes left={row.mistakesLeft} />
+      <div aria-hidden className={ROW.status}>
+        {/* ✓/✗ keeps a fixed slot on every state, so the time never shifts when a run ends */}
+        <span className="grid h-4 w-4 flex-none place-items-center">
+          {row.done === "won" && <Check className="text-zinc-100" size={15} strokeWidth={2.8} />}
+          {row.done === "lost" && <X className="text-zinc-500" size={15} strokeWidth={2.6} />}
+        </span>
+        <span
+          className={
+            "ml-auto text-[12px] font-semibold tabular-nums tracking-[0.01em] min-[800px]:text-[13px] " +
+            (row.done === "won" ? "text-zinc-200" : row.done ? "text-zinc-500" : "text-zinc-700")
+          }
+        >
+          {/* Nothing to say until the run ends — there's no live clock here (see above),
+              so the slot holds a dash to keep its width rather than a ticking time. */}
+          {row.durationMs != null ? mmss(row.durationMs) : "–"}
+        </span>
+      </div>
+    </div>
+  );
+}
 
-  // tick the room (rows reorder)
+// ——— The empty seats ———————————————————————————————————————————————————
+// Rows with nobody in them, in the exact geometry of the one above: a blank disc where a
+// friend's avatar goes, a grey grid where their board goes, a bar where their name goes. The
+// column edges line up with your row, which is what makes them read as SEATS rather than as a
+// list still loading — and what makes the rail's emptiness the point instead of an accident.
+// Opacity steps down the stack so the last one is nearly gone and the eye lands on the button
+// under it. aria-hidden throughout: there is nobody here to announce.
+const SEAT_FADE = [0.5, 0.34, 0.2];
+
+function EmptySeat({ rank, opacity }: { rank: number; opacity: number }) {
+  return (
+    <div
+      aria-hidden
+      className={ROW.shell + " bg-zinc-900/60"}
+      style={{ opacity }}
+    >
+      <Rank rank={rank} />
+      <div className={ROW.avatar + " bg-zinc-100/10"} />
+      <div className={ROW.mini}>
+        {Array.from({ length: 16 }, (_, i) => (
+          <div key={i} className="rounded-[1px] bg-zinc-100/10" />
+        ))}
+      </div>
+      <span className={ROW.name}>
+        {/* a name-shaped bar, not a word: any placeholder name is somebody's, and a
+            greeked one ("Player 2") invites you to read it as a real absent player */}
+        <span className="block h-[7px] w-[52%] max-w-[86px] rounded-full bg-zinc-100/10" />
+      </span>
+      <Mistakes left={0} />
+      <div className={ROW.status} />
+    </div>
+  );
+}
+
+// ——— The rail ——————————————————————————————————————————————————————————
+// Everything the Activity puts beside the board — masthead, tab row, ranked list — plus the
+// one thing it doesn't need: somewhere to go. The CTA takes the rail's footer slot, the same
+// place the game pins its next-puzzle countdown, so the panel keeps the shape a player will
+// see again the moment they're inside Discord.
+
+// The tab row, as text. Live is the tab you'd be on; Season and All-time are shown but not
+// offered, because a page with one local run has no standings to put behind them — and hiding
+// them would misrepresent what the rail actually holds. Spans, not buttons: nothing here is
+// pressable, so nothing here takes the cursor or a tab stop (roster.tsx's TAB_LOOK is exactly
+// the tab minus its control affordances).
+function DeadTabs() {
+  return (
+    <div className="flex flex-none items-center gap-4 px-0.5 pb-0.5">
+      <span className={TAB_LOOK + TAB_ON}>
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+        Live
+      </span>
+      <span className={TAB_LOOK + TAB_OFF}>Season</span>
+      <span className={TAB_LOOK + TAB_OFF}>All-time</span>
+    </div>
+  );
+}
+
+function Rail({ puzzle, row, finished }: { puzzle?: Puzzle; row: SelfRow; finished: boolean }) {
+  return (
+    // The one place this rail parts company with GameView's. In the Activity the rail
+    // absolute-fills its half and scrolls its list inside, because a live room is any length
+    // and must never drive a fixed iframe taller. Here the list is four rows and always will
+    // be — pinning it to the board's height only bought a seat sliced in half at the clip, so
+    // the rail is a plain column that ends where its content ends. Mobile: the same column,
+    // under the board, in the same order.
+    <div className="flex w-full min-w-0 flex-1 flex-col gap-2.5">
+      <Header puzzle={puzzle} className="hidden min-[800px]:flex" />
+      <DeadTabs />
+      <div className="flex flex-col gap-1.5">
+        <SelfRowView row={row} />
+        {SEAT_FADE.map((opacity, i) => (
+          <EmptySeat key={i} rank={i + 2} opacity={opacity} />
+        ))}
+      </div>
+      {/* The rail's footer slot — the game pins its next-puzzle countdown here, and this page
+          pins the only thing it has to say. One sentence: the seats above already made the
+          argument, so this just names where the players come from. */}
+      <div className="mt-1 flex flex-col items-start gap-3 border-t border-white/[0.07] px-1 pt-3.5">
+        <p className="text-pretty font-sans text-[12.5px] leading-[1.65] text-zinc-500">
+          {finished
+            ? "That was today's. In Discord your whole server gets the same board every day, with grids filling in live and a season leaderboard keeping score."
+            : "In Discord your whole server plays this board with you: grids filling in live, and a season leaderboard keeping score."}
+        </p>
+        <PlayInDiscord label="Play in Discord" />
+      </div>
+    </div>
+  );
+}
+
+// ——— Today's board ————————————————————————————————————————————————————
+
+// A quiet stand-in while today's board is on the wire: sixteen tiles at the real tile
+// height, so the column doesn't jump when the game arrives.
+function BoardSkeleton() {
+  return (
+    <div aria-hidden className="grid grid-cols-4 gap-2">
+      {Array.from({ length: 16 }, (_, i) => (
+        <div
+          key={i}
+          className="h-[var(--tile-h)] animate-pulse rounded-lg bg-zinc-900"
+          style={{ animationDelay: `${(i % 4) * 90}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ——— Page ——————————————————————————————————————————————————————————————
+
+export function Landing({ puzzle: seed }: { puzzle?: Puzzle }) {
+  // The puzzle is held HERE, not in the board: the masthead's dateline and puzzle number
+  // come off the same fetch, and they're the rail's, not the board's.
+  const [puzzle, setPuzzle] = useState<Puzzle | null>(seed ?? null);
+  const [failed, setFailed] = useState(false);
+  const [game, setGame] = useState<Game | null>(null);
+  const [finished, setFinished] = useState(false);
+  // This visitor's run, as the rail draws it. Held here because the board and the rail are
+  // siblings. Presence fires on every tile tap too, and most of those don't change a thing the
+  // row shows — bail out on an unchanged row so a selection never re-renders the board's
+  // parent mid-animation.
+  const [row, setRow] = useState<SelfRow>(IDLE_ROW);
+  const onRow = useCallback((next: SelfRow) => {
+    setRow((prev) => (sameRow(prev, next) ? prev : next));
+  }, []);
+
   useEffect(() => {
-    if (still) return;
-    const id = setInterval(() => setTick((t) => t + 1), ROOM_TICK);
-    return () => clearInterval(id);
-  }, [key, still]);
-
-  // drive the board solve through the GameView's DOM (same technique as DemoBoard)
-  useEffect(() => {
-    if (still) return;
+    if (seed) return;
     let alive = true;
-    const root = ref.current;
-    const tile = (w: string): HTMLElement | null | undefined =>
-      root?.querySelector<HTMLElement>(`[data-flip="${CSS.escape(w)}"]`);
-    const submitBtn = (): HTMLButtonElement | undefined =>
-      [...(root?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
-        (b) => b.textContent?.trim() === "Submit",
-      );
-    const tilesLeft = (): number =>
-      root?.querySelectorAll('[data-flip]:not([data-flip^="bar-"])').length ?? 0;
-    const until = async (cond: () => boolean, t = 6000): Promise<void> => {
-      const s = performance.now();
-      while (alive && !cond() && performance.now() - s < t) await sleep(80);
-    };
     void (async () => {
-      await sleep(300);
-      for (const grp of DEMO_PUZZLE.groups) {
-        if (!alive) return;
-        const before = tilesLeft();
-        for (const w of grp.members) {
-          tile(w)?.click();
-          await sleep(60);
-        }
-        await sleep(70);
-        await until(() => {
-          const b = submitBtn();
-          return b != null && !b.disabled;
-        });
-        submitBtn()?.click();
-        await until(() => tilesLeft() <= before - 4);
-        await sleep(100);
-      }
-      await sleep(1600); // hold the finished board + standings, then restart
-      if (alive) {
-        cycleStart.current = Date.now();
-        setTick(0);
-        setKey((k) => k + 1);
+      try {
+        const res = await fetch("/api/today");
+        if (!res.ok) throw new Error(String(res.status));
+        const p = (await res.json()) as Puzzle;
+        if (alive) setPuzzle(p);
+      } catch {
+        if (alive) setFailed(true);
       }
     })();
     return () => {
       alive = false;
     };
-  }, [key, still]);
+  }, [seed]);
 
-  return (
-    <div ref={ref} aria-hidden data-demo-game className="pointer-events-none select-none">
-      <GameView
-        game={game}
-        gameKey={String(key)}
-        players={players}
-        selfId=""
-        season={DEMO_SEASON}
-        allTime={DEMO_ALLTIME}
-        onPresence={noop}
-        onFinish={noop}
-      />
-    </div>
-  );
-}
-
-// ——— Discord cards, drawn live ————————————————————————————————————————
-// Same canvas code the server runs to render the PNGs it posts (card-draw.ts);
-// the browser draws with the page's own fonts, so nothing extra ships.
-async function ensureCanvasFonts(): Promise<void> {
-  await Promise.all(
-    [
-      '500 16px "Libre Franklin"',
-      '600 16px "Libre Franklin"',
-      '700 16px "Libre Franklin"',
-      '800 16px "Libre Franklin"',
-      "700 16px Newsreader",
-    ].map((f) => document.fonts.load(f)),
-  ).catch(() => {
-    /* fall back to whatever's loaded — the card still draws */
-  });
-}
-
-const loadCardImg = (url: string): Promise<CanvasImageSource | null> =>
-  new Promise((res) => {
-    const img = new Image();
-    img.onload = () => res(img);
-    img.onerror = () => res(null);
-    img.src = url;
-  });
-
-// A room mid-race for the "who's playing" card: each grid row is one guess.
-const CARD_ROOM: CardPlayer[] = [
-  {
-    id: "d-jun",
-    name: "Jun Park",
-    avatar: pfp("#2f6fed"),
-    sec: 134,
-    grid: [
-      [2, 1, 2, 2],
-      [2, 2, 2, 2],
-      [0, 0, 0, 0],
-      [1, 1, 1, 1],
-      [3, 3, 3, 3],
-    ],
-  },
-  {
-    id: "d-aria",
-    name: "Aria Voss",
-    avatar: pfp("#d9457a"),
-    sec: 171,
-    grid: [
-      [3, 3, 3, 3],
-      [0, 1, 0, 0],
-      [0, 0, 0, 0],
-      [1, 1, 1, 1],
-      [2, 2, 2, 2],
-    ],
-  },
-  {
-    id: "d-theo",
-    name: "Theo Lindqvist",
-    avatar: null,
-    sec: 95,
-    grid: [
-      [0, 0, 0, 0],
-      [3, 1, 2, 3],
-    ],
-  },
-  {
-    id: "d-mei",
-    name: "Mei Tanaka",
-    avatar: pfp("#1f9e6a"),
-    sec: 14,
-    grid: [],
-  },
-  {
-    id: "d-omar",
-    name: "Omar Haddad",
-    avatar: pfp("#e0a32e"),
-    sec: 108,
-    grid: [
-      [1, 1, 1, 1],
-      [3, 3, 3, 3],
-      [0, 0, 0, 0],
-      [2, 2, 2, 2],
-    ],
-  },
-];
-
-// The daily recap posted at the midnight-ET reset: yesterday's results beside
-// the month's standings.
-const CARD_RECAP: RecapData = {
-  puzzleNo: 1169,
-  puzzleDate: "2026-06-09",
-  season: "June",
-  streak: 12,
-  winRate: 84,
-  guildName: "Puzzle Club",
-  channelName: "daily-disconnections",
-  results: [
-    {
-      id: "d-omar",
-      name: "Omar Haddad",
-      avatar: pfp("#e0a32e"),
-      solved: true,
-      score: 96,
-      mistakes: 0,
-      solvedLevels: [2, 1, 0, 3],
-      sec: 102,
-    },
-    {
-      id: "d-theo",
-      name: "Theo Lindqvist",
-      avatar: null,
-      solved: true,
-      score: 91,
-      mistakes: 0,
-      solvedLevels: [3, 2, 1, 0],
-      sec: 88,
-    },
-    {
-      id: "d-jun",
-      name: "Jun Park",
-      avatar: pfp("#2f6fed"),
-      solved: true,
-      score: 84,
-      mistakes: 1,
-      solvedLevels: [0, 1, 2, 3],
-      sec: 141,
-    },
-    {
-      id: "d-aria",
-      name: "Aria Voss",
-      avatar: pfp("#d9457a"),
-      solved: true,
-      score: 68,
-      mistakes: 2,
-      solvedLevels: [3, 1, 2, 0],
-      sec: 203,
-    },
-    {
-      id: "d-yuki",
-      name: "Yuki Sato",
-      avatar: null,
-      solved: false,
-      score: 12,
-      mistakes: 4,
-      solvedLevels: [3, 1],
-      sec: null,
-    },
-  ],
-  standings: [
-    {
-      id: "d-aria",
-      name: "Aria Voss",
-      avatar: pfp("#d9457a"),
-      total: 487,
-      wins: 6,
-      plays: 7,
-    },
-    {
-      id: "d-jun",
-      name: "Jun Park",
-      avatar: pfp("#2f6fed"),
-      total: 441,
-      wins: 4,
-      plays: 7,
-    },
-    {
-      id: "d-theo",
-      name: "Theo Lindqvist",
-      avatar: null,
-      total: 372,
-      wins: 3,
-      plays: 6,
-    },
-    {
-      id: "d-mei",
-      name: "Mei Tanaka",
-      avatar: pfp("#1f9e6a"),
-      total: 339,
-      wins: 2,
-      plays: 6,
-    },
-  ],
-};
-
-function RosterCard() {
-  const ref = useRef<HTMLCanvasElement>(null);
+  // Rehydrate whatever this browser already did with today's board — which is what makes a
+  // mid-solve reload come back with the row already filled in.
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      await ensureCanvasFonts();
-      const canvas = ref.current;
-      if (cancelled || !canvas) return;
-      const scratch = document.createElement("canvas").getContext("2d");
-      if (!scratch) return;
-      const opts = { puzzleNo: 1170, puzzleDate: "2026-06-10" };
-      const layout = cardLayout(scratch, CARD_ROOM, opts);
-      canvas.width = layout.W; // true pixel size; CSS scales it to fit
-      canvas.height = layout.height;
-      const ctx = canvas.getContext("2d");
-      if (ctx)
-        await drawRoster(ctx, CARD_ROOM, opts, layout, {
-          loadImg: loadCardImg,
-          Path2D: window.Path2D,
-        });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (!puzzle) return;
+    const g = restoreRun(puzzle);
+    setGame(g);
+    setFinished(g.status !== "playing");
+    onRow(rowOf(g));
+  }, [puzzle, onRow]);
+
   return (
-    <canvas
-      ref={ref}
-      className="w-full rounded-xl shadow-2xl ring-1 ring-white/10"
-      aria-label="The who's-playing card the bot posts to the channel"
-    />
-  );
-}
+    // The game's own shell (GameView): capped at 480 and centered as a single column, a 50/50
+    // split at DESKTOP_BP. What it deliberately does NOT copy is the scale-to-fit — inside
+    // Discord the board grows to fill a fixed iframe, but a browser tab is a document that
+    // scrolls, with a footer under it that scaling would fight. The board renders at its
+    // natural size, which is the size it is in an Activity window of this width anyway.
+    <div className="mx-auto flex w-full max-w-[480px] animate-fade-in flex-col min-[800px]:max-w-[860px] min-[800px]:py-10">
+      {/* Mobile only. In Discord this slot is the client's own activity chrome, so the game
+          hides its masthead there; on the open web nothing else says whose page this is, and
+          an anonymous board is a page a visitor can't come back to. Desktop's copy of it sits
+          atop the rail (Rail above), exactly as in the game. */}
+      <MobileMasthead puzzle={puzzle ?? undefined} />
 
-function RecapCard() {
-  const ref = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      await ensureCanvasFonts();
-      const canvas = ref.current;
-      if (cancelled || !canvas) return;
-      const layout = recapLayout(CARD_RECAP);
-      canvas.width = layout.W;
-      canvas.height = layout.height;
-      const ctx = canvas.getContext("2d");
-      if (ctx)
-        await drawRecap(ctx, CARD_RECAP, layout, {
-          loadImg: loadCardImg,
-          Path2D: window.Path2D,
-        });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return (
-    <canvas
-      ref={ref}
-      className="w-full rounded-xl shadow-2xl ring-1 ring-white/10"
-      aria-label="The daily recap card posted after the midnight reset"
-    />
-  );
-}
-
-// ——— Page furniture ———————————————————————————————————————————————————
-
-function GitHubIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 16 16" className={className} fill="currentColor" aria-hidden>
-      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
-    </svg>
-  );
-}
-
-function DiscordIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 127.14 96.36" className={className} fill="currentColor" aria-hidden>
-      <path d="M107.7 8.07A105.15 105.15 0 0 0 81.47 0a72.06 72.06 0 0 0-3.36 6.83 97.68 97.68 0 0 0-29.11 0A72.37 72.37 0 0 0 45.64 0a105.89 105.89 0 0 0-26.25 8.09C2.79 32.65-1.71 56.6.54 80.21a105.73 105.73 0 0 0 32.17 16.15 77.7 77.7 0 0 0 6.89-11.11 68.42 68.42 0 0 1-10.85-5.18c.91-.66 1.8-1.34 2.66-2a75.57 75.57 0 0 0 64.32 0c.87.71 1.76 1.39 2.66 2a68.68 68.68 0 0 1-10.87 5.19 77 77 0 0 0 6.89 11.1 105.25 105.25 0 0 0 32.19-16.14c2.64-27.38-4.51-51.11-18.9-72.15ZM42.45 65.69C36.18 65.69 31 60 31 53s5-12.74 11.43-12.74S54 46 53.89 53s-5.05 12.69-11.44 12.69Zm42.24 0C78.41 65.69 73.25 60 73.25 53s5-12.74 11.44-12.74S96.23 46 96.12 53s-5.04 12.69-11.43 12.69Z" />
-    </svg>
-  );
-}
-
-// Staggered page-load reveal: tabIn is declared with `both`, so a delayed
-// element holds opacity 0 until its turn. Append `animate-tab-in` to the
-// element's classes and take the delay from here.
-const riseDelay = (i: number): { animationDelay: string } => ({
-  animationDelay: `${i * 90}ms`,
-});
-
-// Section heading, the game's display serif.
-function H2({ children }: { children: string }) {
-  return (
-    <h2 className="text-balance font-display text-[28px] font-bold tracking-[-0.01em] text-[#e8eaee]">
-      {children}
-    </h2>
-  );
-}
-
-export function Landing() {
-  return (
-    <div className="relative w-full py-10">
-      {/* Atmosphere: two ultra-faint category-color washes over the black. */}
-      <div
-        aria-hidden
-        className="pointer-events-none fixed inset-0 -z-10"
-        style={{
-          background:
-            "radial-gradient(560px 420px at 12% -4%, rgba(249,223,109,0.05), transparent 70%)," +
-            "radial-gradient(640px 480px at 96% 32%, rgba(186,129,197,0.06), transparent 70%)",
-        }}
-      />
-
-      {/* Wordmark, the game header's own lockup (components.tsx Header). */}
-      <header className="flex animate-tab-in items-center gap-2.5" style={riseDelay(0)}>
-        <span className="font-display text-[27px] font-bold leading-none tracking-[-0.025em] text-[#e8eaee] [text-box:trim-both_cap_alphabetic]">
-          Disconnections
-        </span>
-      </header>
-
-      {/* Hero: the app's own desktop split — pitch where the board goes, demo where the rail goes. */}
-      <section className="mt-14 grid items-center gap-12 min-[820px]:mt-20 min-[820px]:grid-cols-[1fr_minmax(0,420px)] min-[820px]:gap-14">
-        <div className="flex flex-col items-start gap-6">
-          <h1
-            className="animate-tab-in text-balance font-display text-[42px] font-bold leading-[1.04] tracking-[-0.015em] text-[#e8eaee] min-[820px]:text-[54px]"
-            style={riseDelay(1)}
-          >
-            The daily puzzle, played together.
-          </h1>
-          <p
-            className="max-w-[46ch] animate-tab-in text-pretty font-sans text-[15px] leading-[1.75] text-zinc-400"
-            style={riseDelay(2)}
-          >
-            Launch it in a Discord channel or call and everyone gets the same
-            daily board. Watch each other's grids fill in live, race the
-            clock, and climb your server's season leaderboard.
-          </p>
-          <div
-            className="flex animate-tab-in flex-wrap items-center gap-3"
-            style={riseDelay(3)}
-          >
-            <a
-              href={INSTALL}
-              className="flex items-center gap-2.5 rounded-full border border-zinc-100 bg-zinc-100 px-5.5 py-2.5 text-sm font-semibold text-zinc-900 transition-opacity duration-150 ease-out hover:opacity-85"
-            >
-              <DiscordIcon className="h-4 w-4" />
-              Add to Discord
-            </a>
-            <a
-              href={GITHUB}
-              className="flex items-center gap-2.5 rounded-full border border-zinc-700 px-5.5 py-2.5 text-sm font-semibold text-zinc-200 transition-colors duration-150 ease-out hover:border-zinc-500"
-            >
-              <GitHubIcon className="h-4 w-4" />
-              View source
-            </a>
-          </div>
-          <p
-            className="max-w-[48ch] animate-tab-in text-pretty font-sans text-[12.5px] leading-relaxed text-zinc-600"
-            style={riseDelay(4)}
-          >
-            Works as a user install too, but{" "}
-            <span className="font-semibold text-zinc-400">Add to server</span>{" "}
-            is the full experience: that's what lets the bot post the live
-            cards and daily recaps.
-          </p>
-        </div>
-        <div className="animate-tab-in" style={riseDelay(5)}>
-          <DemoBoard />
-        </div>
-      </section>
-
-      {/* The room, live: the real rail replaying a scripted morning. The 418px
-          column is the game's own rail width. */}
-      <section className="mt-28 grid items-center gap-12 min-[820px]:grid-cols-[minmax(0,418px)_1fr] min-[820px]:gap-14">
-        <DemoRoster />
-        <div className="flex flex-col items-start gap-5 max-[819px]:-order-1">
-          <H2>Watch the room race.</H2>
-          <p className="max-w-[48ch] text-pretty font-sans text-[14px] leading-[1.8] text-zinc-400">
-            Everyone on today's puzzle shows up beside your board, their grids
-            filling in guess by guess. Colors only, so nothing spoils. Finishers
-            take a time and a rank while the rest of the room plays on.
-          </p>
-          <p className="max-w-[48ch] text-pretty font-sans text-[14px] leading-[1.8] text-zinc-400">
-            Wins feed monthly seasons and all-time standings kept per server:
-            streaks, win rates, average mistakes. Only your first finish of the
-            daily counts, so replays can't farm points.
-          </p>
-        </div>
-      </section>
-
-      {/* The Discord cards, drawn by the bot's own renderer. */}
-      <section className="mt-28 flex flex-col gap-5">
-        <H2>It posts back to the channel.</H2>
-        <p className="max-w-[62ch] text-pretty font-sans text-[14px] leading-[1.8] text-zinc-400">
-          A who's-playing card sits in the channel and live-edits as the room
-          races; after the midnight-ET reset, a recap lands with yesterday's
-          podium and the season so far. Both below are drawn in your browser by
-          the same canvas code the bot uses to render its PNGs.
-        </p>
-        <div className="mt-2 grid items-start gap-10 min-[820px]:grid-cols-[5fr_7fr]">
-          <div className="flex flex-col gap-3">
-            <RosterCard />
-            <p className="text-pretty font-sans text-[12.5px] text-zinc-600">
-              Today's room, mid-race. Grids edit in as guesses commit.
+      <div className="flex w-full min-w-0 flex-col gap-3 min-[800px]:flex-row min-[800px]:items-stretch min-[800px]:gap-6">
+        <div className="flex w-full min-w-0 flex-col gap-3 min-[800px]:flex-1">
+          {failed ? (
+            // The rail's button is right there (beside on desktop, below on mobile), so this
+            // says what happened and points at it rather than growing a CTA of its own.
+            <p className="text-pretty font-sans text-[14px] leading-[1.7] text-zinc-400">
+              Today's board didn't load. It's always waiting in Discord, so try there for now.
             </p>
-          </div>
-          <div className="flex flex-col gap-3">
-            <RecapCard />
-            <p className="text-pretty font-sans text-[12.5px] text-zinc-600">
-              The daily recap: yesterday's results beside the season standings.
-            </p>
-          </div>
+          ) : game ? (
+            <Board
+              key={puzzle?.date}
+              game={game}
+              onPresence={(snap: BoardSnapshot) => {
+                saveRun(game);
+                // The snapshot is the board's own view of the run (its solve animations land a
+                // group in `solvedLevels` exactly when the bar appears), so the rail fills in
+                // step with the board rather than one guess ahead of it.
+                onRow({
+                  solvedLevels: snap.solvedLevels,
+                  mistakesLeft: snap.mistakesLeft,
+                  done: snap.done,
+                  durationMs: game.durationMs,
+                });
+              }}
+              onFinish={() => {
+                saveRun(game);
+                setFinished(true);
+                onRow(rowOf(game)); // now carries durationMs
+              }}
+              // No onShareLink/onCopyImage/onCopyLink: every one of those mints a card from
+              // the server's record of a player's daily, and this run has no record. The end
+              // footer keeps its floor row, "Copy emoji grid as text", which needs nothing.
+            />
+          ) : (
+            <BoardSkeleton />
+          )}
         </div>
-      </section>
 
-      <footer className="mt-28 flex flex-col gap-4 border-t border-white/10 pt-7 pb-2 min-[820px]:flex-row min-[820px]:items-center min-[820px]:justify-between">
-        <p className="max-w-[58ch] text-pretty font-sans text-[12px] leading-relaxed text-zinc-600">
-          An independent game with original daily puzzles, written and edited
-          in-house. Not affiliated with or endorsed by The New York Times.
-        </p>
-        <nav className="flex items-center gap-5 font-sans text-[12px] font-semibold text-zinc-500">
-          <a href={GITHUB} className="transition-colors hover:text-zinc-200">
+        <Rail puzzle={puzzle ?? undefined} row={row} finished={finished} />
+      </div>
+
+      {/* The one thing the game has no equivalent of: this is a public page, and the legal
+          links have to be reachable from it. Kept to a single quiet line so it reads as a
+          plate at the bottom of the frame rather than a site footer bolted to a game. */}
+      <footer className="mt-8 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t border-white/[0.06] pt-5 font-sans text-[11.5px] text-zinc-600 min-[800px]:mt-10">
+        <p>An independent game. Every board written and edited in-house, one a day.</p>
+        <nav className="flex items-center gap-5 font-semibold text-zinc-500">
+          <HoverLink href={GITHUB} hover="text-zinc-200" className="transition-colors">
             GitHub
-          </a>
-          <a href="/privacy.html" className="transition-colors hover:text-zinc-200">
+          </HoverLink>
+          <HoverLink href="/privacy.html" hover="text-zinc-200" className="transition-colors">
             Privacy
-          </a>
-          <a href="/terms.html" className="transition-colors hover:text-zinc-200">
+          </HoverLink>
+          <HoverLink href="/terms.html" hover="text-zinc-200" className="transition-colors">
             Terms
-          </a>
+          </HoverLink>
         </nav>
       </footer>
     </div>

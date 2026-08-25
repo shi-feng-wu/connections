@@ -96,7 +96,9 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 // Brand glyphs the share menu needs that no icon set carries (logos, not icons): Discord's
 // clyde and X's mark, from simple-icons' official paths (CC0). Filled with currentColor so
 // they sit in the rows' zinc exactly like the lucide strokes beside them.
-function DiscordIcon({ size = 16 }: { size?: number }) {
+// Exported so the landing page's "Play in Discord" button draws the SAME official mark
+// (there is one Discord glyph in this app, not two that can drift).
+export function DiscordIcon({ size = 16 }: { size?: number }) {
   return (
     <svg
       width={size}
@@ -847,12 +849,19 @@ const TILE_SELECTED = " bg-[#4a4f5a] text-white";
 // in className since :active clears reliably on touchend.
 const BTN_ICON =
   "inline-flex h-[42px] w-[42px] flex-none items-center justify-center cursor-pointer rounded-full border border-zinc-600 text-zinc-100 transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
+// The primary pill's SHAPE, without its skin. Exported because the landing page's "Play in
+// Discord" button is the same pill in Discord's Blurple (the one colour in this app we don't
+// choose), and it has to sit at the same height and radius as every button the game shows —
+// it's the game's own footer it lands beside.
+export const BTN_SHAPE =
+  "inline-flex h-[42px] items-center justify-center cursor-pointer rounded-full px-5.5 font-semibold text-sm transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
 const BTN_PRIMARY =
-  "inline-flex h-[42px] items-center justify-center cursor-pointer rounded-full px-5.5 border border-zinc-100 bg-zinc-100 text-zinc-900 font-semibold text-sm transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default";
+  BTN_SHAPE + " border border-zinc-100 bg-zinc-100 text-zinc-900";
 // BTN_PRIMARY's labelled twin for the one end-screen action that outranks the rest — the
-// same filled pill as Submit, with the share glyph ahead of the word. Padding and gap step
-// down on the narrow layouts the end footer already tightens for, so the word survives the
-// 320px Android floor instead of collapsing back to a bare glyph.
+// same filled pill as Submit, with the share glyph ahead of the word. Not composed from
+// BTN_SHAPE: its padding steps down on the narrow layouts the end footer already tightens
+// for (so the word survives the 320px Android floor instead of collapsing back to a bare
+// glyph), and overriding px inside one class string is a Tailwind order gamble.
 const BTN_SHARE =
   "inline-flex h-[42px] flex-none items-center justify-center gap-2 cursor-pointer rounded-full px-4.5 border border-zinc-100 bg-zinc-100 text-zinc-900 font-semibold text-sm transition-opacity duration-150 ease-out active:scale-[0.97] disabled:opacity-40 disabled:cursor-default max-[420px]:gap-1.5 max-[420px]:px-3 max-[359px]:px-2.5";
 

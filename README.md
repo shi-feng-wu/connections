@@ -1,5 +1,7 @@
 # Disconnections (Discord Activity)
 
+**Play today's board in the browser at [disconnections.app](https://disconnections.app/)** — the full game lives in Discord.
+
 A daily 16-word grouping puzzle as a Discord Activity (the embedded GUI that opens on Play, like the Wordle activity). Puzzles are original Disconnections content, written and edited in-house and published one per day. Shows live progress of everyone in your session and a persistent leaderboard (this season + all-time) on the end screen.
 
 ![Mid-game: the board beside the live player roster](docs/screenshot.png)
@@ -10,8 +12,8 @@ A daily 16-word grouping puzzle as a Discord Activity (the embedded GUI that ope
 - Realtime: an SSE relay on Railway fans live progress/tiles out to clients (Supabase has no
   realtime — a Discord Activity can't reliably hold the WebSocket it needs)
 - Also runs standalone in a plain browser (skips Discord/Supabase) for UI dev
-- In production, a plain browser visit gets a landing page with a self-playing
-  demo board (`src/landing.tsx`) — the game itself stays Discord-only
+- In production, a plain browser visit gets today's real board, playable
+  (`src/landing.tsx`, fed by `/api/today`); the multiplayer game stays Discord-only
 
 ```
 src/        client: main.tsx (bootstrap), App.tsx (state/wiring), components.tsx +

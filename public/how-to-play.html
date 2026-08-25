@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="all" />
+<title>How to play Disconnections, the daily word puzzle</title>
+<meta name="description" content="The rules of Disconnections: sixteen words, four hidden groups, four mistakes. How hints work, what the four colours mean, and how it plays in Discord." />
+<link rel="canonical" href="https://disconnections.app/how-to-play.html" />
+<meta name="theme-color" content="#0a0a0c" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://disconnections.app/how-to-play.html" />
+<meta property="og:site_name" content="Disconnections" />
+<meta property="og:title" content="How to play Disconnections, the daily word puzzle" />
+<meta property="og:description" content="The rules of Disconnections: sixteen words, four hidden groups, four mistakes. How hints work, what the four colours mean, and how it plays in Discord." />
+<meta property="og:image" content="https://disconnections.app/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Disconnections. The daily puzzle, played together." />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How to play Disconnections, the daily word puzzle" />
+<meta name="twitter:description" content="The rules of Disconnections: sixteen words, four hidden groups, four mistakes. How hints work, what the four colours mean, and how it plays in Discord." />
+<meta name="twitter:image" content="https://disconnections.app/og.png" />
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  @font-face {
+    font-family: "Newsreader";
+    font-style: normal;
+    font-weight: 400 700;
+    font-display: swap;
+    src: url("/fonts/newsreader.woff2") format("woff2");
+  }
+  body {
+    margin: 0;
+    background: #0a0a0c;
+    color: #d4d4d8;
+    font: 16px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 0 20px;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 64px 0 96px; }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 40px; }
+  .wordmark { font-family: "Newsreader", Georgia, serif; font-weight: 700; font-size: 27px; line-height: 1; letter-spacing: -0.025em; color: #e8eaee; text-decoration: none; }
+  h1 { font-family: "Newsreader", Georgia, "Times New Roman", serif; font-size: 34px; line-height: 1.15; color: #e8eaee; margin: 0 0 14px; letter-spacing: -0.01em; }
+  h2 { color: #e8eaee; font-size: 19px; margin: 38px 0 10px; }
+  p, li { color: #c4c4cc; }
+  a { color: #6c8fe8; }
+  ul { padding-left: 20px; }
+  li { margin: 8px 0; }
+  strong { color: #e4e4e7; font-weight: 600; }
+  .lede { font-size: 17.5px; line-height: 1.65; color: #d4d4dc; margin: 0 0 4px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 10px; margin: 26px 0 0; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 9px; height: 42px; padding: 0 22px; border-radius: 999px; font-size: 14px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+  .btn-primary { background: #f4f4f5; color: #18181b; }
+  .btn-discord { background: #5865f2; color: #fff; }
+  .btn svg { flex: none; }
+  @media (hover: hover) { .btn:hover { opacity: 0.88; } }
+  .cta-note { color: #71717a; font-size: 13px; margin: 12px 0 0; }
+  .levels { list-style: none; padding: 0; margin: 14px 0 0; }
+  .levels li { display: flex; gap: 12px; align-items: baseline; margin: 10px 0; }
+  .swatch { flex: none; width: 13px; height: 13px; border-radius: 3px; transform: translateY(1px); }
+  .note { border-left: 2px solid #3f3f46; padding: 2px 0 2px 16px; color: #a1a1aa; font-size: 14.5px; margin: 28px 0; }
+  .next { margin-top: 46px; border-top: 1px solid #1f1f23; padding-top: 22px; }
+  footer { margin-top: 46px; padding-top: 20px; border-top: 1px solid #1f1f23; color: #71717a; font-size: 13px; }
+  footer a { color: #71717a; }
+  @media (max-width: 560px) {
+    main { padding: 44px 0 72px; }
+    h1 { font-size: 28px; }
+    .lede { font-size: 16.5px; }
+    .btn { flex: 1 1 100%; }
+  }
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "name": "How to play Disconnections",
+  "url": "https://disconnections.app/how-to-play.html",
+  "description": "The rules of Disconnections: sixteen words, four hidden groups, four mistakes. How hints work, what the four colours mean, and how it plays in Discord.",
+  "primaryImageOfPage": "https://disconnections.app/og.png",
+  "about": {
+    "@type": "VideoGame",
+    "name": "Disconnections",
+    "url": "https://disconnections.app/",
+    "image": "https://disconnections.app/og.png",
+    "genre": ["Word game", "Puzzle"],
+    "playMode": ["MultiPlayer", "SinglePlayer"],
+    "gamePlatform": ["Discord", "Web browser"],
+    "applicationCategory": "Game",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "author": {
+      "@type": "Organization",
+      "name": "Disconnections",
+      "url": "https://disconnections.app/"
+    }
+  }
+}
+</script>
+</head>
+<body>
+<main>
+  <div class="brand">
+    <a class="wordmark" href="/">Disconnections</a>
+  </div>
+
+  <h1>How to play Disconnections</h1>
+
+  <p class="lede">
+    One board a day: sixteen words hiding four groups of four. Find all four groups before you run
+    out of guesses. The rules take a minute to learn and the boards take considerably longer to
+    stop being smug about it.
+  </p>
+
+  <div class="cta">
+    <a class="btn btn-primary" href="https://disconnections.app/">Play today's board</a>
+    <a class="btn btn-discord" href="https://discord.com/activities/1510529051805093973?custom_id=web-htp">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" /></svg>
+      Open in Discord
+    </a>
+  </div>
+  <p class="cta-note">Free, no account. Today's board is playable on the homepage.</p>
+
+  <h2>The rules</h2>
+  <ul>
+    <li>The board is <strong>sixteen words</strong> in a four-by-four grid. They belong to four
+      hidden groups of four.</li>
+    <li>Tap or click four words you think share a connection, then <strong>submit</strong>.</li>
+    <li>Right, and the group locks in with its colour, its label appears, and those four words
+      leave the grid.</li>
+    <li>Wrong, and you lose one of your four guesses. If three of the four words were in the same
+      group, the board tells you that you were <strong>one away</strong>.</li>
+    <li>Solve all four groups and you've won. Spend all four mistakes and the board closes and
+      shows you the answers.</li>
+  </ul>
+  <p>
+    Once three groups are out, the last four words are forced, so a board is either solved or lost
+    with two groups still up. Nobody loses on the final group.
+  </p>
+
+  <h2>Four mistakes, and what they cost</h2>
+  <p>
+    You get four wrong guesses. The dots under the grid are how many you have left, and everyone
+    else in the room can see them too. Mistakes don't just end runs, they cost points: a win is
+    scored on how fast you finished, minus what your wrong guesses cost, so a clean solve outranks
+    a scrambled one at the same time on the clock.
+  </p>
+
+  <h2>Hints</h2>
+  <p>
+    Stuck is a legitimate state. The hint button reveals the colour of one word in the easiest group
+    still standing, which usually gives you a foothold rather than the answer. A hint costs the same
+    as a mistake on your score, but it doesn't spend one of your four guesses, so it's the safe way
+    to buy information. Once a single group is left the button goes quiet, since the last four words
+    are already decided and there'd be nothing to reveal.
+  </p>
+
+  <h2>The four colours, easiest to hardest</h2>
+  <p>
+    The groups are ranked by how mean they are, and the colour tells you where each one sat once you
+    solve it:
+  </p>
+  <ul class="levels">
+    <li><span class="swatch" style="background:#e0a93e"></span><span><strong>Yellow</strong> is the
+      straight one. A plain category, and the words mostly mean what they look like.</span></li>
+    <li><span class="swatch" style="background:#6f9d3f"></span><span><strong>Green</strong> asks for
+      one small step: a shared property rather than a shared subject.</span></li>
+    <li><span class="swatch" style="background:#6c8fe8"></span><span><strong>Blue</strong> is where
+      the wordplay starts, and where the words you already assigned to yellow turn out to be
+      needed.</span></li>
+    <li><span class="swatch" style="background:#8f5bb5"></span><span><strong>Purple</strong> is the
+      trick: hidden words, homophones, one letter changed, a pattern you only see backwards.</span></li>
+  </ul>
+  <p>
+    A good board is built so the easy group is the trap. Four words will sit together perfectly and
+    one of them belongs somewhere else, which is why solving from the purple end is a real strategy
+    and not showing off.
+  </p>
+
+  <h2>What the daily looks like in Discord</h2>
+  <p>
+    The whole server plays the same board. Beside your grid is a rail of everyone else in the room,
+    each with a small copy of their own board that fills in live as they solve, plus their remaining
+    mistakes and their finishing time. When the day is over the bot posts a recap in the channel
+    with the results, the season standings, and whether the server's solve streak survived.
+  </p>
+
+  <h2>Playing it with friends</h2>
+  <p>
+    The rules are the same solo, but the daily was designed for a room. If what you're after is a
+    word puzzle you can play with other people at the same time rather than comparing screenshots
+    afterwards, the longer version of that is on
+    <a href="/play-with-friends.html">playing Disconnections with friends</a>: how the shared board
+    works, what lands on the leaderboard, and how to launch it in a channel or a voice call in about
+    ten seconds.
+  </p>
+
+  <div class="cta">
+    <a class="btn btn-primary" href="https://disconnections.app/">Play today's board</a>
+    <a class="btn btn-discord" href="https://discord.com/activities/1510529051805093973?custom_id=web-htp">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" /></svg>
+      Open in Discord
+    </a>
+  </div>
+
+  <div class="note">
+    Disconnections is an independent game. Every board is written and edited in-house, one a day,
+    and it is not affiliated with any other puzzle or its publisher.
+  </div>
+
+  <div class="next">
+    <p>
+      Next: <a href="/play-with-friends.html">playing with friends in Discord</a>, or go straight to
+      <a href="https://disconnections.app/">today's board</a>.
+    </p>
+  </div>
+
+  <footer>© 2026 Disconnections · <a href="/">Home</a> · <a href="/play-with-friends.html">Play with friends</a> · <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a></footer>
+</main>
+</body>
+</html>

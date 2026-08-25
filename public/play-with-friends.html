@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="all" />
+<title>Play a Connections-style word puzzle with friends</title>
+<meta name="description" content="Everyone in your Discord server gets the same daily word-grouping puzzle: grids fill in live, times and mistakes on one leaderboard. Today's board is free." />
+<link rel="canonical" href="https://disconnections.app/play-with-friends.html" />
+<meta name="theme-color" content="#0a0a0c" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://disconnections.app/play-with-friends.html" />
+<meta property="og:site_name" content="Disconnections" />
+<meta property="og:title" content="Play a Connections-style word puzzle with friends" />
+<meta property="og:description" content="Everyone in your Discord server gets the same daily word-grouping puzzle: grids fill in live, times and mistakes on one leaderboard. Today's board is free." />
+<meta property="og:image" content="https://disconnections.app/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Disconnections. The daily puzzle, played together." />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Play a Connections-style word puzzle with friends" />
+<meta name="twitter:description" content="Everyone in your Discord server gets the same daily word-grouping puzzle: grids fill in live, times and mistakes on one leaderboard. Today's board is free." />
+<meta name="twitter:image" content="https://disconnections.app/og.png" />
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  @font-face {
+    font-family: "Newsreader";
+    font-style: normal;
+    font-weight: 400 700;
+    font-display: swap;
+    src: url("/fonts/newsreader.woff2") format("woff2");
+  }
+  body {
+    margin: 0;
+    background: #0a0a0c;
+    color: #d4d4d8;
+    font: 16px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 0 20px;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 64px 0 96px; }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 40px; }
+  .wordmark { font-family: "Newsreader", Georgia, serif; font-weight: 700; font-size: 27px; line-height: 1; letter-spacing: -0.025em; color: #e8eaee; text-decoration: none; }
+  h1 { font-family: "Newsreader", Georgia, "Times New Roman", serif; font-size: 34px; line-height: 1.15; color: #e8eaee; margin: 0 0 14px; letter-spacing: -0.01em; }
+  h2 { color: #e8eaee; font-size: 19px; margin: 38px 0 10px; }
+  h3 { color: #e8eaee; font-size: 15.5px; margin: 26px 0 4px; }
+  p, li { color: #c4c4cc; }
+  a { color: #6c8fe8; }
+  ul { padding-left: 20px; }
+  li { margin: 8px 0; }
+  strong { color: #e4e4e7; font-weight: 600; }
+  .lede { font-size: 17.5px; line-height: 1.65; color: #d4d4dc; margin: 0 0 4px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 10px; margin: 26px 0 0; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 9px; height: 42px; padding: 0 22px; border-radius: 999px; font-size: 14px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+  .btn-primary { background: #f4f4f5; color: #18181b; }
+  .btn-discord { background: #5865f2; color: #fff; }
+  .btn svg { flex: none; }
+  @media (hover: hover) { .btn:hover { opacity: 0.88; } }
+  .cta-note { color: #71717a; font-size: 13px; margin: 12px 0 0; }
+  .note { border-left: 2px solid #3f3f46; padding: 2px 0 2px 16px; color: #a1a1aa; font-size: 14.5px; margin: 28px 0; }
+  .next { margin-top: 46px; border-top: 1px solid #1f1f23; padding-top: 22px; }
+  footer { margin-top: 46px; padding-top: 20px; border-top: 1px solid #1f1f23; color: #71717a; font-size: 13px; }
+  footer a { color: #71717a; }
+  @media (max-width: 560px) {
+    main { padding: 44px 0 72px; }
+    h1 { font-size: 28px; }
+    .lede { font-size: 16.5px; }
+    .btn { flex: 1 1 100%; }
+  }
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "VideoGame",
+  "name": "Disconnections",
+  "url": "https://disconnections.app/",
+  "image": "https://disconnections.app/og.png",
+  "description": "A daily word-grouping puzzle for Discord servers: sixteen words, four hidden groups, one board a day for everyone in the channel, with live grids and a shared leaderboard.",
+  "genre": ["Word game", "Puzzle"],
+  "playMode": ["MultiPlayer", "SinglePlayer"],
+  "gamePlatform": ["Discord", "Web browser"],
+  "applicationCategory": "Game",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "author": {
+    "@type": "Organization",
+    "name": "Disconnections",
+    "url": "https://disconnections.app/"
+  }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Can you play Connections-style puzzles with friends online?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. Launch Disconnections in a Discord channel or voice call and everyone there plays the same daily board in the same room, with each other's grids filling in live and one leaderboard for the times."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is it free?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. The daily board is free to play in Discord and free in the browser. There is no account to make and nothing to buy to play the daily."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Do we all get the same puzzle?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. There is one board a day and every player gets that same board, which is what makes the times and the mistake counts worth comparing."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does it work on phones?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. Activities run inside the Discord mobile app on iOS and Android, and the browser board on disconnections.app is built for a phone screen too."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Do you need to install a bot?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Not to play. Anyone can open the Activity in a channel without adding anything to the server. Adding the app is what turns on the nightly recap post and the slash commands."
+      }
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<main>
+  <div class="brand">
+    <a class="wordmark" href="/">Disconnections</a>
+  </div>
+
+  <h1>Play a Connections-style word puzzle with friends</h1>
+
+  <p class="lede">
+    Disconnections is a daily word-grouping puzzle made to be played together. Sixteen words,
+    four hidden groups, one board a day. Open it in a Discord channel or call and everybody there
+    gets that same board, with their grids filling in next to yours while you solve.
+  </p>
+
+  <div class="cta">
+    <a class="btn btn-primary" href="https://disconnections.app/">Play today's board</a>
+    <a class="btn btn-discord" href="https://discord.com/activities/1510529051805093973?custom_id=web-pwf">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" /></svg>
+      Open in Discord
+    </a>
+  </div>
+  <p class="cta-note">Free, no account, and today's board is playable right on the homepage.</p>
+
+  <h2>What the game is</h2>
+  <p>
+    Every day there is one board: sixteen words in a four-by-four grid, hiding four groups of four.
+    Pick four words you think belong together and submit. Get it right and the group locks in with
+    its colour and leaves the grid. Get it wrong four times and the board closes on you.
+  </p>
+  <p>
+    The difficulty is never the vocabulary. It's that most of the sixteen words look like they
+    belong in two groups at once, and only one arrangement satisfies all four. The board that looks
+    obvious in the first ten seconds is usually the one built to catch you.
+  </p>
+  <p>
+    Every board is written and edited in-house, one a day, by people who play them. Somebody chooses
+    which word sits in the wrong group on purpose, and somebody decides how far the last group is
+    allowed to go. If you're new to this kind of puzzle, the
+    <a href="/how-to-play.html">full rules are on the how to play page</a>.
+  </p>
+
+  <h2>The multiplayer part</h2>
+  <p>
+    Most word games answer “can I play this with friends?” with “send them the link and compare
+    screenshots afterwards.” That isn't really playing together. Launch Disconnections in a channel
+    or a voice call and this is what you get instead:
+  </p>
+  <ul>
+    <li><strong>The same board for everyone.</strong> One puzzle a day, and every person in the
+      room is looking at that same sixteen words. Nobody is racing a different problem.</li>
+    <li><strong>Grids that fill in live.</strong> Beside your board is a rail of everyone playing.
+      When a friend cracks a group, their little grid paints that row in front of you, and you can
+      see them closing in before they say anything.</li>
+    <li><strong>Mistakes and times, side by side.</strong> Each row carries the dots for the
+      guesses that player has left and the clock they finished on, so a clean solve and a
+      scraped-through-on-the-last-life solve read differently.</li>
+    <li><strong>Seasons and streaks.</strong> The leaderboard keeps two windows, this season and
+      all-time, and the server carries a solve streak for every consecutive day somebody in it
+      cracks the board.</li>
+    <li><strong>A nightly recap.</strong> The bot posts yesterday's results back into the channel:
+      who solved it, how fast, where the standings landed, and whether the streak survived.</li>
+  </ul>
+  <p>
+    You don't have to take turns and you don't all have to be online at once, though the version
+    people end up playing is a call with the board open and someone insisting the purple group is
+    unfair.
+  </p>
+
+  <h2>How to start it in your server</h2>
+  <p>
+    Disconnections is a Discord Activity, so it opens inside Discord instead of sending everyone to
+    a website. In any text channel, open the app launcher next to the message box and pick
+    Disconnections. In a voice call, it's under the activities button. You can also open the
+    <a href="https://discord.com/discovery/applications/1510529051805093973">app page in Discord's
+    directory</a> and launch it from there, or add it to a server so the recap and the slash
+    commands come along.
+  </p>
+  <p>
+    Whoever launches it opens the room; everyone else in the channel joins the board that's already
+    running. Nobody has to install anything of their own.
+  </p>
+
+  <h2>Or just play today's board here</h2>
+  <p>
+    If you want to try it before you put it in front of a server, today's real board is playable
+    free on <a href="https://disconnections.app/">the homepage</a>. No account, no Discord, no
+    email. A browser run stays in your browser and doesn't post a score anywhere, which is the one
+    thing the Discord version has that the page can't: other people on the leaderboard.
+  </p>
+
+  <div class="cta">
+    <a class="btn btn-primary" href="https://disconnections.app/">Play today's board</a>
+    <a class="btn btn-discord" href="https://discord.com/activities/1510529051805093973?custom_id=web-pwf">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" /></svg>
+      Open in Discord
+    </a>
+  </div>
+
+  <h2>Questions people ask</h2>
+
+  <h3>Can you play Connections-style puzzles with friends online?</h3>
+  <p>
+    Yes. Launch Disconnections in a Discord channel or voice call and everyone there plays the same
+    daily board in the same room, with each other's grids filling in live and one leaderboard for
+    the times.
+  </p>
+
+  <h3>Is it free?</h3>
+  <p>
+    Yes. The daily board is free to play in Discord and free in the browser. There is no account to
+    make and nothing to buy to play the daily.
+  </p>
+
+  <h3>Do we all get the same puzzle?</h3>
+  <p>
+    Yes. There is one board a day and every player gets that same board, which is what makes the
+    times and the mistake counts worth comparing.
+  </p>
+
+  <h3>Does it work on phones?</h3>
+  <p>
+    Yes. Activities run inside the Discord mobile app on iOS and Android, and the browser board on
+    disconnections.app is built for a phone screen too.
+  </p>
+
+  <h3>Do you need to install a bot?</h3>
+  <p>
+    Not to play. Anyone can open the Activity in a channel without adding anything to the server.
+    Adding the app is what turns on the nightly recap post and the slash commands.
+  </p>
+
+  <div class="note">
+    Disconnections is an independent game. Every board is written and edited in-house, one a day,
+    and it is not affiliated with any other puzzle or its publisher.
+  </div>
+
+  <div class="next">
+    <p>
+      Next: <a href="/how-to-play.html">how to play, in full</a>, or go straight to
+      <a href="https://disconnections.app/">today's board</a>.
+    </p>
+  </div>
+
+  <footer>© 2026 Disconnections · <a href="/">Home</a> · <a href="/how-to-play.html">How to play</a> · <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a></footer>
+</main>
+</body>
+</html>

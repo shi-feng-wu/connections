@@ -504,6 +504,9 @@ export function Landing({ puzzle: seed }: { puzzle?: Puzzle }) {
       <footer className="mt-8 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t border-white/[0.06] pt-5 font-sans text-[11.5px] text-zinc-600 min-[800px]:mt-10">
         <p>An independent game. Every board written and edited in-house, one a day.</p>
         <nav className="flex items-center gap-5 font-semibold text-zinc-500">
+          <HoverLink href="/how-to-play.html" hover="text-zinc-200" className="transition-colors">
+            How to play
+          </HoverLink>
           <HoverLink href={GITHUB} hover="text-zinc-200" className="transition-colors">
             GitHub
           </HoverLink>

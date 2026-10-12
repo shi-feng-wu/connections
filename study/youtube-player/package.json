@@ -1,0 +1,13 @@
+{
+  "name": "youtube-player-study",
+  "private": true,
+  "description": "Clean-room scaffold of a YouTube-style adaptive video player, for study. Zero runtime dependencies.",
+  "type": "module",
+  "scripts": {
+    "media": "./scripts/make-media.sh",
+    "serve": "node server.mjs",
+    "test": "node --test tests/unit.node-test.mjs",
+    "rea:youtube": "./scripts/rea-study.sh https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+    "rea:local": "./scripts/rea-study.sh http://127.0.0.1:8080/"
+  }
+}

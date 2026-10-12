@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Video Player Study</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="src/main.js"></script>
+  </head>
+  <body>
+    <div class="watch">
+      <div id="full-slot"></div>
+      <div class="columns">
+        <main class="primary">
+          <div id="primary-slot">
+            <div id="player">
+              <video playsinline preload="metadata"></video>
+            </div>
+          </div>
+          <button type="button" class="mini-expand">Expand miniplayer</button>
+          <h1 class="title">Loading…</h1>
+          <p class="meta">
+            Clean-room study scaffold of a YouTube-style player. Right-click the video for stats; add
+            <code>?bw=300</code> to throttle, <code>?progressive</code> to skip MSE, <code>?autoplay</code> to start.
+          </p>
+        </main>
+        <aside class="secondary">
+          <div class="up-next">Up next</div>
+          <div class="placeholder"></div>
+          <div class="placeholder"></div>
+          <div class="placeholder"></div>
+        </aside>
+      </div>
+    </div>
+  </body>
+</html>

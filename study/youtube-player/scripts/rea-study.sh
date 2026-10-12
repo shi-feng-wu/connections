@@ -45,7 +45,7 @@ CHROME_BIN=$(find_chrome)
 HEADLESS_FLAG=()
 [ "${HEADLESS:-0}" = 1 ] && HEADLESS_FLAG=(--headless=new)
 [ "$(id -u)" = 0 ] && HEADLESS_FLAG+=(--no-sandbox) # containers run as root; Chrome refuses otherwise
-"$CHROME_BIN" "${HEADLESS_FLAG[@]}" --remote-debugging-address=127.0.0.1 --remote-debugging-port="$PORT" \
+"$CHROME_BIN" ${HEADLESS_FLAG[@]+"${HEADLESS_FLAG[@]}"} --remote-debugging-address=127.0.0.1 --remote-debugging-port="$PORT" \
   --user-data-dir="$PROFILE" --password-store=basic --no-first-run --no-default-browser-check \
   --autoplay-policy=no-user-gesture-required "$URL" >"$RUN/chrome.log" 2>&1 &
 CHROME_PID=$!

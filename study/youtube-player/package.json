@@ -7,7 +7,7 @@
     "media": "./scripts/make-media.sh",
     "serve": "node server.mjs",
     "test": "node --test tests/unit.node-test.mjs",
-    "rea:youtube": "./scripts/rea-study.sh https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+    "rea:youtube": "PLAYER_SELECTOR='#movie_player' EXTRA_ORIGIN_PATTERN='googlevideo\\.com' ./scripts/rea-study.sh 'https://www.youtube.com/watch?v=aqz-KE-bpKQ'",
     "rea:local": "./scripts/rea-study.sh http://127.0.0.1:8080/"
   }
 }

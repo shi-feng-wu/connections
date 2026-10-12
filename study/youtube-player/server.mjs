@@ -36,6 +36,7 @@ createServer((req, res) => {
     'Content-Type': TYPES[extname(file)] ?? 'application/octet-stream',
     'Accept-Ranges': 'bytes',
     'Cache-Control': 'no-cache',
+    'Access-Control-Allow-Origin': '*', // lets a second local port act as a separate media origin
   };
 
   const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');

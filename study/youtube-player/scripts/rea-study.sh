@@ -16,6 +16,11 @@
 # third-party scripts are for reading, not for copying into this project.
 #
 # Env: CHROME=/path/to/chrome   PORT=9222   PLAY_MS=8000   HEADLESS=1
+#      PLAYER_SELECTOR=#player        element whose event listeners are dumped
+#      EXTRA_ORIGIN_PATTERN=regex     other origins to capture as well, found from the
+#                                     page's own resource list (e.g. 'googlevideo\.com'
+#                                     for YouTube's media servers); REA otherwise only
+#                                     captures the page's own origin
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -70,9 +75,22 @@ TARGET=$(node -e '
 [ -n "$TARGET" ] || { echo "no page target found; see $RUN/targets.json"; exit 1; }
 echo "target $TARGET — letting the page play for ${PLAY_MS}ms"
 
+# REA captures only exact origins: the page's own, plus any we name here.
+ORIGIN_ARGS=()
+if [ -n "${EXTRA_ORIGIN_PATTERN:-}" ]; then
+  sleep 3 # let the player start fetching media first
+  PAGE_ORIGIN=$(node -e 'console.log(new URL(process.argv[1]).origin)' "$URL")
+  ORIGIN_ARGS=(--allowed-origins "$PAGE_ORIGIN")
+  for o in $(node scripts/discover-origins.mjs "$CDP" "$TARGET" "$EXTRA_ORIGIN_PATTERN"); do
+    [ "$o" = "$PAGE_ORIGIN" ] && continue
+    echo "  + capturing $o"
+    ORIGIN_ARGS+=(--allowed-origins "$o")
+  done
+fi
+
 # While the page plays: network (segment requests, player config JSON shapes),
 # console, workers, DOM + accessibility tree of the player chrome, and scripts.
-run page inspect-web-page "$CDP" "$TARGET" --observation-ms "$PLAY_MS" \
+run page inspect-web-page "$CDP" "$TARGET" ${ORIGIN_ARGS[@]+"${ORIGIN_ARGS[@]}"} --observation-ms "$PLAY_MS" \
   --include-accessibility-text --include-json-body-shapes --include-script-sources --include-storage-keys
 run bundle analyze-web-bundle "$CDP" "$TARGET" --observation-ms 2000
 run screenshot capture-web-screenshot "$CDP" "$TARGET"
@@ -83,7 +101,7 @@ run listeners-player inspect-web-event-listeners "$CDP" "$TARGET" "${PLAYER_SELE
 
 # Precise execution profile while you interact (seek, open settings, ...).
 echo "→ execution: interact with the player now (${PLAY_MS}ms)"
-run execution observe-web-execution "$CDP" "$TARGET" --observation-ms "$PLAY_MS"
+run execution observe-web-execution "$CDP" "$TARGET" ${ORIGIN_ARGS[@]+"${ORIGIN_ARGS[@]}"} --observation-ms "$PLAY_MS"
 
 # Export the captured scripts to disk for REA's static JS analysis.
 if [ -s "$RUN/page.json" ]; then

@@ -40,7 +40,8 @@ if (page) {
   // Group by URL path with digits collapsed, so seg001/seg002/... become one row.
   const groups = new Map();
   for (const r of page.network.requests) {
-    const key = `${r.resource_type} ${short(r.url).replace(/\d+/g, '#')}`;
+    const host = r.origin && r.origin !== page.target.origin ? new URL(r.origin).host.replace(/\d+/g, '#') : '';
+    const key = `${r.resource_type} ${host}${short(r.url).replace(/\d+/g, '#')}`;
     const g = groups.get(key) ?? { n: 0, bytes: 0, mime: r.mime_type, initiator: r.initiator };
     g.n++;
     g.bytes += r.encoded_data_length ?? 0;
@@ -68,6 +69,12 @@ if (page) {
   h('Page facts');
   out.push(`- DOM nodes: ${page.dom.total_nodes}`, `- Workers: ${page.workers.length}`, `- localStorage keys: ${page.storage.local_storage_keys.join(', ') || '(none)'}`);
   out.push(`- WebSocket connections: ${page.network.websocket_connections.length}`, `- Capture completeness: ${page.completeness.status}`);
+  const origins = [...new Set(page.network.requests.map((r) => r.origin))];
+  out.push(`- Origins captured: ${origins.join(', ') || '(none)'}`);
+  for (const e of page.completeness.excluded ?? []) {
+    const n = Object.values(e.count ?? {}).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
+    if (n) out.push(`- Filtered out of \`${e.section}\` (${e.reason}): ${n}`);
+  }
 }
 
 for (const [name, label] of [
@@ -76,7 +83,8 @@ for (const [name, label] of [
 ]) {
   const l = load(name);
   if (!l?.listeners) continue;
-  h(`Event listeners on the ${label}`);
+  h(`Event listeners on the ${label} (\`${l.selected_node?.selector ?? '?'}\`)`);
+  if (!l.listeners.length) out.push('(none registered directly on this element — likely delegated to an ancestor)');
   const byType = new Map();
   for (const x of l.listeners) byType.set(x.type, [...(byType.get(x.type) ?? []), where(x.location)]);
   for (const [type, locs] of byType) out.push(`- \`${type}\` → ${[...new Set(locs)].join(', ')}`);

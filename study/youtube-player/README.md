@@ -109,6 +109,11 @@ Example:
 PLAYER_SELECTOR='#movie_player' PLAY_MS=15000 ./scripts/rea-study.sh "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
 
+REA only captures exact origins, so YouTube's media traffic (served from
+per-server `*.googlevideo.com` hosts) is invisible by default. `npm run
+rea:youtube` sets `EXTRA_ORIGIN_PATTERN='googlevideo\.com'`, which reads the
+page's own resource list to find those hosts and adds them to the capture.
+
 The run takes the CDP target whose URL matches, plays for `PLAY_MS`, and then
 gives you a second `PLAY_MS` window for `observe-web-execution`. Interact with
 the player during that window. `PLAYER_SELECTOR` picks the element whose
